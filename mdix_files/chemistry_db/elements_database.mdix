@@ -16,11 +16,11 @@
 )
 
 @DATA(
-  database_name = "Periodic Table Database - 80 Elements (Historic Alchemical Set + Periodic Fill-In Batches 1-7)",
-  database_version = "1.8.0",
+  database_name = "Periodic Table Database - 90 Elements (Historic Alchemical Set + Periodic Fill-In Batches 1-7, 9)",
+  database_version = "1.9.0",
   last_updated = 2026-09-05T00:00:00Z,
   format_type = "DixScript Physics Simulation Ready",
-  total_elements = 80,
+  total_elements = 90,
   properties_per_element = 126,
   simulation_ready = true,
   speed_of_light_m_s = 299792458.0,
@@ -5805,5 +5805,724 @@
 
   elements.lead.physics_calculated:
     reactivity_index = physics.calculateReactivityIndex(715.6, 35.1, 2.33)
+
+  // ============================================================
+  // ELEMENT: Fermium (Fm, Z=100)
+  // Periodic-table fill-in, batch 9 (parallel-chat Z=100-118 slice, this element
+  // covers the Z=100-109 sub-range). Ivy Mike thermonuclear debris discovery, kept classified until 1955. IE1 is a real measurement (Sato et al. 2018 JACS), not a prediction.
+  // ============================================================
+
+  elements.fermium.identity:
+    core = builders.createIdentity("Fermium", "Fm", 100, 257.0, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "7440-72-4"
+
+  elements.fermium.nuclear:
+    properties = builders.createNuclearCore(100, 157, 0.0, 0.0, 0.0) // spin/moments not determined for this isotope, left 0.0
+
+  elements.fermium.isotopes::
+    builders.createIsotope(257, 0.0, 8683200.0000, enums.DecayMode.ALPHA, 6.520, 0.0)
+    // reference isotope only -- Fermium has NO stable isotopes at all
+
+  elements.fermium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f12 7s2", 2, 40.00, 6.50000, 0.0), // shared low-confidence actinide-analog placeholder (no specific Fm calc found); work function not determined
+    quantum = builders.createQuantumNumbers(5, 3, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders, not from a term-symbol analysis
+    electronegativity = builders.createElectronegativity(1.30, 0.0, 0.0, 0.0, 0.0) // Pauling is a real predicted value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.fermium.ionization_energies_kj_mol:: 629.0 // IE1 only (measured); successive IEs not sourced
+
+  elements.fermium.oxidation_states:: 2, 3
+
+  elements.fermium.geometry:
+    radii = builders.createRadii(0.0, 0.0, 0.0), // atomic/covalent radii not cross-checked to this session's standard, left 0.0
+    molar_volume_cm3 = 26.49 // derived from mass/density above, not independently sourced
+
+  elements.fermium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.fermium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // lattice TYPE is a real predicted value; constants not sourced
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.fermium.thermodynamics:
+    phases = builders.createPhasePoints(1800.0, 0.0, 0.0, 0.0, 0.0, 0.0), // melting (predicted)/boiling; triple/critical points not sourced
+    thermal = builders.createThermalProps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // no heat-of-fusion/vaporization/specific-heat/conductivity/expansion/Debye-temp data found
+
+  elements.fermium.mechanical:
+    bulk = builders.createMechanicalProps(9.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // density is a real predicted value (predicted); elastic moduli/hardness/sound speed not sourced
+
+  elements.fermium.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0), // no conductivity/resistivity/band-gap data found
+    type = "assumed metallic conductor by homology, not measured"
+
+  elements.fermium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0, 0.0) // generic open-shell-metal default, not a sourced measurement or calculation
+
+  elements.fermium.optical:
+    refractive_index = 0.0, // not determined
+    color = "never observed (no macroscopic quantity ever produced)"
+
+  elements.fermium.interaction:
+    lennard_jones = builders.createLennardJones(6.038636, 2.927493), // UFF (Rappe 1992, via UFF.csv)
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface energy / adsorption energy / work function data found
+
+  elements.fermium.abundance:
+    distribution = builders.createAbundance(0.0, 0.0, 0.0, 0.0) // genuinely does not occur in nature -- stronger than Tc/Pm's ultra-trace occurrence, this element has never existed outside a lab (or historic thermonuclear-test debris)
+
+  elements.fermium.discovery:
+    info = builders.createDiscovery(1952, "Ghiorso, Thompson et al. (LBNL/Argonne/Los Alamos, in Ivy Mike fallout)", "USA", "Enrico Fermi")
+
+  elements.fermium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(629.0, 40.00, 1.30)
+
+  // ============================================================
+  // ELEMENT: Mendelevium (Md, Z=101)
+  // Periodic-table fill-in, batch 9 (parallel-chat Z=100-118 slice, this element
+  // covers the Z=100-109 sub-range). First element ever synthesized one atom at a time (1955). IE1 real-measured; ionic radii for BOTH +2 and +3 states are real ion-exchange-chromatography values -- unusually rich data for this Z range.
+  // ============================================================
+
+  elements.mendelevium.identity:
+    core = builders.createIdentity("Mendelevium", "Md", 101, 258.0, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "7440-11-1"
+
+  elements.mendelevium.nuclear:
+    properties = builders.createNuclearCore(101, 157, 0.0, 0.0, 0.0) // spin/moments not determined for this isotope, left 0.0
+
+  elements.mendelevium.isotopes::
+    builders.createIsotope(258, 0.0, 4458240.0000, enums.DecayMode.ALPHA, 6.716, 0.0)
+    // reference isotope only -- Mendelevium has NO stable isotopes at all
+
+  elements.mendelevium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f13 7s2", 2, 40.00, 6.58000, 0.0), // shared low-confidence actinide-analog placeholder (no specific Md calc found); work function not determined
+    quantum = builders.createQuantumNumbers(5, 3, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders, not from a term-symbol analysis
+    electronegativity = builders.createElectronegativity(1.30, 0.0, 0.0, 0.0, 0.0) // Pauling is a real predicted value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.mendelevium.ionization_energies_kj_mol:: 636.0 // IE1 only (measured); successive IEs not sourced
+
+  elements.mendelevium.oxidation_states:: 2, 3
+
+  elements.mendelevium.geometry:
+    radii = builders.createRadii(0.0, 0.0, 0.0), // atomic/covalent radii not cross-checked to this session's standard, left 0.0
+    molar_volume_cm3 = 25.05 // derived from mass/density above, not independently sourced
+
+  elements.mendelevium.ionic_radii::
+    builders.createIonicRadius(3, 89.6, 6),
+    builders.createIonicRadius(2, 115.0, 6)
+
+  elements.mendelevium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // lattice TYPE is a real predicted value; constants not sourced
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.mendelevium.thermodynamics:
+    phases = builders.createPhasePoints(1100.0, 0.0, 0.0, 0.0, 0.0, 0.0), // melting (predicted)/boiling; triple/critical points not sourced
+    thermal = builders.createThermalProps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // no heat-of-fusion/vaporization/specific-heat/conductivity/expansion/Debye-temp data found
+
+  elements.mendelevium.mechanical:
+    bulk = builders.createMechanicalProps(10.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // density is a real predicted value (predicted, +-0.7); elastic moduli/hardness/sound speed not sourced
+
+  elements.mendelevium.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0), // no conductivity/resistivity/band-gap data found
+    type = "assumed metallic conductor by homology, not measured"
+
+  elements.mendelevium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0, 0.0) // generic open-shell-metal default, not a sourced measurement or calculation
+
+  elements.mendelevium.optical:
+    refractive_index = 0.0, // not determined
+    color = "never observed (no macroscopic quantity ever produced)"
+
+  elements.mendelevium.interaction:
+    lennard_jones = builders.createLennardJones(5.535417, 2.916802), // UFF (Rappe 1992, via UFF.csv)
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface energy / adsorption energy / work function data found
+
+  elements.mendelevium.abundance:
+    distribution = builders.createAbundance(0.0, 0.0, 0.0, 0.0) // genuinely does not occur in nature -- stronger than Tc/Pm's ultra-trace occurrence, this element has never existed outside a lab
+
+  elements.mendelevium.discovery:
+    info = builders.createDiscovery(1955, "Ghiorso, Harvey, Choppin, Thompson, Seaborg (LBNL) -- first-ever one-atom-at-a-time synthesis", "USA", "Dmitri Mendeleev")
+
+  elements.mendelevium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(636.0, 40.00, 1.30)
+
+  // ============================================================
+  // ELEMENT: Nobelium (No, Z=102)
+  // Periodic-table fill-in, batch 9 (parallel-chat Z=100-118 slice, this element
+  // covers the Z=100-109 sub-range). IE1 is the most precisely measured atomic property in this entire batch (Chhetri et al. 2018 PRL, laser resonance ionization spectroscopy, 5-decimal precision). +2 is No's dominant oxidation state, a real reversal of the actinide-series +3 norm.
+  // ============================================================
+
+  elements.nobelium.identity:
+    core = builders.createIdentity("Nobelium", "No", 102, 259.0, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "10028-14-5"
+
+  elements.nobelium.nuclear:
+    properties = builders.createNuclearCore(102, 157, 0.0, 0.0, 0.0) // spin/moments not determined for this isotope, left 0.0
+
+  elements.nobelium.isotopes::
+    builders.createIsotope(259, 0.0, 3480.0000, enums.DecayMode.ALPHA, 7.500, 0.0)
+    // 75% alpha to Fm-255, 25% EC to Md-259, <10% SF
+    // reference isotope only -- Nobelium has NO stable isotopes at all
+
+  elements.nobelium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f14 7s2", 2, 40.00, 6.62621, 0.0), // shared low-confidence actinide-analog placeholder (no specific No calc found); work function not determined
+    quantum = builders.createQuantumNumbers(5, 3, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders, not from a term-symbol analysis
+    electronegativity = builders.createElectronegativity(1.30, 0.0, 0.0, 0.0, 0.0) // Pauling is a real predicted value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.nobelium.ionization_energies_kj_mol:: 639.2 // IE1 only (measured); successive IEs not sourced
+
+  elements.nobelium.oxidation_states:: 2, 3
+
+  elements.nobelium.geometry:
+    radii = builders.createRadii(0.0, 0.0, 0.0), // atomic/covalent radii not cross-checked to this session's standard, left 0.0
+    molar_volume_cm3 = 26.16 // derived from mass/density above, not independently sourced
+
+  elements.nobelium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.nobelium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // lattice TYPE is a real predicted value; constants not sourced
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.nobelium.thermodynamics:
+    phases = builders.createPhasePoints(1100.0, 0.0, 0.0, 0.0, 0.0, 0.0), // melting (predicted)/boiling; triple/critical points not sourced
+    thermal = builders.createThermalProps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // no heat-of-fusion/vaporization/specific-heat/conductivity/expansion/Debye-temp data found
+
+  elements.nobelium.mechanical:
+    bulk = builders.createMechanicalProps(9.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // density is a real predicted value (predicted, +-0.4); elastic moduli/hardness/sound speed not sourced
+
+  elements.nobelium.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0), // no conductivity/resistivity/band-gap data found
+    type = "assumed metallic conductor by homology, not measured"
+
+  elements.nobelium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0, 0.0) // generic open-shell-metal default, not a sourced measurement or calculation
+
+  elements.nobelium.optical:
+    refractive_index = 0.0, // not determined
+    color = "never observed (no macroscopic quantity ever produced)"
+
+  elements.nobelium.interaction:
+    lennard_jones = builders.createLennardJones(5.535417, 2.893639), // UFF (Rappe 1992, via UFF.csv)
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface energy / adsorption energy / work function data found
+
+  elements.nobelium.abundance:
+    distribution = builders.createAbundance(0.0, 0.0, 0.0, 0.0) // genuinely does not occur in nature -- stronger than Tc/Pm's ultra-trace occurrence, this element has never existed outside a lab (or historic thermonuclear-test debris)
+
+  elements.nobelium.discovery:
+    info = builders.createDiscovery(1958, "Ghiorso, Sikkeland, Sikkeland, Walton, Seaborg (LBNL); definitively confirmed by Dubna 1966", "USA / USSR (disputed)", "Alfred Nobel")
+
+  elements.nobelium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(639.2, 40.00, 1.30)
+
+  // ============================================================
+  // ELEMENT: Lawrencium (Lr, Z=103)
+  // Periodic-table fill-in, batch 9 (parallel-chat Z=100-118 slice, this element
+  // covers the Z=100-109 sub-range). Closes the actinide series. Ground-state configuration is 7s2 7p1 (NOT 6d1 like its lanthanide homologue Lu) -- confirmed by the low measured IP1 (Sato et al. 2015 Nature, the first-ever IP measurement of any element this heavy). EA is a real, recent (2024) theoretical prediction, not the shared placeholder used for Fm/Md/No.
+  // ============================================================
+
+  elements.lawrencium.identity:
+    core = builders.createIdentity("Lawrencium", "Lr", 103, 266.0, enums.ElementGroup.ACTINIDE, 7, enums.Block.D_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "22537-19-5"
+
+  elements.lawrencium.nuclear:
+    properties = builders.createNuclearCore(103, 163, 0.0, 0.0, 0.0) // spin/moments not determined for this isotope, left 0.0
+
+  elements.lawrencium.isotopes::
+    builders.createIsotope(266, 0.0, 39600.0000, enums.DecayMode.SPONTANEOUS_FISSION, 0.000, 0.0)
+    // no alpha Q-value published; SF is the dominant/only observed branch for this isotope
+    // reference isotope only -- Lawrencium has NO stable isotopes at all
+
+  elements.lawrencium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f14 7s2 7p1", 3, 43.05, 4.96000, 0.0), // theoretical (Guo et al. 2024, CBS-CCSDT+Breit+QED): 0.446(11) eV -- NOT measured, but a real recent citable prediction, unlike Fm/Md/No above; work function not determined
+    quantum = builders.createQuantumNumbers(7, 1, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders, not from a term-symbol analysis
+    electronegativity = builders.createElectronegativity(1.30, 0.0, 0.0, 0.0, 0.0) // Pauling is a real predicted value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.lawrencium.ionization_energies_kj_mol:: 478.6 // IE1 only (measured); successive IEs not sourced
+
+  elements.lawrencium.oxidation_states:: 3
+
+  elements.lawrencium.geometry:
+    radii = builders.createRadii(0.0, 0.0, 0.0), // atomic/covalent radii not cross-checked to this session's standard, left 0.0
+    molar_volume_cm3 = 18.47 // derived from mass/density above, not independently sourced
+
+  elements.lawrencium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.lawrencium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // lattice TYPE is a real predicted value; constants not sourced
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.lawrencium.thermodynamics:
+    phases = builders.createPhasePoints(1900.0, 0.0, 0.0, 0.0, 0.0, 0.0), // melting (predicted)/boiling; triple/critical points not sourced
+    thermal = builders.createThermalProps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // no heat-of-fusion/vaporization/specific-heat/conductivity/expansion/Debye-temp data found
+
+  elements.lawrencium.mechanical:
+    bulk = builders.createMechanicalProps(14.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // density is a real predicted value (predicted); elastic moduli/hardness/sound speed not sourced
+
+  elements.lawrencium.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0), // no conductivity/resistivity/band-gap data found
+    type = "assumed metallic conductor by homology, not measured"
+
+  elements.lawrencium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0, 0.0) // generic open-shell-metal default, not a sourced measurement or calculation
+
+  elements.lawrencium.optical:
+    refractive_index = 0.0, // not determined
+    color = "never observed (no macroscopic quantity ever produced)"
+
+  elements.lawrencium.interaction:
+    lennard_jones = builders.createLennardJones(5.535417, 2.882948), // UFF (Rappe 1992, via UFF.csv, listed as 'Lw')
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface energy / adsorption energy / work function data found
+
+  elements.lawrencium.abundance:
+    distribution = builders.createAbundance(0.0, 0.0, 0.0, 0.0) // genuinely does not occur in nature -- stronger than Tc/Pm's ultra-trace occurrence, this element has never existed outside a lab
+
+  elements.lawrencium.discovery:
+    info = builders.createDiscovery(1961, "Ghiorso, Sikkeland, Larsh, Latimer (LBNL); independently produced at Dubna 1965", "USA / USSR", "Ernest O. Lawrence")
+
+  elements.lawrencium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(478.6, 43.05, 1.30)
+
+  // ============================================================
+  // ELEMENT: Rutherfordium (Rf, Z=104)
+  // Periodic-table fill-in, batch 9 (parallel-chat Z=100-118 slice, this element
+  // covers the Z=100-109 sub-range). First transactinide. UFF coverage ends at Lr (Z=103); this and every heavier element in this batch gets (0.0,0.0) LJ params rather than a substitute. Real one-atom-at-a-time chemistry (RfCl4 volatility, ion-exchange) confirms group-4 (Hf/Zr) homology.
+  // ============================================================
+
+  elements.rutherfordium.identity:
+    core = builders.createIdentity("Rutherfordium", "Rf", 104, 267.0, enums.ElementGroup.TRANSITION_METAL, 7, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "53850-36-5"
+
+  elements.rutherfordium.nuclear:
+    properties = builders.createNuclearCore(104, 163, 0.0, 0.0, 0.0) // spin/moments not determined for this isotope, left 0.0
+
+  elements.rutherfordium.isotopes::
+    builders.createIsotope(267, 0.0, 2880.0000, enums.DecayMode.SPONTANEOUS_FISSION, 0.000, 0.0)
+    // half-life itself disputed across sources (48 min vs ~1.3-2.5 h); SF is the reported mode
+    // reference isotope only -- Rutherfordium has NO stable isotopes at all
+
+  elements.rutherfordium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f14 6d2 7s2", 4, 0.00, 6.01000, 0.0), // no measured or theoretically predicted EA found in literature; work function not determined
+    quantum = builders.createQuantumNumbers(6, 2, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders, not from a term-symbol analysis
+    electronegativity = builders.createElectronegativity(1.30, 0.0, 0.0, 0.0, 0.0) // Pauling is a real predicted value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.rutherfordium.ionization_energies_kj_mol:: 580.0 // IE1 only (theoretical prediction, not measured -- no IP measurement exists past Lr as of this session); successive IEs not sourced
+
+  elements.rutherfordium.oxidation_states:: 4
+
+  elements.rutherfordium.geometry:
+    radii = builders.createRadii(0.0, 0.0, 0.0), // atomic/covalent radii not cross-checked to this session's standard, left 0.0
+    molar_volume_cm3 = 15.71 // derived from mass/density above, not independently sourced
+
+  elements.rutherfordium.ionic_radii::
+    builders.createIonicRadius(4, 76.0, 6)
+
+  elements.rutherfordium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // lattice TYPE is a real predicted value; constants not sourced
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.rutherfordium.thermodynamics:
+    phases = builders.createPhasePoints(2400.0, 5800.0, 0.0, 0.0, 0.0, 0.0), // melting (predicted)/boiling (predicted); triple/critical points not sourced
+    thermal = builders.createThermalProps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // no heat-of-fusion/vaporization/specific-heat/conductivity/expansion/Debye-temp data found
+
+  elements.rutherfordium.mechanical:
+    bulk = builders.createMechanicalProps(17.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // density is a real predicted value (predicted); elastic moduli/hardness/sound speed not sourced
+
+  elements.rutherfordium.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0), // no conductivity/resistivity/band-gap data found
+    type = "assumed metallic conductor by homology, not measured"
+
+  elements.rutherfordium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0, 0.0) // generic open-shell-metal default, not a sourced measurement or calculation
+
+  elements.rutherfordium.optical:
+    refractive_index = 0.0, // not determined
+    color = "never observed (no macroscopic quantity ever produced)"
+
+  elements.rutherfordium.interaction:
+    lennard_jones = builders.createLennardJones(0.000000, 0.000000), // NONE -- UFF.csv coverage stops at Lw/Lr (Z=103); no substitute found
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface energy / adsorption energy / work function data found
+
+  elements.rutherfordium.abundance:
+    distribution = builders.createAbundance(0.0, 0.0, 0.0, 0.0) // genuinely does not occur in nature -- stronger than Tc/Pm's ultra-trace occurrence, this element has never existed outside a lab
+
+  elements.rutherfordium.discovery:
+    info = builders.createDiscovery(1969, "Ghiorso et al. (LBNL), confirmed 1973; disputed against a 1964 Dubna claim ('kurchatovium')", "USA / USSR (Transfermium Wars)", "Ernest Rutherford")
+
+  elements.rutherfordium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(580.0, 0.00, 1.30)
+
+  // ============================================================
+  // ELEMENT: Dubnium (Db, Z=105)
+  // Periodic-table fill-in, batch 9 (parallel-chat Z=100-118 slice, this element
+  // covers the Z=100-109 sub-range). Real one-atom-at-a-time gas-phase chromatography confirms group-5 (Ta/Nb) homology (DbCl5, DbBr5, DbOCl3, DbOBr3 all observed). Naming was disputed for over 25 years (Transfermium Wars); IUPAC settled on 'Dubnium' as a compromise in 1997.
+  // ============================================================
+
+  elements.dubnium.identity:
+    core = builders.createIdentity("Dubnium", "Db", 105, 268.0, enums.ElementGroup.TRANSITION_METAL, 7, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "53850-35-4"
+
+  elements.dubnium.nuclear:
+    properties = builders.createNuclearCore(105, 163, 0.0, 0.0, 0.0) // spin/moments not determined for this isotope, left 0.0
+
+  elements.dubnium.isotopes::
+    builders.createIsotope(268, 0.0, 57600.0000, enums.DecayMode.ALPHA, 0.000, 0.0)
+    // 51% alpha to Lr-264, 49% SF; half-life value itself disputed (16h vs 28h across sources)
+    // reference isotope only -- Dubnium has NO stable isotopes at all
+
+  elements.dubnium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f14 6d3 7s2", 5, 0.00, 6.89000, 0.0), // no measured or theoretically predicted EA found in literature; work function not determined
+    quantum = builders.createQuantumNumbers(6, 2, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders, not from a term-symbol analysis
+    electronegativity = builders.createElectronegativity(0.00, 0.0, 0.0, 0.0, 0.0) // DATA GAP, not the noble-gas real-zero convention -- no predicted Pauling EN published for this element as of this session (WebElements: 'no data'); other four scales not sourced either
+
+  elements.dubnium.ionization_energies_kj_mol:: 665.0 // IE1 only (theoretical prediction, not measured -- no IP measurement exists past Lr as of this session); successive IEs not sourced
+
+  elements.dubnium.oxidation_states:: 5
+
+  elements.dubnium.geometry:
+    radii = builders.createRadii(0.0, 0.0, 0.0), // atomic/covalent radii not cross-checked to this session's standard, left 0.0
+    molar_volume_cm3 = 12.41 // derived from mass/density above, not independently sourced
+
+  elements.dubnium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.dubnium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.BCC, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // lattice TYPE is a real predicted value; constants not sourced
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.dubnium.thermodynamics:
+    phases = builders.createPhasePoints(0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // melting/boiling; triple/critical points not sourced
+    thermal = builders.createThermalProps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // no heat-of-fusion/vaporization/specific-heat/conductivity/expansion/Debye-temp data found
+
+  elements.dubnium.mechanical:
+    bulk = builders.createMechanicalProps(21.6, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // density is a real predicted value (predicted); elastic moduli/hardness/sound speed not sourced
+
+  elements.dubnium.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0), // no conductivity/resistivity/band-gap data found
+    type = "assumed metallic conductor by homology, not measured"
+
+  elements.dubnium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0, 0.0) // generic open-shell-metal default, not a sourced measurement or calculation
+
+  elements.dubnium.optical:
+    refractive_index = 0.0, // not determined
+    color = "never observed (no macroscopic quantity ever produced)"
+
+  elements.dubnium.interaction:
+    lennard_jones = builders.createLennardJones(0.000000, 0.000000), // NONE -- beyond UFF.csv coverage
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface energy / adsorption energy / work function data found
+
+  elements.dubnium.abundance:
+    distribution = builders.createAbundance(0.0, 0.0, 0.0, 0.0) // genuinely does not occur in nature -- stronger than Tc/Pm's ultra-trace occurrence, this element has never existed outside a lab
+
+  elements.dubnium.discovery:
+    info = builders.createDiscovery(1970, "Ghiorso et al. (LBNL, proposed 'hahnium'); disputed against 1968 Dubna claim", "USA / USSR (Transfermium Wars)", "Dubna, Russia (JINR site) -- the compromise name IUPAC settled on in 1997")
+
+  elements.dubnium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(665.0, 0.00, 0.00) // NOTE: reads 0.0 as a DATA-GAP artifact (EN unsourced), not real chemical inertness -- see TABLE-row comment in element_data.rs
+
+  // ============================================================
+  // ELEMENT: Seaborgium (Sg, Z=106)
+  // Periodic-table fill-in, batch 9 (parallel-chat Z=100-118 slice, this element
+  // covers the Z=100-109 sub-range). Sg(CO)6 -- a genuine, real, experimentally-confirmed zero-oxidation-state carbonyl complex (Even et al. 2014, Science) -- is one of the only pieces of hard experimental data for any element past Rf/Db. Naming after a then-living scientist (Glenn Seaborg) was itself controversial.
+  // ============================================================
+
+  elements.seaborgium.identity:
+    core = builders.createIdentity("Seaborgium", "Sg", 106, 269.0, enums.ElementGroup.TRANSITION_METAL, 7, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "54038-81-2"
+
+  elements.seaborgium.nuclear:
+    properties = builders.createNuclearCore(106, 163, 0.0, 0.0, 0.0) // spin/moments not determined for this isotope, left 0.0
+
+  elements.seaborgium.isotopes::
+    builders.createIsotope(269, 0.0, 780.0000, enums.DecayMode.ALPHA, 0.000, 0.0)
+    // 87% alpha to Rf-265, 13% SF; half-life tied with Sg-267 (9.8 min) for 'most stable' -- assignment not definitive per current eval
+    // reference isotope only -- Seaborgium has NO stable isotopes at all
+
+  elements.seaborgium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f14 6d4 7s2", 6, 0.00, 7.85000, 0.0), // no measured or theoretically predicted EA found in literature; work function not determined
+    quantum = builders.createQuantumNumbers(6, 2, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders, not from a term-symbol analysis
+    electronegativity = builders.createElectronegativity(0.00, 0.0, 0.0, 0.0, 0.0) // DATA GAP, not the noble-gas real-zero convention -- no predicted Pauling EN published for this element as of this session (WebElements: 'no data'); other four scales not sourced either
+
+  elements.seaborgium.ionization_energies_kj_mol:: 757.0 // IE1 only (theoretical prediction, not measured -- no IP measurement exists past Lr as of this session); successive IEs not sourced
+
+  elements.seaborgium.oxidation_states:: 0, 6
+
+  elements.seaborgium.geometry:
+    radii = builders.createRadii(0.0, 0.0, 0.0), // atomic/covalent radii not cross-checked to this session's standard, left 0.0
+    molar_volume_cm3 = 11.45 // derived from mass/density above, not independently sourced
+
+  elements.seaborgium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.seaborgium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.BCC, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // lattice TYPE is a real predicted value; constants not sourced
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.seaborgium.thermodynamics:
+    phases = builders.createPhasePoints(0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // melting/boiling; triple/critical points not sourced
+    thermal = builders.createThermalProps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // no heat-of-fusion/vaporization/specific-heat/conductivity/expansion/Debye-temp data found
+
+  elements.seaborgium.mechanical:
+    bulk = builders.createMechanicalProps(23.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // density is a real predicted value (predicted, 23-24 range); elastic moduli/hardness/sound speed not sourced
+
+  elements.seaborgium.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0), // no conductivity/resistivity/band-gap data found
+    type = "assumed metallic conductor by homology, not measured"
+
+  elements.seaborgium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0, 0.0) // generic open-shell-metal default, not a sourced measurement or calculation
+
+  elements.seaborgium.optical:
+    refractive_index = 0.0, // not determined
+    color = "never observed (no macroscopic quantity ever produced)"
+
+  elements.seaborgium.interaction:
+    lennard_jones = builders.createLennardJones(0.000000, 0.000000), // NONE -- beyond UFF.csv coverage
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface energy / adsorption energy / work function data found
+
+  elements.seaborgium.abundance:
+    distribution = builders.createAbundance(0.0, 0.0, 0.0, 0.0) // genuinely does not occur in nature -- stronger than Tc/Pm's ultra-trace occurrence, this element has never existed outside a lab
+
+  elements.seaborgium.discovery:
+    info = builders.createDiscovery(1974, "Ghiorso et al. (LBNL) and independently Oganessian et al. (Dubna), same year", "USA / USSR (near-simultaneous)", "Glenn T. Seaborg -- controversial as the first element named after a then-living person")
+
+  elements.seaborgium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(757.0, 0.00, 0.00) // NOTE: reads 0.0 as a DATA-GAP artifact (EN unsourced), not real chemical inertness -- see TABLE-row comment in element_data.rs
+
+  // ============================================================
+  // ELEMENT: Bohrium (Bh, Z=107)
+  // Periodic-table fill-in, batch 9 (parallel-chat Z=100-118 slice, this element
+  // covers the Z=100-109 sub-range). Very little dedicated one-atom-at-a-time chemistry has been done on Bh specifically; most of what's known is nuclear (decay chains), not chemical.
+  // ============================================================
+
+  elements.bohrium.identity:
+    core = builders.createIdentity("Bohrium", "Bh", 107, 270.0, enums.ElementGroup.TRANSITION_METAL, 7, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "54037-14-8"
+
+  elements.bohrium.nuclear:
+    properties = builders.createNuclearCore(107, 163, 0.0, 0.0, 0.0) // spin/moments not determined for this isotope, left 0.0
+
+  elements.bohrium.isotopes::
+    builders.createIsotope(270, 0.0, 144.0000, enums.DecayMode.ALPHA, 0.000, 0.0)
+    // unconfirmed 278Bh may be longer-lived (~11.5 min); 270Bh used as the confirmed reference
+    // reference isotope only -- Bohrium has NO stable isotopes at all
+
+  elements.bohrium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f14 6d5 7s2", 7, 0.00, 7.67000, 0.0), // no measured or theoretically predicted EA found in literature; work function not determined
+    quantum = builders.createQuantumNumbers(6, 2, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders, not from a term-symbol analysis
+    electronegativity = builders.createElectronegativity(0.00, 0.0, 0.0, 0.0, 0.0) // DATA GAP, not the noble-gas real-zero convention -- no predicted Pauling EN published for this element as of this session (WebElements: 'no data'); other four scales not sourced either
+
+  elements.bohrium.ionization_energies_kj_mol:: 740.0 // IE1 only (theoretical prediction, not measured -- no IP measurement exists past Lr as of this session); successive IEs not sourced
+
+  elements.bohrium.oxidation_states:: 7
+
+  elements.bohrium.geometry:
+    radii = builders.createRadii(0.0, 0.0, 0.0), // atomic/covalent radii not cross-checked to this session's standard, left 0.0
+    molar_volume_cm3 = 10.19 // derived from mass/density above, not independently sourced
+
+  elements.bohrium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.bohrium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // lattice TYPE is a real predicted value; constants not sourced
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.bohrium.thermodynamics:
+    phases = builders.createPhasePoints(0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // melting/boiling; triple/critical points not sourced
+    thermal = builders.createThermalProps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // no heat-of-fusion/vaporization/specific-heat/conductivity/expansion/Debye-temp data found
+
+  elements.bohrium.mechanical:
+    bulk = builders.createMechanicalProps(26.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // density is a real predicted value (predicted, 26-27 range); elastic moduli/hardness/sound speed not sourced
+
+  elements.bohrium.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0), // no conductivity/resistivity/band-gap data found
+    type = "assumed metallic conductor by homology, not measured"
+
+  elements.bohrium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0, 0.0) // generic open-shell-metal default, not a sourced measurement or calculation
+
+  elements.bohrium.optical:
+    refractive_index = 0.0, // not determined
+    color = "never observed (no macroscopic quantity ever produced)"
+
+  elements.bohrium.interaction:
+    lennard_jones = builders.createLennardJones(0.000000, 0.000000), // NONE -- beyond UFF.csv coverage
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface energy / adsorption energy / work function data found
+
+  elements.bohrium.abundance:
+    distribution = builders.createAbundance(0.0, 0.0, 0.0, 0.0) // genuinely does not occur in nature -- stronger than Tc/Pm's ultra-trace occurrence, this element has never existed outside a lab
+
+  elements.bohrium.discovery:
+    info = builders.createDiscovery(1981, "Munzenberg, Armbruster et al. (GSI Darmstadt)", "West Germany", "Niels Bohr")
+
+  elements.bohrium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(740.0, 0.00, 0.00) // NOTE: reads 0.0 as a DATA-GAP artifact (EN unsourced), not real chemical inertness -- see TABLE-row comment in element_data.rs
+
+  // ============================================================
+  // ELEMENT: Hassium (Hs, Z=108)
+  // Periodic-table fill-in, batch 9 (parallel-chat Z=100-118 slice, this element
+  // covers the Z=100-109 sub-range). HsO4 volatility experiments (2002) are a real, celebrated confirmation of group-8 (Os) homology -- one of the few transactinides with directly observed chemistry. Reference isotope chosen for data quality, not pure longest-half-life ranking -- see isotopes:: comment.
+  // ============================================================
+
+  elements.hassium.identity:
+    core = builders.createIdentity("Hassium", "Hs", 108, 269.0, enums.ElementGroup.TRANSITION_METAL, 7, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "54037-57-9"
+
+  elements.hassium.nuclear:
+    properties = builders.createNuclearCore(108, 161, 0.0, 0.0, 0.0) // spin/moments not determined for this isotope, left 0.0
+
+  elements.hassium.isotopes::
+    builders.createIsotope(269, 0.0, 13.0000, enums.DecayMode.ALPHA, 9.730, 0.0)
+    // chosen over the nominally longer-lived 271Hs (46s) or 270Hs (7.6s, N=162 subshell closure) because 269Hs has the best-characterized, real measured alpha Q-value; 271Hs's own half-life carries substantial measurement uncertainty
+    // reference isotope only -- Hassium has NO stable isotopes at all
+
+  elements.hassium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f14 6d6 7s2", 8, 0.00, 7.57000, 0.0), // no measured or theoretically predicted EA found in literature; work function not determined
+    quantum = builders.createQuantumNumbers(6, 2, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders, not from a term-symbol analysis
+    electronegativity = builders.createElectronegativity(0.00, 0.0, 0.0, 0.0, 0.0) // DATA GAP, not the noble-gas real-zero convention -- no predicted Pauling EN published for this element as of this session (WebElements: 'no data'); other four scales not sourced either
+
+  elements.hassium.ionization_energies_kj_mol:: 730.0 // IE1 only (theoretical prediction, not measured -- no IP measurement exists past Lr as of this session); successive IEs not sourced
+
+  elements.hassium.oxidation_states:: 8
+
+  elements.hassium.geometry:
+    radii = builders.createRadii(0.0, 0.0, 0.0), // atomic/covalent radii not cross-checked to this session's standard, left 0.0
+    molar_volume_cm3 = 9.61 // derived from mass/density above, not independently sourced
+
+  elements.hassium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.hassium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // lattice TYPE is a real predicted value; constants not sourced
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.hassium.thermodynamics:
+    phases = builders.createPhasePoints(0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // melting/boiling; triple/critical points not sourced
+    thermal = builders.createThermalProps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // no heat-of-fusion/vaporization/specific-heat/conductivity/expansion/Debye-temp data found
+
+  elements.hassium.mechanical:
+    bulk = builders.createMechanicalProps(28.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // density is a real predicted value (predicted, 27-29 range); elastic moduli/hardness/sound speed not sourced
+
+  elements.hassium.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0), // no conductivity/resistivity/band-gap data found
+    type = "assumed metallic conductor by homology, not measured"
+
+  elements.hassium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0, 0.0) // generic open-shell-metal default, not a sourced measurement or calculation
+
+  elements.hassium.optical:
+    refractive_index = 0.0, // not determined
+    color = "never observed (no macroscopic quantity ever produced)"
+
+  elements.hassium.interaction:
+    lennard_jones = builders.createLennardJones(0.000000, 0.000000), // NONE -- beyond UFF.csv coverage
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface energy / adsorption energy / work function data found
+
+  elements.hassium.abundance:
+    distribution = builders.createAbundance(0.0, 0.0, 0.0, 0.0) // genuinely does not occur in nature -- stronger than Tc/Pm's ultra-trace occurrence, this element has never existed outside a lab
+
+  elements.hassium.discovery:
+    info = builders.createDiscovery(1984, "Munzenberg, Armbruster et al. (GSI Darmstadt)", "West Germany", "Hassia, Latin name for the German state of Hesse (GSI's location)")
+
+  elements.hassium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(730.0, 0.00, 0.00) // NOTE: reads 0.0 as a DATA-GAP artifact (EN unsourced), not real chemical inertness -- see TABLE-row comment in element_data.rs
+
+  // ============================================================
+  // ELEMENT: Meitnerium (Mt, Z=109)
+  // Periodic-table fill-in, batch 9 (parallel-chat Z=100-118 slice, this element
+  // covers the Z=100-109 sub-range). No one-atom-at-a-time chemistry experiment has ever been performed on Mt -- production rates are too low even by transactinide standards. All oxidation states below are pure theoretical prediction.
+  // ============================================================
+
+  elements.meitnerium.identity:
+    core = builders.createIdentity("Meitnerium", "Mt", 109, 278.0, enums.ElementGroup.TRANSITION_METAL, 7, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "54038-01-6"
+
+  elements.meitnerium.nuclear:
+    properties = builders.createNuclearCore(109, 169, 0.0, 0.0, 0.0) // spin/moments not determined for this isotope, left 0.0
+
+  elements.meitnerium.isotopes::
+    builders.createIsotope(278, 0.0, 4.5000, enums.DecayMode.ALPHA, 0.000, 0.0)
+    // half-life value disputed across sources (4.5s current eval vs 7.6-8s older sources)
+    // reference isotope only -- Meitnerium has NO stable isotopes at all
+
+  elements.meitnerium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f14 6d7 7s2", 9, 0.00, 8.29000, 0.0), // no measured or theoretically predicted EA found in literature; work function not determined
+    quantum = builders.createQuantumNumbers(6, 2, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders, not from a term-symbol analysis
+    electronegativity = builders.createElectronegativity(0.00, 0.0, 0.0, 0.0, 0.0) // DATA GAP, not the noble-gas real-zero convention -- no predicted Pauling EN published for this element as of this session (WebElements: 'no data'); other four scales not sourced either
+
+  elements.meitnerium.ionization_energies_kj_mol:: 800.0 // IE1 only (theoretical prediction, not measured -- no IP measurement exists past Lr as of this session); successive IEs not sourced
+
+  elements.meitnerium.oxidation_states:: 1, 3, 6
+
+  elements.meitnerium.geometry:
+    radii = builders.createRadii(0.0, 0.0, 0.0), // atomic/covalent radii not cross-checked to this session's standard, left 0.0
+    molar_volume_cm3 = 10.11 // derived from mass/density above, not independently sourced
+
+  elements.meitnerium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.meitnerium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // lattice TYPE is a real predicted value; constants not sourced
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.meitnerium.thermodynamics:
+    phases = builders.createPhasePoints(0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // melting/boiling; triple/critical points not sourced
+    thermal = builders.createThermalProps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // no heat-of-fusion/vaporization/specific-heat/conductivity/expansion/Debye-temp data found
+
+  elements.meitnerium.mechanical:
+    bulk = builders.createMechanicalProps(27.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) // density is a real predicted value (predicted, 27-28 range); elastic moduli/hardness/sound speed not sourced
+
+  elements.meitnerium.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0), // no conductivity/resistivity/band-gap data found
+    type = "assumed metallic conductor by homology, not measured"
+
+  elements.meitnerium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0, 0.0) // generic open-shell-metal default, not a sourced measurement or calculation
+
+  elements.meitnerium.optical:
+    refractive_index = 0.0, // not determined
+    color = "never observed (no macroscopic quantity ever produced)"
+
+  elements.meitnerium.interaction:
+    lennard_jones = builders.createLennardJones(0.000000, 0.000000), // NONE -- beyond UFF.csv coverage
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface energy / adsorption energy / work function data found
+
+  elements.meitnerium.abundance:
+    distribution = builders.createAbundance(0.0, 0.0, 0.0, 0.0) // genuinely does not occur in nature -- stronger than Tc/Pm's ultra-trace occurrence, this element has never existed outside a lab
+
+  elements.meitnerium.discovery:
+    info = builders.createDiscovery(1982, "Munzenberg, Armbruster et al. (GSI Darmstadt), single-atom cold-fusion detection", "West Germany", "Lise Meitner")
+
+  elements.meitnerium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(800.0, 0.00, 0.00) // NOTE: reads 0.0 as a DATA-GAP artifact (EN unsourced), not real chemical inertness -- see TABLE-row comment in element_data.rs
 
 )

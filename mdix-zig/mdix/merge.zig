@@ -84,7 +84,9 @@ pub fn mergeSources(
 
 /// mergeSources with explicit per-source weights. `weights` must be the
 /// same length as `sources`; a higher weight wins under
-/// .weighted_priority.
+/// .weighted_priority. Weights are clamped to [0.0, 1.0] on the Rust
+/// side — see MdixMergeStrategy.weighted_priority's doc comment in
+/// mdix_ffi.zig for what that means for out-of-range values.
 pub fn mergeSourcesWeighted(
     allocator: std.mem.Allocator,
     sources: []const []const u8,

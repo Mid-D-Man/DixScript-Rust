@@ -3,10 +3,17 @@ const mdix = @import("mdix");
 
 test "mergeSourcesWeighted: higher weight wins under .weighted_priority" {
     const allocator = std.testing.allocator;
+    // Weights are clamped to [0.0, 1.0] on the Rust side
+    // (MdixMergeInput::with_weight) — 0.1/0.9 stays comfortably inside
+    // that range and unambiguously orders the two sources. An earlier
+    // draft used 1.0/10.0: 10.0 silently clamps down to 1.0, tying with
+    // the first source's 1.0, and a tie falls back to the primary
+    // (lower-indexed) source — which looked like "weights don't work"
+    // but was really "this weight never got applied in the first place."
     var result = try mdix.mergeSourcesWeighted(
         allocator,
         &.{ "@DATA( env = \"dev\" )", "@DATA( env = \"prod\" )" },
-        &.{ 1.0, 10.0 }, // second source outweighs the first
+        &.{ 0.1, 0.9 }, // second source outweighs the first
         .weighted_priority,
         .replace,
     );
@@ -32,11 +39,21 @@ test "mergeSourcesWeighted: mismatched sources/weights length fails" {
 
 test "mergeSources: array_strategy .concat combines rather than replaces" {
     const allocator = std.testing.allocator;
+    // array_strategy only applies to a GroupArray entry — DixScript's
+    // `path:: item, item` syntax (confirmed against the parser: a
+    // GroupArray is only ever produced by the `::` token). A plain
+    // bracket-literal array *value* (`tags = ["a", "b"]`) is a regular
+    // property whose conflicts resolve winner-takes-all under the
+    // merge strategy, same as any other scalar — array_strategy never
+    // enters into it. An earlier draft used bracket literals here and
+    // got 2 (source 0's whole array replacing source 1's, exactly the
+    // winner-takes-all behavior a plain property gets) instead of the
+    // 3 a real GroupArray concat would produce.
     var result = try mdix.mergeSources(
         allocator,
         &.{
-            "@DATA( tags = [\"a\", \"b\"] )",
-            "@DATA( tags = [\"c\"] )",
+            "@DATA( tags:: \"a\", \"b\" )",
+            "@DATA( tags:: \"c\" )",
         },
         .primary_wins,
         .concat,

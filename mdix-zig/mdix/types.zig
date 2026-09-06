@@ -1,8 +1,11 @@
 //! types.zig — typed convenience wrappers for values whose canonical
-//! mdix-ffi representation is a plain string (mdix_get_string). Mirrors
-//! mdix-odin/mdix/types.odin. None of these need new FFI surface — the
-//! string *is* the value at the FFI layer, these just parse it into
-//! something more useful than a bare []u8.
+//! mdix-ffi representation is a plain string (mdix_get_string) or, for
+//! Blob/Regex specifically, a JSON string (mdix_get_json) — see
+//! getStringLikeViaJson's doc comment below for why those two split
+//! from the rest. Mirrors mdix-odin/mdix/types.odin. None of these need
+//! new FFI surface — the value is already retrievable as text at the
+//! FFI layer, these just parse it into something more useful than a
+//! bare []u8.
 //!
 //! Two deliberate gaps versus the Odin version, both because Zig's std
 //! lib doesn't ship what Odin's core: collection does:
@@ -111,9 +114,24 @@ pub const Blob = struct {
     }
 };
 
+/// Blob and Regex are the two DixScript types mdix_get_string cannot
+/// read — checked directly against dixscript's `impl TryFrom<DixValue>
+/// for String` (dixscript/src/Runtime/dix_data.rs), which only covers
+/// String/Date/Timestamp/HexColor. mdix_get_json's serializer, on the
+/// other hand, maps every one of String/Date/Timestamp/HexColor/Blob/
+/// Regex to a plain JSON string (dixscript/src/Runtime/converter.rs) —
+/// so fetching the JSON form and decoding that one JSON string back out
+/// works for exactly the two types getString can't reach.
+fn getStringLikeViaJson(db: root.Database, allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const raw_json = try db.getJson(allocator, path);
+    defer allocator.free(raw_json);
+    var parsed = std.json.parseFromSlice([]const u8, allocator, raw_json, .{}) catch return error.MdixFailed;
+    defer parsed.deinit();
+    return allocator.dupe(u8, parsed.value);
+}
+
 pub fn getBlob(db: root.Database, allocator: std.mem.Allocator, path: []const u8) !Blob {
-    const raw = try db.getString(allocator, path);
-    return .{ .raw_base64 = raw };
+    return .{ .raw_base64 = try getStringLikeViaJson(db, allocator, path) };
 }
 
 // ── Regex ────────────────────────────────────────────────────────────────
@@ -125,8 +143,7 @@ pub const MdixRegex = struct {
 };
 
 pub fn getRegex(db: root.Database, allocator: std.mem.Allocator, path: []const u8) !MdixRegex {
-    const raw = try db.getString(allocator, path);
-    return .{ .pattern = raw };
+    return .{ .pattern = try getStringLikeViaJson(db, allocator, path) };
 }
 
 // ── Date ─────────────────────────────────────────────────────────────────

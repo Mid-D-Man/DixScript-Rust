@@ -77,9 +77,14 @@ pub const MdixFormatMode = enum(c_int) {
 /// `MdixMergeStrategy` repr(i32) enum exactly (hand-maintained).
 pub const MdixMergeStrategy = enum(c_int) {
     /// Each source's weight decides the winner; equal weights fall back
-    /// to the lower-indexed (primary) source. What `mdix_merge_sources`
-    /// (no explicit weights) effectively resolves to — it auto-assigns
-    /// descending weights, source 0 gets 1.0, the last source gets ~0.0.
+    /// to the lower-indexed (primary) source. Weights are clamped to
+    /// [0.0, 1.0] on the Rust side (MdixMergeInput::with_weight) — a
+    /// value outside that range silently clamps rather than erroring,
+    /// so e.g. two weights of 10.0 and 1.0 both become 1.0 and tie
+    /// (falling back to the primary source), not "10.0 wins". What
+    /// `mdix_merge_sources` (no explicit weights) effectively resolves
+    /// to — it auto-assigns descending weights, source 0 gets 1.0, the
+    /// last source gets ~0.0.
     weighted_priority = 0,
     /// The lower-indexed source always wins, regardless of weight.
     primary_wins = 1,
@@ -93,6 +98,15 @@ pub const MdixMergeStrategy = enum(c_int) {
 /// How to combine two array-valued entries that share a path across merge
 /// sources. Mirrors the Rust `ArrayMergeStrategy` repr(i32) enum exactly
 /// (hand-maintained).
+///
+/// Only applies to a DixScript `GroupArray` entry — the `path:: item,
+/// item` syntax. A plain bracket-literal array *value*
+/// (`path = [item, item]`) is an ordinary property; a conflict on one
+/// resolves winner-takes-all under the merge strategy, same as any
+/// other scalar — this setting never enters into it, and the loser's
+/// items are simply discarded regardless of `concat`/`concat_dedup`.
+/// Checked directly against dixscript's own merge.rs (`merge_array_items`
+/// is only ever called from the `DataEntry::GroupArray` match arm).
 pub const MdixArrayMergeStrategy = enum(c_int) {
     /// The winning source's array entirely replaces the losing one's.
     replace = 0,

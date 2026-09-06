@@ -3,9 +3,17 @@ const mdix = @import("mdix");
 
 test "Database: @CONFIG values readable via configValue" {
     const allocator = std.testing.allocator;
+    // version must be exactly "1.0.0" -- confirmed against
+    // dixscript's VersionManager::is_compatible_with, which checks
+    // membership in a version_hierarchy set containing only
+    // VERSION_1_0 ("1.0.0"), not a semver range check. An earlier
+    // draft used "2.0" here (an arbitrary placeholder), which
+    // loadStr silently rejects as an unsupported version -- same
+    // failure shape as any other parse error (null handle,
+    // error.MdixFailed), nothing wrong with configValue() itself.
     var db = try mdix.Database.loadStr(allocator,
         \\@CONFIG(
-        \\  version -> "2.0"
+        \\  version -> "1.0.0"
         \\  author  -> "Mid-D-Man"
         \\)
         \\@DATA( port = 8080 )
@@ -14,7 +22,7 @@ test "Database: @CONFIG values readable via configValue" {
 
     const version = try db.configValue(allocator, "version");
     defer allocator.free(version);
-    try std.testing.expectEqualStrings("2.0", version);
+    try std.testing.expectEqualStrings("1.0.0", version);
 }
 
 test "Database: getKeys with a prefix only returns that prefix's direct children" {

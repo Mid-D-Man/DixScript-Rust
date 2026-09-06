@@ -16,11 +16,11 @@
 )
 
 @DATA(
-  database_name = "Periodic Table Database - 99 Elements (Historic Alchemical Set + Periodic Fill-In Batches 1-7, 9-10)",
-  database_version = "1.10.0",
+  database_name = "Periodic Table Database - 109 Elements (Historic Alchemical Set + Periodic Fill-In Batches 1-7, 9-11)",
+  database_version = "1.11.0",
   last_updated = 2026-09-06T00:00:00Z,
   format_type = "DixScript Physics Simulation Ready",
-  total_elements = 99,
+  total_elements = 109,
   properties_per_element = 126,
   simulation_ready = true,
   speed_of_light_m_s = 299792458.0,
@@ -7172,5 +7172,716 @@
 
   elements.oganesson.physics_calculated:
     reactivity_index = physics.calculateReactivityIndex(860.0, 7.72, 0.00) // NOTE: reads 0.0 as a DATA-GAP artifact (EN unsourced for this entire batch), not real chemical inertness -- see electronic:: comment above
+
+  // ============================================================
+  // ELEMENT: Thorium (Th, Z=90)
+  // Periodic-table fill-in, batch 11 (Z=90-99, the actinide 'middle' -- a much
+  // richer real-data regime than batches 9-10). Fully characterized, real bulk data throughout -- essentially a normal heavy metal (primordial, industrially significant as a nuclear fuel candidate). f-block classification quirk mirrors La/Ac: zero 5f electrons in the ground state despite the block placement.
+  // ============================================================
+
+  elements.thorium.identity:
+    core = builders.createIdentity("Thorium", "Th", 90, 232.0377, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "7440-29-1"
+
+  elements.thorium.nuclear:
+    properties = builders.createNuclearCore(90, 142, 0.0, 0.00, 0.00)
+
+  elements.thorium.isotopes::
+    builders.createIsotope(232, 0.0, 4.4342e+17, enums.DecayMode.ALPHA, 4.083, 7.3)
+    // primordial -- >99.98% of all natural thorium; half-life comparable to the age of the universe
+
+  elements.thorium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]6d2 7s2", 4, 113.00, 6.08385, 0.0), // real measured value (matterviz/NIST-derived); work function not determined
+    quantum = builders.createQuantumNumbers(5, 3, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders
+    electronegativity = builders.createElectronegativity(1.30, 0.0, 0.0, 0.0, 0.0) // Pauling is a real, specifically-cited value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.thorium.ionization_energies_kj_mol:: 587.0, 1110.0, 1930.0 // real measured/established values; IE1-3, further IEs not sourced
+
+  elements.thorium.oxidation_states:: -1, 1, 2, 3, 4
+
+  elements.thorium.geometry:
+    radii = builders.createRadii(179.8, 206.0, 0.0),
+    molar_volume_cm3 = 19.79 // derived from mass/density, not independently sourced
+
+  elements.thorium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.thorium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 508.45, 0.00, 0.00, 90.0, 90.00, 90.0),
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.thorium.thermodynamics:
+    phases = builders.createPhasePoints(2023.0, 5061.0, 0.0, 0.0, 0.0, 0.0), // real melting/boiling points; triple/critical points not sourced
+    thermal = builders.createThermalProps(13.81, 514.0, 113.041, 54.00, 1.154e-05, 0.0) // heat of fusion, vaporization, specific heat, thermal conductivity, expansion are real where nonzero; Debye temp not sourced
+
+  elements.thorium.mechanical:
+    bulk = builders.createMechanicalProps(11.72, 79.0, 31.0, 54.0, 0.27, 3.0, 2490.0) // density is real; elastic moduli/Poisson/hardness/sound speed are real where nonzero
+
+  elements.thorium.electrical:
+    props = builders.createElectricalProps(6.3694e+06, 1.5700e-07, 0.0), // conductivity derived from real measured resistivity where nonzero; no band-gap data (metal)
+    type = "metallic conductor"
+
+  elements.thorium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 6.6695e-06, 0.0) // real measured magnetic ordering
+
+  elements.thorium.optical:
+    refractive_index = 0.0, // not determined (opaque metal)
+    color = "silvery" // real, consistent across sources
+
+  elements.thorium.interaction:
+    lennard_jones = builders.createLennardJones(13.083712, 3.025492), // UFF (Rappe 1992, via UFF.csv) -- real coverage, unlike the Z=104+ gap
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface/adsorption/work-function data found
+
+  elements.thorium.abundance:
+    distribution = builders.createAbundance(9.60e+00, 3.000e-02, 0.0000e+00, 0.0) // primordial, real crustal abundance -- comparable to lead
+
+  elements.thorium.discovery:
+    info = builders.createDiscovery(1828, "Jons Jacob Berzelius", "Sweden", "Thor, the Norse god of thunder")
+
+  elements.thorium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(587.0, 113.00, 1.30) // real nonzero value -- unlike batches 9-10, every element in this batch has a genuine sourced EN
+
+  // ============================================================
+  // ELEMENT: Protactinium (Pa, Z=91)
+  // Periodic-table fill-in, batch 11 (Z=90-99, the actinide 'middle' -- a much
+  // richer real-data regime than batches 9-10). Real but sparse data -- Pa is naturally occurring only in extreme trace amounts (a decay product of U-235) and is described in the current literature as chemically 'enigmatic', with a genuinely complex, still-being-modeled valence electron structure.
+  // ============================================================
+
+  elements.protactinium.identity:
+    core = builders.createIdentity("Protactinium", "Pa", 91, 231.0359, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "7440-13-3"
+
+  elements.protactinium.nuclear:
+    properties = builders.createNuclearCore(91, 140, 1.5, 0.00, 0.00)
+
+  elements.protactinium.isotopes::
+    builders.createIsotope(231, 0.0, 1.0339e+12, enums.DecayMode.ALPHA, 5.150, 200.6)
+    // the only significant natural isotope, formed in the U-235 decay chain -- 'enigmatic' chemically per recent (2023) computational work, its 5 valence electrons spread across 5f/6d/7s/7p
+
+  elements.protactinium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f2 6d1 7s2", 5, 40.00, 5.88693, 0.0), // shared low-confidence actinide-analog placeholder (same convention as batch 9's Fm/Md/No) -- no specific Pa calc found; work function not determined
+    quantum = builders.createQuantumNumbers(5, 3, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders
+    electronegativity = builders.createElectronegativity(1.50, 0.0, 0.0, 0.0, 0.0) // Pauling is a real, specifically-cited value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.protactinium.ionization_energies_kj_mol:: 568.0 // real measured/established values; IE1 only, further IEs not sourced
+
+  elements.protactinium.oxidation_states:: 2, 3, 4, 5
+
+  elements.protactinium.geometry:
+    radii = builders.createRadii(163.0, 200.0, 0.0),
+    molar_volume_cm3 = 14.97 // derived from mass/density, not independently sourced
+
+  elements.protactinium.ionic_radii::
+    builders.createIonicRadius(4, 78.0, 6) // real/predicted values
+
+  elements.protactinium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.TETRAGONAL, 392.10, 0.00, 323.50, 90.0, 90.00, 90.0), // body-centered tetragonal specifically; enum has no centering distinction
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.protactinium.thermodynamics:
+    phases = builders.createPhasePoints(1841.0, 4300.0, 0.0, 0.0, 0.0, 0.0), // real melting/boiling (uncertain) points; triple/critical points not sourced
+    thermal = builders.createThermalProps(12.34, 481.0, 0.000, 47.00, 1.180e-05, 0.0) // heat of fusion, vaporization, specific heat, thermal conductivity, expansion are real where nonzero; Debye temp not sourced
+
+  elements.protactinium.mechanical:
+    bulk = builders.createMechanicalProps(15.43, 0.0, 0.0, 0.0, 0.00, 0.0, 0.0) // density is real; elastic moduli/Poisson/hardness/sound speed are real where nonzero
+
+  elements.protactinium.electrical:
+    props = builders.createElectricalProps(5.6497e+06, 1.7700e-07, 0.0), // conductivity derived from real measured resistivity where nonzero; no band-gap data (metal)
+    type = "metallic conductor"
+
+  elements.protactinium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0000e+00, 0.0) // real measured magnetic ordering
+
+  elements.protactinium.optical:
+    refractive_index = 0.0, // not determined (opaque metal)
+    color = "silvery" // real, consistent across sources
+
+  elements.protactinium.interaction:
+    lennard_jones = builders.createLennardJones(11.070833, 3.050437), // UFF (Rappe 1992, via UFF.csv)
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface/adsorption/work-function data found
+
+  elements.protactinium.abundance:
+    distribution = builders.createAbundance(1.40e-06, 0.000e+00, 0.0000e+00, 0.0) // extremely trace, real but vanishingly small -- decay product of U-235, among the rarest naturally occurring elements
+
+  elements.protactinium.discovery:
+    info = builders.createDiscovery(1913, "Kasimir Fajans and Oswald Helmuth Gohring (first identified); Aristid von Grosse achieved first isolation in 1934; predicted by Mendeleev in 1871", "Germany", "Greek 'protos' (first) + actinium, since some of its isotopes decay into actinium; named by Otto Hahn and Lise Meitner")
+
+  elements.protactinium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(568.0, 40.00, 1.50) // real nonzero value -- unlike batches 9-10, every element in this batch has a genuine sourced EN
+
+  // ============================================================
+  // ELEMENT: Uranium (U, Z=92)
+  // Periodic-table fill-in, batch 11 (Z=90-99, the actinide 'middle' -- a much
+  // richer real-data regime than batches 9-10). The best-characterized element in this entire batch -- primordial, industrially essential, real data for nearly every field. The one surprising gap: no specific electron affinity calculation was found even for uranium.
+  // ============================================================
+
+  elements.uranium.identity:
+    core = builders.createIdentity("Uranium", "U", 92, 238.0289, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "7440-61-1"
+
+  elements.uranium.nuclear:
+    properties = builders.createNuclearCore(92, 146, 0.0, 0.00, 0.00)
+
+  elements.uranium.isotopes::
+    builders.createIsotope(238, 0.0, 1.4101e+17, enums.DecayMode.ALPHA, 4.267, 2.7)
+    // primordial, 99.27% of all natural uranium
+
+  elements.uranium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f3 6d1 7s2", 6, 40.00, 6.19371, 0.0), // shared low-confidence actinide-analog placeholder -- no specific U calc found despite U being otherwise the best-characterized element in this batch; work function not determined
+    quantum = builders.createQuantumNumbers(5, 3, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders
+    electronegativity = builders.createElectronegativity(1.38, 0.0, 0.0, 0.0, 0.0) // Pauling is a real, specifically-cited value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.uranium.ionization_energies_kj_mol:: 597.6, 1420.0 // real measured/established values; IE1-2, further IEs not sourced
+
+  elements.uranium.oxidation_states:: -1, 1, 2, 3, 4, 5, 6
+
+  elements.uranium.geometry:
+    radii = builders.createRadii(156.0, 196.0, 186.0),
+    molar_volume_cm3 = 12.49 // derived from mass/density, not independently sourced
+
+  elements.uranium.ionic_radii::
+    builders.createIonicRadius(4, 89.0, 6),
+    builders.createIonicRadius(6, 73.0, 6) // real/predicted values
+
+  elements.uranium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.ORTHORHOMBIC, 285.35, 586.97, 495.52, 90.0, 90.00, 90.0),
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.uranium.thermodynamics:
+    phases = builders.createPhasePoints(1405.3, 4404.0, 0.0, 0.0, 0.0, 0.0), // real melting/boiling points; triple/critical points not sourced
+    thermal = builders.createThermalProps(9.14, 417.1, 116.225, 27.50, 1.546e-05, 0.0) // heat of fusion, vaporization, specific heat, thermal conductivity, expansion are real where nonzero; Debye temp not sourced
+
+  elements.uranium.mechanical:
+    bulk = builders.createMechanicalProps(19.05, 208.0, 111.0, 100.0, 0.23, 0.0, 3155.0) // density is real; elastic moduli/Poisson/hardness/sound speed are real where nonzero -- Mohs not sourced; Vickers hardness 1960-2500 MPa is real but a different scale
+
+  elements.uranium.electrical:
+    props = builders.createElectricalProps(3.5714e+06, 2.8000e-07, 0.0), // conductivity derived from real measured resistivity where nonzero; no band-gap data (metal)
+    type = "metallic conductor"
+
+  elements.uranium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 3.3133e-05, 0.0) // real measured magnetic ordering
+
+  elements.uranium.optical:
+    refractive_index = 0.0, // not determined (opaque metal)
+    color = "silvery" // real, consistent across sources
+
+  elements.uranium.interaction:
+    lennard_jones = builders.createLennardJones(11.070833, 3.024601), // UFF (Rappe 1992, via UFF.csv)
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface/adsorption/work-function data found
+
+  elements.uranium.abundance:
+    distribution = builders.createAbundance(2.70e+00, 9.000e-03, 3.2000e-03, 0.0) // primordial, real crustal/ocean abundance -- fuels the entire nuclear power industry
+
+  elements.uranium.discovery:
+    info = builders.createDiscovery(1789, "Martin Heinrich Klaproth (discovery); Eugene-Melchior Peligot achieved first metal isolation in 1841", "Germany / France", "the planet Uranus")
+
+  elements.uranium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(597.6, 40.00, 1.38) // real nonzero value -- unlike batches 9-10, every element in this batch has a genuine sourced EN
+
+  // ============================================================
+  // ELEMENT: Neptunium (Np, Z=93)
+  // Periodic-table fill-in, batch 11 (Z=90-99, the actinide 'middle' -- a much
+  // richer real-data regime than batches 9-10). First transuranium element ever discovered (1940). Real trace natural occurrence (neutron capture in U ores) but treated as effectively synthetic for abundance purposes, consistent with how vanishingly small that trace is.
+  // ============================================================
+
+  elements.neptunium.identity:
+    core = builders.createIdentity("Neptunium", "Np", 93, 237.0000, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "7439-99-8"
+
+  elements.neptunium.nuclear:
+    properties = builders.createNuclearCore(93, 144, 2.5, 0.00, 0.00)
+
+  elements.neptunium.isotopes::
+    builders.createIsotope(237, 0.0, 6.7665e+13, enums.DecayMode.ALPHA, 4.959, 180.0)
+    // trace-natural (formed in U ores by neutron capture) but the longest-lived isotope and standard reference; first-ever transuranium element discovered
+
+  elements.neptunium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f4 6d1 7s2", 5, 40.00, 6.26522, 0.0), // shared low-confidence actinide-analog placeholder -- no specific Np calc found; work function not determined
+    quantum = builders.createQuantumNumbers(5, 3, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders
+    electronegativity = builders.createElectronegativity(1.36, 0.0, 0.0, 0.0, 0.0) // Pauling is a real, specifically-cited value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.neptunium.ionization_energies_kj_mol:: 604.5 // real measured/established values; IE1 only, further IEs not sourced
+
+  elements.neptunium.oxidation_states:: 2, 3, 4, 5, 6, 7
+
+  elements.neptunium.geometry:
+    radii = builders.createRadii(155.0, 190.0, 0.0),
+    molar_volume_cm3 = 11.59 // derived from mass/density, not independently sourced
+
+  elements.neptunium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.neptunium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.ORTHORHOMBIC, 472.30, 488.70, 666.30, 90.0, 90.00, 90.0),
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.neptunium.thermodynamics:
+    phases = builders.createPhasePoints(912.0, 4447.0, 0.0, 0.0, 0.0, 0.0), // real melting/boiling (extrapolated) points; triple/critical points not sourced
+    thermal = builders.createThermalProps(5.19, 336.0, 0.000, 6.30, 0.000e+00, 0.0) // heat of fusion, vaporization, specific heat, thermal conductivity, expansion are real where nonzero; Debye temp not sourced
+
+  elements.neptunium.mechanical:
+    bulk = builders.createMechanicalProps(20.45, 0.0, 0.0, 0.0, 0.00, 0.0, 0.0) // density is real; elastic moduli/Poisson/hardness/sound speed are real where nonzero
+
+  elements.neptunium.electrical:
+    props = builders.createElectricalProps(8.1967e+05, 1.2200e-06, 0.0), // conductivity derived from real measured resistivity where nonzero; no band-gap data (metal)
+    type = "metallic conductor"
+
+  elements.neptunium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0000e+00, 0.0) // real measured magnetic ordering
+
+  elements.neptunium.optical:
+    refractive_index = 0.0, // not determined (opaque metal)
+    color = "silvery" // real, consistent across sources
+
+  elements.neptunium.interaction:
+    lennard_jones = builders.createLennardJones(9.561174, 3.050437), // UFF (Rappe 1992, via UFF.csv)
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface/adsorption/work-function data found
+
+  elements.neptunium.abundance:
+    distribution = builders.createAbundance(0.00e+00, 0.000e+00, 0.0000e+00, 0.0) // trace natural occurrence from neutron capture in uranium ores is real but not meaningfully quantifiable -- effectively synthetic for practical purposes
+
+  elements.neptunium.discovery:
+    info = builders.createDiscovery(1940, "Edwin McMillan and Philip H. Abelson", "USA", "the planet Neptune, continuing the outward-from-Uranus naming sequence")
+
+  elements.neptunium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(604.5, 40.00, 1.36) // real nonzero value -- unlike batches 9-10, every element in this batch has a genuine sourced EN
+
+  // ============================================================
+  // ELEMENT: Plutonium (Pu, Z=94)
+  // Periodic-table fill-in, batch 11 (Z=90-99, the actinide 'middle' -- a much
+  // richer real-data regime than batches 9-10). The most complex elemental metal known -- six real allotropic phases between room temperature and melting (only the room-temperature alpha phase is recorded here), and the delta phase has real NEGATIVE thermal expansion. TABLE mass uses the longest-lived isotope (Pu-244) but the isotopes:: entry uses the practically/industrially significant Pu-239, following the Tc-99/Pm-147 convention.
+  // ============================================================
+
+  elements.plutonium.identity:
+    core = builders.createIdentity("Plutonium", "Pu", 94, 244.0000, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "7440-07-5"
+
+  elements.plutonium.nuclear:
+    properties = builders.createNuclearCore(94, 145, 0.5, 0.00, 0.00)
+
+  elements.plutonium.isotopes::
+    builders.createIsotope(239, 0.0, 7.6091e+11, enums.DecayMode.ALPHA, 5.157, 269.0)
+    // Pu-239 used here instead of the nominally-longer-lived Pu-244 (TABLE mass reference) -- Pu-239 is the practically/industrially significant isotope (nuclear fuel and weapons), following the same Tc-99/Pm-147 convention as earlier batches
+
+  elements.plutonium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f6 7s2", 6, 40.00, 6.06001, 0.0), // shared low-confidence actinide-analog placeholder -- no specific Pu calc found; work function not determined
+    quantum = builders.createQuantumNumbers(5, 3, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders
+    electronegativity = builders.createElectronegativity(1.28, 0.0, 0.0, 0.0, 0.0) // Pauling is a real, specifically-cited value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.plutonium.ionization_energies_kj_mol:: 584.7 // real measured/established values; IE1 only, further IEs not sourced
+
+  elements.plutonium.oxidation_states:: 2, 3, 4, 5, 6, 7, 8
+
+  elements.plutonium.geometry:
+    radii = builders.createRadii(159.0, 187.0, 0.0),
+    molar_volume_cm3 = 12.29 // derived from mass/density, not independently sourced
+
+  elements.plutonium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.plutonium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.MONOCLINIC, 618.30, 482.20, 1096.40, 90.0, 101.79, 90.0), // alpha-Pu, the room-temperature phase -- Pu is FAMOUS for having SIX allotropes between room temperature and melting, more than any other element; only this one (most stable at STP) is recorded here
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.plutonium.thermodynamics:
+    phases = builders.createPhasePoints(912.5, 3505.0, 0.0, 0.0, 0.0, 0.0), // real melting/boiling points; triple/critical points not sourced
+    thermal = builders.createThermalProps(2.82, 333.5, 0.000, 6.74, 4.960e-05, 0.0) // heat of fusion, vaporization, specific heat, thermal conductivity, expansion are real where nonzero; Debye temp not sourced
+
+  elements.plutonium.mechanical:
+    bulk = builders.createMechanicalProps(19.85, 96.0, 43.0, 0.0, 0.21, 0.0, 2260.0) // density is real (the commonly-cited practical value (essentially isotope-independent as a bulk metal property); Wikipedia separately lists 20.26 g/cm3 for near-r.t. alpha-244Pu specifically); elastic moduli/Poisson/hardness/sound speed are real where nonzero
+
+  elements.plutonium.electrical:
+    props = builders.createElectricalProps(6.8493e+05, 1.4600e-06, 0.0), // conductivity derived from real measured resistivity where nonzero; no band-gap data (metal)
+    type = "metallic conductor"
+
+  elements.plutonium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0000e+00, 0.0) // real measured magnetic ordering
+
+  elements.plutonium.optical:
+    refractive_index = 0.0, // not determined (opaque metal)
+    color = "silvery" // real, consistent across sources
+
+  elements.plutonium.interaction:
+    lennard_jones = builders.createLennardJones(8.051515, 3.050437), // UFF (Rappe 1992, via UFF.csv)
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface/adsorption/work-function data found
+
+  elements.plutonium.abundance:
+    distribution = builders.createAbundance(0.00e+00, 0.000e+00, 0.0000e+00, 0.0) // trace natural occurrence from U-ore neutron capture is real (this is how Pu was found in nature before being synthesized) but not meaningfully quantifiable
+
+  elements.plutonium.discovery:
+    info = builders.createDiscovery(1940, "Glenn T. Seaborg, Arthur Wahl, Joseph W. Kennedy, Edwin McMillan", "USA", "the dwarf planet Pluto, continuing the outward planetary naming sequence (Pluto was still classified a planet in 1941)")
+
+  elements.plutonium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(584.7, 40.00, 1.28) // real nonzero value -- unlike batches 9-10, every element in this batch has a genuine sourced EN
+
+  // ============================================================
+  // ELEMENT: Americium (Am, Z=95)
+  // Periodic-table fill-in, batch 11 (Z=90-99, the actinide 'middle' -- a much
+  // richer real-data regime than batches 9-10). First element in this batch with NO commonly-cited atomic/covalent radius. First transuranic with a closed relativistic 5f subshell (7F0 ground term, real pressure-induced phase transitions studied by DFT+DMFT as of 2025). Named by analogy to europium, one row up.
+  // ============================================================
+
+  elements.americium.identity:
+    core = builders.createIdentity("Americium", "Am", 95, 243.0000, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "7440-35-9"
+
+  elements.americium.nuclear:
+    properties = builders.createNuclearCore(95, 146, 2.5, 1.61, 0.00)
+
+  elements.americium.isotopes::
+    builders.createIsotope(241, 0.0, 1.3640e+10, enums.DecayMode.ALPHA, 5.486, 608.0)
+    // Am-241 used here instead of the nominally-longer-lived Am-243 (TABLE mass reference) -- Am-241 is the practically significant isotope, produced by the tonne and used in essentially every household ionization-type smoke detector
+
+  elements.americium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f7 7s2", 3, 40.00, 5.99057, 0.0), // shared low-confidence actinide-analog placeholder -- no specific Am calc found; work function not determined
+    quantum = builders.createQuantumNumbers(5, 3, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders
+    electronegativity = builders.createElectronegativity(1.30, 0.0, 0.0, 0.0, 0.0) // Pauling is a real, specifically-cited value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.americium.ionization_energies_kj_mol:: 578.0 // real measured/established values; IE1 only, further IEs not sourced
+
+  elements.americium.oxidation_states:: 2, 3, 4, 5, 6, 7
+
+  elements.americium.geometry:
+    radii = builders.createRadii(0.0, 0.0, 0.0),
+    molar_volume_cm3 = 20.25 // derived from mass/density, not independently sourced
+
+  elements.americium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.americium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 0.00, 0.00, 0.00, 90.0, 90.00, 90.0), // double-hcp (Am-I phase) specifically; enum has no double/simple distinction. Am is the first transuranic element with a closed relativistic 5f subshell (7F0 ground term) and undergoes real pressure-induced phase transitions (dhcp -> fcc -> orthorhombic) that have been directly studied
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.americium.thermodynamics:
+    phases = builders.createPhasePoints(1449.0, 2880.0, 0.0, 0.0, 0.0, 0.0), // real melting/boiling (calculated) points; triple/critical points not sourced
+    thermal = builders.createThermalProps(14.39, 0.0, 0.000, 0.00, 0.000e+00, 0.0) // heat of fusion, vaporization, specific heat, thermal conductivity, expansion are real where nonzero; Debye temp not sourced
+
+  elements.americium.mechanical:
+    bulk = builders.createMechanicalProps(12.00, 0.0, 0.0, 0.0, 0.00, 0.0, 0.0) // density is real; elastic moduli/Poisson/hardness/sound speed are real where nonzero
+
+  elements.americium.electrical:
+    props = builders.createElectricalProps(0.0000e+00, 0.0000e+00, 0.0), // conductivity derived from real measured resistivity where nonzero; no band-gap data (metal)
+    type = "metallic conductor"
+
+  elements.americium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0000e+00, 0.0) // real measured magnetic ordering
+
+  elements.americium.optical:
+    refractive_index = 0.0, // not determined (opaque metal)
+    color = "silvery" // real, consistent across sources
+
+  elements.americium.interaction:
+    lennard_jones = builders.createLennardJones(7.045076, 3.012129), // UFF (Rappe 1992, via UFF.csv)
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface/adsorption/work-function data found
+
+  elements.americium.abundance:
+    distribution = builders.createAbundance(0.00e+00, 0.000e+00, 0.0000e+00, 0.0) // trace natural occurrence in uranium ores is real (from neutron capture) but effectively synthetic for practical purposes
+
+  elements.americium.discovery:
+    info = builders.createDiscovery(1944, "Glenn T. Seaborg, Ralph A. James, Leon O. Morgan, Albert Ghiorso", "USA", "the Americas, by analogy to europium (Am sits directly below europium, itself named after Europe)")
+
+  elements.americium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(578.0, 40.00, 1.30) // real nonzero value -- unlike batches 9-10, every element in this batch has a genuine sourced EN
+
+  // ============================================================
+  // ELEMENT: Curium (Cm, Z=96)
+  // Periodic-table fill-in, batch 11 (Z=90-99, the actinide 'middle' -- a much
+  // richer real-data regime than batches 9-10). First element in this batch where EBSCO explicitly confirms several properties as 'unknown' rather than merely unfound (specific heat, thermal/electrical conductivity, magnetic ordering) -- a genuine data-richness cliff starting here, not a research gap on this session's part. Named by analogy to gadolinium.
+  // ============================================================
+
+  elements.curium.identity:
+    core = builders.createIdentity("Curium", "Cm", 96, 247.0000, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "7440-51-9"
+
+  elements.curium.nuclear:
+    properties = builders.createNuclearCore(96, 148, 0.0, 0.00, 0.00)
+
+  elements.curium.isotopes::
+    builders.createIsotope(244, 0.0, 5.7124e+08, enums.DecayMode.ALPHA, 5.805, 16.2)
+    // Cm-244 used here instead of the nominally-longer-lived Cm-247 (TABLE mass reference) -- Cm-244 is the practically significant isotope, used in radioisotope thermoelectric generators including Mars rover instruments
+
+  elements.curium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f7 6d1 7s2", 3, 40.00, 6.02166, 0.0), // shared low-confidence actinide-analog placeholder -- explicitly confirmed 'unknown' by EBSCO rather than just unfound; work function not determined
+    quantum = builders.createQuantumNumbers(5, 3, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders
+    electronegativity = builders.createElectronegativity(1.30, 0.0, 0.0, 0.0, 0.0) // Pauling is a real, specifically-cited value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.curium.ionization_energies_kj_mol:: 581.0 // real measured/established values; IE1 only, further IEs not sourced
+
+  elements.curium.oxidation_states:: 2, 3, 4, 5, 6
+
+  elements.curium.geometry:
+    radii = builders.createRadii(174.0, 0.0, 0.0),
+    molar_volume_cm3 = 18.28 // derived from mass/density, not independently sourced
+
+  elements.curium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.curium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 0.00, 0.00, 0.00, 90.0, 90.00, 90.0), // double-hcp per Wikipedia's general actinide convention; one source (EBSCO) instead describes it as 'simple hexagonal' -- noted as a real disagreement across sources rather than silently picking one
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.curium.thermodynamics:
+    phases = builders.createPhasePoints(1613.0, 3383.0, 0.0, 0.0, 0.0, 0.0), // real melting/boiling points; triple/critical points not sourced
+    thermal = builders.createThermalProps(13.85, 0.0, 0.000, 0.00, 0.000e+00, 0.0) // heat of fusion, vaporization, specific heat, thermal conductivity, expansion are real where nonzero -- explicitly confirmed 'unknown' (EBSCO), not just unfound; Debye temp not sourced
+
+  elements.curium.mechanical:
+    bulk = builders.createMechanicalProps(13.51, 0.0, 0.0, 0.0, 0.00, 0.0, 0.0) // density is real; elastic moduli/Poisson/hardness/sound speed are real where nonzero
+
+  elements.curium.electrical:
+    props = builders.createElectricalProps(0.0000e+00, 0.0000e+00, 0.0), // conductivity derived from real measured resistivity where nonzero; no band-gap data (metal)
+    type = "metallic conductor"
+
+  elements.curium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0000e+00, 0.0) // -- ordering type explicitly confirmed 'unknown' by EBSCO -- PARAMAGNETIC used here only as the generic open-shell-metal default, weaker confidence than most other fields in this batch
+
+  elements.curium.optical:
+    refractive_index = 0.0, // not determined (opaque metal)
+    color = "silvery" // real, consistent across sources
+
+  elements.curium.interaction:
+    lennard_jones = builders.createLennardJones(6.541856, 2.963129), // UFF (Rappe 1992, via UFF.csv)
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface/adsorption/work-function data found
+
+  elements.curium.abundance:
+    distribution = builders.createAbundance(0.00e+00, 0.000e+00, 0.0000e+00, 0.0) // purely synthetic, no natural occurrence
+
+  elements.curium.discovery:
+    info = builders.createDiscovery(1944, "Glenn T. Seaborg, Ralph A. James, Albert Ghiorso", "USA", "Marie and Pierre Curie, by analogy to gadolinium (Cm sits directly below gadolinium, itself named after scientist Johan Gadolin)")
+
+  elements.curium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(581.0, 40.00, 1.30) // real nonzero value -- unlike batches 9-10, every element in this batch has a genuine sourced EN
+
+  // ============================================================
+  // ELEMENT: Berkelium (Bk, Z=97)
+  // Periodic-table fill-in, batch 11 (Z=90-99, the actinide 'middle' -- a much
+  // richer real-data regime than batches 9-10). Real thermal conductivity value survives even here (10 W/(m*K)). Its practically-significant isotope, Bk-249, is the direct link to batch 9's tennessine discovery (used as the cyclotron target).
+  // ============================================================
+
+  elements.berkelium.identity:
+    core = builders.createIdentity("Berkelium", "Bk", 97, 247.0000, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "7440-40-6"
+
+  elements.berkelium.nuclear:
+    properties = builders.createNuclearCore(97, 152, 3.5, 0.00, 0.00)
+
+  elements.berkelium.isotopes::
+    builders.createIsotope(249, 0.0, 2.8270e+07, enums.DecayMode.ALPHA, 5.526, 0.0)
+    // Bk-249 used here instead of the nominally-longer-lived Bk-247 (TABLE mass reference) -- Bk-249 is the practically significant isotope, notably the target material used in the 2010 discovery of tennessine (batch 9). Bk-249 decays 99.99+% by beta-minus to Cf-249; the alpha branch shown is the minor (~0.001%) channel
+
+  elements.berkelium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f9 7s2", 3, 40.00, 6.22895, 0.0), // shared low-confidence actinide-analog placeholder -- no specific Bk calc found; work function not determined
+    quantum = builders.createQuantumNumbers(5, 3, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders
+    electronegativity = builders.createElectronegativity(1.30, 0.0, 0.0, 0.0, 0.0) // Pauling is a real, specifically-cited value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.berkelium.ionization_energies_kj_mol:: 601.0 // real measured/established values; IE1 only, further IEs not sourced
+
+  elements.berkelium.oxidation_states:: 2, 3, 4, 5
+
+  elements.berkelium.geometry:
+    radii = builders.createRadii(170.0, 0.0, 0.0),
+    molar_volume_cm3 = 16.71 // derived from mass/density, not independently sourced
+
+  elements.berkelium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.berkelium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 0.00, 0.00, 0.00, 90.0, 90.00, 90.0), // double-hcp
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.berkelium.thermodynamics:
+    phases = builders.createPhasePoints(1259.0, 2900.0, 0.0, 0.0, 0.0, 0.0), // real melting (beta phase)/boiling (beta phase) points; triple/critical points not sourced
+    thermal = builders.createThermalProps(7.92, 0.0, 0.000, 10.00, 0.000e+00, 0.0) // heat of fusion (calculated), vaporization, specific heat, thermal conductivity, expansion are real where nonzero; Debye temp not sourced
+
+  elements.berkelium.mechanical:
+    bulk = builders.createMechanicalProps(14.78, 0.0, 0.0, 0.0, 0.00, 0.0, 0.0) // density is real (alpha phase; beta phase separately measured at 13.25 g/cm3); elastic moduli/Poisson/hardness/sound speed are real where nonzero
+
+  elements.berkelium.electrical:
+    props = builders.createElectricalProps(0.0000e+00, 0.0000e+00, 0.0), // conductivity derived from real measured resistivity where nonzero; no band-gap data (metal)
+    type = "metallic conductor"
+
+  elements.berkelium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0000e+00, 0.0) // real measured magnetic ordering
+
+  elements.berkelium.optical:
+    refractive_index = 0.0, // not determined (opaque metal)
+    color = "silvery" // real, consistent across sources
+
+  elements.berkelium.interaction:
+    lennard_jones = builders.createLennardJones(6.541856, 2.974711), // UFF (Rappe 1992, via UFF.csv)
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface/adsorption/work-function data found
+
+  elements.berkelium.abundance:
+    distribution = builders.createAbundance(0.00e+00, 0.000e+00, 0.0000e+00, 0.0) // purely synthetic, no natural occurrence
+
+  elements.berkelium.discovery:
+    info = builders.createDiscovery(1949, "Stanley G. Thompson, Glenn T. Seaborg, Kenneth Street Jr., Albert Ghiorso", "USA", "Berkeley, California, home of Lawrence Berkeley National Laboratory, by analogy to terbium (named after Ytterby, Sweden)")
+
+  elements.berkelium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(601.0, 40.00, 1.30) // real nonzero value -- unlike batches 9-10, every element in this batch has a genuine sourced EN
+
+  // ============================================================
+  // ELEMENT: Californium (Cf, Z=98)
+  // Periodic-table fill-in, batch 11 (Z=90-99, the actinide 'middle' -- a much
+  // richer real-data regime than batches 9-10). Real Mohs hardness (3-4) despite most other mechanical/thermal/electrical fields being unfound. Its practically-significant isotope, Cf-252, is the standard portable neutron source used to start up nuclear reactors worldwide.
+  // ============================================================
+
+  elements.californium.identity:
+    core = builders.createIdentity("Californium", "Cf", 98, 251.0000, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "7440-71-3"
+
+  elements.californium.nuclear:
+    properties = builders.createNuclearCore(98, 154, 0.0, 0.00, 0.00)
+
+  elements.californium.isotopes::
+    builders.createIsotope(252, 0.0, 8.3476e+07, enums.DecayMode.ALPHA, 6.217, 20.6)
+    // Cf-252 used here instead of the nominally-longer-lived Cf-251 (TABLE mass reference) -- Cf-252 is the practically significant isotope: the standard portable spontaneous-fission neutron source (3.1% SF branch alongside the dominant 96.9% alpha branch shown here) used to start up nuclear reactors and in neutron radiography
+
+  elements.californium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f10 7s2", 3, 40.00, 6.30150, 0.0), // shared low-confidence actinide-analog placeholder -- no specific Cf calc found; work function not determined
+    quantum = builders.createQuantumNumbers(5, 3, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders
+    electronegativity = builders.createElectronegativity(1.30, 0.0, 0.0, 0.0, 0.0) // Pauling is a real, specifically-cited value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.californium.ionization_energies_kj_mol:: 608.0 // real measured/established values; IE1 only, further IEs not sourced
+
+  elements.californium.oxidation_states:: 2, 3, 4, 5
+
+  elements.californium.geometry:
+    radii = builders.createRadii(0.0, 0.0, 0.0),
+    molar_volume_cm3 = 16.62 // derived from mass/density, not independently sourced
+
+  elements.californium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.californium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 0.00, 0.00, 0.00, 90.0, 90.00, 90.0), // double-hcp
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.californium.thermodynamics:
+    phases = builders.createPhasePoints(1173.0, 1743.0, 0.0, 0.0, 0.0, 0.0), // real melting/boiling (estimation) points; triple/critical points not sourced
+    thermal = builders.createThermalProps(0.00, 0.0, 0.000, 0.00, 0.000e+00, 0.0) // heat of fusion, vaporization, specific heat, thermal conductivity, expansion are real where nonzero; Debye temp not sourced
+
+  elements.californium.mechanical:
+    bulk = builders.createMechanicalProps(15.10, 0.0, 0.0, 0.0, 0.00, 3.5, 0.0) // density is real; elastic moduli/Poisson/hardness/sound speed are real where nonzero
+
+  elements.californium.electrical:
+    props = builders.createElectricalProps(0.0000e+00, 0.0000e+00, 0.0), // conductivity derived from real measured resistivity where nonzero; no band-gap data (metal)
+    type = "metallic conductor"
+
+  elements.californium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0000e+00, 0.0) // real measured magnetic ordering
+
+  elements.californium.optical:
+    refractive_index = 0.0, // not determined (opaque metal)
+    color = "silvery" // real, consistent across sources
+
+  elements.californium.interaction:
+    lennard_jones = builders.createLennardJones(6.541856, 2.951547), // UFF (Rappe 1992, via UFF.csv)
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface/adsorption/work-function data found
+
+  elements.californium.abundance:
+    distribution = builders.createAbundance(0.00e+00, 0.000e+00, 0.0000e+00, 0.0) // purely synthetic, no natural occurrence
+
+  elements.californium.discovery:
+    info = builders.createDiscovery(1950, "Stanley G. Thompson, Kenneth Street Jr., Albert Ghiorso, Glenn T. Seaborg", "USA", "California and the University of California, by analogy to dysprosium's Greek 'hard to obtain' -- Cf sits directly below dysprosium")
+
+  elements.californium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(608.0, 40.00, 1.30) // real nonzero value -- unlike batches 9-10, every element in this batch has a genuine sourced EN
+
+  // ============================================================
+  // ELEMENT: Einsteinium (Es, Z=99)
+  // Periodic-table fill-in, batch 11 (Z=90-99, the actinide 'middle' -- a much
+  // richer real-data regime than batches 9-10). Discovered in the same 1952 Ivy Mike debris as fermium (batch 9). Both its unusually low density and its real, exceptionally low bulk modulus (15 GPa) are attributed to the same cause: continuous self-irradiation damage from ~1000 W/g of internal radioactive self-heating -- a genuinely unique physical situation among the elements in this table.
+  // ============================================================
+
+  elements.einsteinium.identity:
+    core = builders.createIdentity("Einsteinium", "Es", 99, 252.0000, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "7429-92-7"
+
+  elements.einsteinium.nuclear:
+    properties = builders.createNuclearCore(99, 154, 3.5, 0.00, 0.00)
+
+  elements.einsteinium.isotopes::
+    builders.createIsotope(253, 0.0, 1.7686e+06, enums.DecayMode.ALPHA, 6.739, 0.0)
+    // Es-253 used here instead of the nominally-longer-lived Es-252 (TABLE mass reference) -- Es-253 is the practically significant isotope, produced in the largest quantities and used for essentially all einsteinium chemistry studies. Es and Fm (batch 9) were discovered together in the same 1952 Ivy Mike thermonuclear debris
+
+  elements.einsteinium.electronic:
+    configuration = builders.createElectronicConfig("[Rn]5f11 7s2", 3, 40.00, 6.41551, 0.0), // shared low-confidence actinide-analog placeholder -- explicitly confirmed 'unknown' by EBSCO rather than just unfound; work function not determined
+    quantum = builders.createQuantumNumbers(5, 3, 0, 0.5), // (n,l) is the real differentiating subshell; ml/ms are structural placeholders
+    electronegativity = builders.createElectronegativity(1.30, 0.0, 0.0, 0.0, 0.0) // Pauling is a real, specifically-cited value; Mulliken/Allred-Rochow/Sanderson/Allen not sourced
+
+  elements.einsteinium.ionization_energies_kj_mol:: 619.0, 1158.0 // real measured/established values; IE1-2, further IEs not sourced
+
+  elements.einsteinium.oxidation_states:: 2, 3, 4
+
+  elements.einsteinium.geometry:
+    radii = builders.createRadii(0.0, 0.0, 0.0),
+    molar_volume_cm3 = 28.51 // derived from mass/density, not independently sourced
+
+  elements.einsteinium.ionic_radii::
+    // none specifically sourced this session
+
+  elements.einsteinium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 575.00, 0.00, 0.00, 90.0, 90.00, 90.0), // a lower-temperature hexagonal phase (a=398pm, c=650pm) has also been reported, converting to fcc above 573K
+    space_group = "not determined",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.einsteinium.thermodynamics:
+    phases = builders.createPhasePoints(1133.0, 1269.0, 0.0, 0.0, 0.0, 0.0), // real melting/boiling (estimated) points; triple/critical points not sourced
+    thermal = builders.createThermalProps(0.00, 0.0, 0.000, 0.00, 0.000e+00, 0.0) // heat of fusion, vaporization, specific heat, thermal conductivity, expansion are real where nonzero; Debye temp not sourced
+
+  elements.einsteinium.mechanical:
+    bulk = builders.createMechanicalProps(8.84, 0.0, 0.0, 15.0, 0.00, 0.0, 0.0) // density is real (real measured value, but notably REDUCED from what simple periodic trends would predict -- attributed to continuous self-irradiation lattice damage from Es's intense internal radioactivity (~1000 W/g of self-heating)); elastic moduli/Poisson/hardness/sound speed are real where nonzero -- real measured value -- exceptionally soft, among the lowest bulk moduli of any non-alkali metal, itself a consequence of the same self-irradiation damage noted under density
+
+  elements.einsteinium.electrical:
+    props = builders.createElectricalProps(0.0000e+00, 0.0000e+00, 0.0), // conductivity derived from real measured resistivity where nonzero; no band-gap data (metal)
+    type = "metallic conductor"
+
+  elements.einsteinium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0000e+00, 0.0) // -- most thermal/electrical/magnetic properties explicitly confirmed 'unknown' (EBSCO) due to Es's volatility and radioactivity -- PARAMAGNETIC used only as the generic default
+
+  elements.einsteinium.optical:
+    refractive_index = 0.0, // not determined (opaque metal)
+    color = "silvery" // real, consistent across sources
+
+  elements.einsteinium.interaction:
+    lennard_jones = builders.createLennardJones(6.038636, 2.939075), // UFF (Rappe 1992, via UFF.csv)
+    polarizability_angstrom3 = 0.0, // not sourced
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0) // no surface/adsorption/work-function data found
+
+  elements.einsteinium.abundance:
+    distribution = builders.createAbundance(0.00e+00, 0.000e+00, 0.0000e+00, 0.0) // purely synthetic, no natural occurrence
+
+  elements.einsteinium.discovery:
+    info = builders.createDiscovery(1952, "Ghiorso, Thompson et al. (LBNL/Argonne/Los Alamos, in Ivy Mike fallout, kept classified until 1955)", "USA", "Albert Einstein")
+
+  elements.einsteinium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(619.0, 40.00, 1.30) // real nonzero value -- unlike batches 9-10, every element in this batch has a genuine sourced EN
 
 )

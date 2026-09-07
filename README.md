@@ -32,7 +32,7 @@
 | `MidManStudio.Mdix` | C# / Unity | ✅ **NuGet** — `dotnet add package MidManStudio.Mdix` |
 | `mdix-go` · `mdix-java` · `mdix-lua` · `mdix-php` · `mdix-odin` | Go · Java/Kotlin · Lua · PHP · Odin | 🔨 Code-complete — publishing pass pending |
 | `mdix-c` | C / C++ | 🔨 Header + FFI stable — build from source |
-| VS Code · VS for Mac · IntelliJ | IDE extensions | ⏳ In progress |
+| VS Code · VS for Mac · IntelliJ | IDE extensions | Vs-Vs-Code Done , rest⏳ In progress |
 
 The C# prototype (`https://github.com/Mid-D-Man/DixScript`) remains the reference implementation for the language itself.
 
@@ -385,7 +385,7 @@ cargo add dixscript
 or in `Cargo.toml`:
 ```toml
 [dependencies]
-dixscript = "1.0"
+dixscript = "1.0.0"
 ```
 ```rust
 use dixscript::Runtime::DixLoader;
@@ -443,6 +443,9 @@ Full IDE integration (diagnostics, completion, hover) is implemented — wrap it
 **The rule of thumb:** If changing one field currently means editing it in more than three places, DixScript will help.
 
 ---
+
+## GitAds Sponsored
+[![Sponsored by GitAds](https://gitads.dev/v1/ad-serve?source=mid-d-man/dixscript-rust@github)](https://gitads.dev/v1/ad-track?source=mid-d-man/dixscript-rust@github)
 
 ## Contributing
 

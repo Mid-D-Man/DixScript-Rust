@@ -16,11 +16,11 @@
 )
 
 @DATA(
-  database_name = "Periodic Table Database - 109 Elements (Historic Alchemical Set + Periodic Fill-In Batches 1-7, 9-11)",
-  database_version = "1.11.0",
+  database_name = "Periodic Table Database - COMPLETE, all 118 Elements (Historic Alchemical Set + Periodic Fill-In Batches 1-11)",
+  database_version = "1.12.0",
   last_updated = 2026-09-06T00:00:00Z,
   format_type = "DixScript Physics Simulation Ready",
-  total_elements = 109,
+  total_elements = 118,
   properties_per_element = 126,
   simulation_ready = true,
   speed_of_light_m_s = 299792458.0,
@@ -5805,6 +5805,648 @@
 
   elements.lead.physics_calculated:
     reactivity_index = physics.calculateReactivityIndex(715.6, 35.1, 2.33)
+
+
+  // ============================================================
+  // ELEMENT: Platinum (Pt, Z=78)
+  // Opens batch 8 -- finishes period 6 entirely this batch (Pt/Tl/Bi/Po/At/Rn), then opens period 7 and the actinides (Fr/Ra/Ac/Th). UFF LJ. Anomalous [Xe] 4f14 5d9 6s1 ground-state config (not the 'expected' d8s2) -- a real, well-documented exception, same category of anomaly as Cu/Ag/Au's d10s1 and W's own d4s2 (batch 7) departures from naive filling order. Poisson ratio, shear, and bulk modulus here are DFT-computed (theoretical), not experimentally measured -- flagged since this is the first entry in the table sourced that way for a common, well-studied metal.
+  // ============================================================
+
+  elements.platinum.identity:
+    core = builders.createIdentity("Platinum", "Pt", 78, 195.084, enums.ElementGroup.TRANSITION_METAL, 6, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-06-4"
+
+  elements.platinum.nuclear:
+    properties = builders.createNuclearCore(78, 117, 0.5, 0.606, 0.0)
+
+  elements.platinum.isotopes::
+    builders.createIsotope(195, 33.78, 0.0, enums.DecayMode.STABLE, 0.0, 27.5),
+    builders.createIsotope(194, 32.86, 0.0, enums.DecayMode.STABLE, 0.0, 1.55),
+    builders.createIsotope(196, 25.21, 0.0, enums.DecayMode.STABLE, 0.0, 0.72)
+
+  elements.platinum.electronic:
+    configuration = builders.createElectronicConfig("[Xe] 4f14 5d9 6s1", 10, 205.04, 8.959, 5.65),
+    quantum = builders.createQuantumNumbers(5, 2, -2, 0.5),
+    electronegativity = builders.createElectronegativity(2.28, 1.58, 1.44, 1.3, 1.58)
+
+  elements.platinum.ionization_energies_kj_mol:: 864.4, 1791.0, 2800.0
+
+  elements.platinum.oxidation_states:: 2, 4
+
+  elements.platinum.geometry:
+    radii = builders.createRadii(136.0, 136.0, 175.0),
+    molar_volume_cm3 = 9.1
+
+  elements.platinum.ionic_radii::
+    builders.createIonicRadius(2, 76.5, 6)
+
+  elements.platinum.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 3.9242, 3.9242, 3.9242, 90.0, 90.0, 90.0),
+    space_group = "Fm-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.platinum.thermodynamics:
+    phases = builders.createPhasePoints(2041.4, 4098.0, 2041.4, 0.0, 7786.0, 100000000.0),
+    thermal = builders.createThermalProps(22.17, 469.0, 133.0, 71.6, 8.8e-06, 240.0)
+
+  elements.platinum.mechanical:
+    bulk = builders.createMechanicalProps(21.45, 168.0, 49.5, 248.0, 0.406, 3.5, 2680.0)
+
+  elements.platinum.electrical:
+    props = builders.createElectricalProps(9524000.0, 1.05e-07, 0.0),
+    type = "conductor (metal)"
+
+  elements.platinum.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 2e-05, 0.0)
+
+  elements.platinum.optical:
+    refractive_index = 2.3,
+    color = "silvery white"
+
+  elements.platinum.interaction:
+    lennard_jones = builders.createLennardJones(40.25757602290978, 2.4535350697584946),
+    polarizability_angstrom3 = 9.0,
+    polarizability_tensor = builders.createPolarizabilityTensor(9.0, 0.0, 0.0, 0.0, 9.0, 0.0, 0.0, 0.0, 9.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 5.65)
+
+  elements.platinum.abundance:
+    distribution = builders.createAbundance(0.005, 0.0013, 5e-07, 0.0)
+
+  elements.platinum.discovery:
+    info = builders.createDiscovery(1735, "Antonio de Ulloa", "Spain", "Spanish platina (little silver)")
+
+  elements.platinum.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(864.4, 205.04, 2.28)
+
+
+  // ============================================================
+  // ELEMENT: Thallium (Tl, Z=81)
+  // UFF LJ. Strong 'inert pair effect' -- the +1 oxidation state (from the 6s2 pair staying non-bonding) is actually MORE stable than +3 for Tl, the same relativistic mechanism responsible for Hg being liquid and Au being golden-colored. Toxic with no known biological role, unlike some of this batch's neighbors.
+  // ============================================================
+
+  elements.thallium.identity:
+    core = builders.createIdentity("Thallium", "Tl", 81, 204.383, enums.ElementGroup.POST_TRANSITION_METAL, 6, enums.Block.P_BLOCK, enums.ElementGroup.POST_TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-28-0"
+
+  elements.thallium.nuclear:
+    properties = builders.createNuclearCore(81, 124, 0.5, 1.6222, 0.0)
+
+  elements.thallium.isotopes::
+    builders.createIsotope(205, 70.5, 0.0, enums.DecayMode.STABLE, 0.0, 0.104),
+    builders.createIsotope(203, 29.5, 0.0, enums.DecayMode.STABLE, 0.0, 11.4)
+
+  elements.thallium.electronic:
+    configuration = builders.createElectronicConfig("[Xe] 4f14 5d10 6s2 6p1", 3, 36.37, 6.108, 3.84),
+    quantum = builders.createQuantumNumbers(6, 1, 0, 0.5),
+    electronegativity = builders.createElectronegativity(1.62, 1.44, 1.44, 1.44, 1.44)
+
+  elements.thallium.ionization_energies_kj_mol:: 589.4, 1971.0, 2878.0
+
+  elements.thallium.oxidation_states:: 1, 3
+
+  elements.thallium.geometry:
+    radii = builders.createRadii(170.0, 145.0, 196.0),
+    molar_volume_cm3 = 17.25
+
+  elements.thallium.ionic_radii::
+    builders.createIonicRadius(1, 150.0, 6)
+
+  elements.thallium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 3.4566, 3.4566, 5.5248, 90.0, 90.0, 120.0),
+    space_group = "P63/mmc",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.thallium.thermodynamics:
+    phases = builders.createPhasePoints(576.65, 1730.15, 576.65, 0.0, 3287.0, 100000000.0),
+    thermal = builders.createThermalProps(4.14, 165.0, 129.0, 46.1, 2.99e-05, 78.0)
+
+  elements.thallium.mechanical:
+    bulk = builders.createMechanicalProps(11.85, 8.0, 2.8, 43.0, 0.45, 1.2, 818.0)
+
+  elements.thallium.electrical:
+    props = builders.createElectricalProps(5556000.0, 1.8e-07, 0.0),
+    type = "conductor (metal)"
+
+  elements.thallium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -3.5e-06, 0.0)
+
+  elements.thallium.optical:
+    refractive_index = 1.5,
+    color = "silvery white with a bluish tinge"
+
+  elements.thallium.interaction:
+    lennard_jones = builders.createLennardJones(342.18939619473315, 3.872736727756055),
+    polarizability_angstrom3 = 7.6,
+    polarizability_tensor = builders.createPolarizabilityTensor(7.6, 0.0, 0.0, 0.0, 7.6, 0.0, 0.0, 0.0, 7.6),
+    surface = builders.createSurfaceProps(0.0, 0.0, 3.84)
+
+  elements.thallium.abundance:
+    distribution = builders.createAbundance(0.85, 0.0006, 2e-07, 0.0)
+
+  elements.thallium.discovery:
+    info = builders.createDiscovery(1861, "William Crookes", "England", "Greek thallos (green shoot/twig), for its bright green spectral line")
+
+  elements.thallium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(589.4, 36.37, 1.62)
+
+
+  // ============================================================
+  // ELEMENT: Bismuth (Bi, Z=83)
+  // UFF LJ. Bi-209, long assumed to be the heaviest STABLE isotope of any element, was found in 2003 to be very weakly alpha-radioactive (t1/2=2.01e19 years, over a billion times the age of the universe) -- treated as natural/stable-in-practice, same convention as Rb-87/V-50 etc., but genuinely worth noting since this discovery overturned a long-standing textbook assumption. Second-lowest thermal conductivity of any metal (after Hg) and the most diamagnetic of all metals -- both real, well-documented extremes.
+  // ============================================================
+
+  elements.bismuth.identity:
+    core = builders.createIdentity("Bismuth", "Bi", 83, 208.98, enums.ElementGroup.POST_TRANSITION_METAL, 6, enums.Block.P_BLOCK, enums.ElementGroup.POST_TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-69-9"
+
+  elements.bismuth.nuclear:
+    properties = builders.createNuclearCore(83, 126, 4.5, 4.1106, -0.516)
+
+  elements.bismuth.isotopes::
+    builders.createIsotope(209, 100.0, 6.34e+26, enums.DecayMode.ALPHA, 3.14, 0.034)
+
+  elements.bismuth.electronic:
+    configuration = builders.createElectronicConfig("[Xe] 4f14 5d10 6s2 6p3", 5, 90.92, 7.286, 4.34),
+    quantum = builders.createQuantumNumbers(6, 1, -1, 0.5),
+    electronegativity = builders.createElectronegativity(2.02, 1.9, 1.67, 1.56, 1.9)
+
+  elements.bismuth.ionization_energies_kj_mol:: 702.9, 1610.0, 2466.0
+
+  elements.bismuth.oxidation_states:: 3, 5
+
+  elements.bismuth.geometry:
+    radii = builders.createRadii(160.0, 148.0, 207.0),
+    molar_volume_cm3 = 21.37
+
+  elements.bismuth.ionic_radii::
+    builders.createIonicRadius(3, 103.0, 6)
+
+  elements.bismuth.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.RHOMBOHEDRAL, 4.7236, 4.7236, 4.7236, 57.35, 57.35, 57.35),
+    space_group = "R-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.bismuth.thermodynamics:
+    phases = builders.createPhasePoints(544.7, 1837.0, 544.7, 0.0, 3490.0, 100000000.0),
+    thermal = builders.createThermalProps(11.3, 104.8, 122.0, 7.97, 1.34e-05, 119.0)
+
+  elements.bismuth.mechanical:
+    bulk = builders.createMechanicalProps(9.78, 32.0, 12.0, 31.0, 0.33, 2.25, 1790.0)
+
+  elements.bismuth.electrical:
+    props = builders.createElectricalProps(775200.0, 1.29e-06, 0.0),
+    type = "conductor (metal), most diamagnetic of all metals"
+
+  elements.bismuth.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -0.000166, 0.0)
+
+  elements.bismuth.optical:
+    refractive_index = 1.5,
+    color = "silvery white with a pink tinge, often iridescent oxide tarnish"
+
+  elements.bismuth.interaction:
+    lennard_jones = builders.createLennardJones(260.6678047483408, 3.893227398273283),
+    polarizability_angstrom3 = 7.4,
+    polarizability_tensor = builders.createPolarizabilityTensor(7.4, 0.0, 0.0, 0.0, 7.4, 0.0, 0.0, 0.0, 7.4),
+    surface = builders.createSurfaceProps(0.0, 0.0, 4.34)
+
+  elements.bismuth.abundance:
+    distribution = builders.createAbundance(0.025, 0.0003, 2e-07, 0.0)
+
+  elements.bismuth.discovery:
+    info = builders.createDiscovery(1753, "Claude Francois Geoffroy", "France", "German Bisemutum, possibly from wismuth")
+
+  elements.bismuth.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(702.9, 90.92, 2.02)
+
+
+  // ============================================================
+  // ELEMENT: Polonium (Po, Z=84)
+  // THIRD ELEMENT IN THIS TABLE WITH NO STABLE ISOTOPES (after Tc batch 4, Pm batch 6). Alpha-Po's crystal structure (simple cubic, one atom per unit cell) is genuinely UNIQUE -- no other element adopts this structure at standard conditions, a real and notable structural fact, not a simplification. nuclear.properties uses Po-210 (the practically significant, famous isotope -- used in RTGs and infamous in the Litvinenko poisoning) rather than Po-209 (technically longer-lived), same deliberate-substitution convention as Tc-99/Pm-147. Present in trace natural amounts as a genuine (if minuscule) U-238 decay product -- abundance is not quite (0,0,0,0) the way Tc/Pm's is, reflecting that real difference.
+  // Several mechanical/thermal/electrical fields are estimates given how little bulk Po has ever existed for measurement (its intense radioactivity self-heats and complicates study) -- flagged rather than presented as solid.
+  // ============================================================
+
+  elements.polonium.identity:
+    core = builders.createIdentity("Polonium", "Po", 84, 209.0, enums.ElementGroup.METALLOID, 6, enums.Block.P_BLOCK, enums.ElementGroup.METALLOID, enums.Phase.SOLID),
+    cas_registry = "7440-08-6"
+
+  elements.polonium.nuclear:
+    properties = builders.createNuclearCore(84, 126, 0.0, 0.0, 0.0)
+
+  elements.polonium.isotopes::
+    builders.createIsotope(210, 0.0, 11960000.0, enums.DecayMode.ALPHA, 5.407, 0.0),
+    builders.createIsotope(209, 0.0, 3940000000.0, enums.DecayMode.ALPHA, 4.979, 0.0)
+
+  elements.polonium.electronic:
+    configuration = builders.createElectronicConfig("[Xe] 4f14 5d10 6s2 6p4", 6, 183.32, 8.414, 4.6),
+    quantum = builders.createQuantumNumbers(6, 1, 1, 0.5),
+    electronegativity = builders.createElectronegativity(2.0, 1.76, 1.67, 1.7, 1.76)
+
+  elements.polonium.ionization_energies_kj_mol:: 811.8, 1730.0
+
+  elements.polonium.oxidation_states:: -2, 2, 4
+
+  elements.polonium.geometry:
+    radii = builders.createRadii(153.0, 140.0, 197.0),
+    molar_volume_cm3 = 22.73
+
+  elements.polonium.ionic_radii::
+    builders.createIonicRadius(4, 94.0, 6)
+
+  elements.polonium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.CUBIC, 3.3591, 3.3591, 3.3591, 90.0, 90.0, 90.0),
+    space_group = "Pm-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.polonium.thermodynamics:
+    phases = builders.createPhasePoints(527.0, 1235.0, 527.0, 0.0, 2347.0, 100000000.0),
+    thermal = builders.createThermalProps(13.0, 102.91, 126.3, 20.0, 2.35e-05, 100.0)
+
+  elements.polonium.mechanical:
+    bulk = builders.createMechanicalProps(9.196, 26.0, 9.9, 27.0, 0.26, 2.0, 1260.0)
+
+  elements.polonium.electrical:
+    props = builders.createElectricalProps(2300000.0, 4.3e-07, 0.0),
+    type = "conductor/semimetal"
+
+  elements.polonium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -1e-05, 0.0)
+
+  elements.polonium.optical:
+    refractive_index = 1.5,
+    color = "silvery"
+
+  elements.polonium.interaction:
+    lennard_jones = builders.createLennardJones(163.54640259307098, 4.195242063722858),
+    polarizability_angstrom3 = 6.8,
+    polarizability_tensor = builders.createPolarizabilityTensor(6.8, 0.0, 0.0, 0.0, 6.8, 0.0, 0.0, 0.0, 6.8),
+    surface = builders.createSurfaceProps(0.0, 0.0, 4.6)
+
+  elements.polonium.abundance:
+    distribution = builders.createAbundance(2e-10, 0.0, 0.0, 0.0)
+
+  elements.polonium.discovery:
+    info = builders.createDiscovery(1898, "Marie Curie and Pierre Curie", "France/Poland", "named after Poland, Marie Curie's home country")
+
+  elements.polonium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(811.8, 183.32, 2.0)
+
+
+  // ============================================================
+  // ELEMENT: Astatine (At, Z=85)
+  // THE RAREST NATURALLY OCCURRING ELEMENT ON EARTH -- less than 1 gram is estimated to exist in the entire planet's crust at any given moment (continuously produced and decaying within the U/Th decay chains). NO ONE HAS EVER SEEN A VISIBLE, BULK SAMPLE OF ASTATINE -- every property below marked 0.0/unknown genuinely has no measurement, not just one this session didn't find; crystal_lattice, all mechanical/thermal/electrical/optical fields, and geometry.vdw_radius_pm and molar_volume_cm3 are honestly zeroed rather than estimated, because unlike the refractory-metal critical-point heuristic used elsewhere in this table (calibrated against real measured analogues), there is no comparably-solid basis for guessing At's bulk properties. IE1 (899.0 kJ/mol) and electronegativity (2.2) ARE real, commonly-cited theoretical/predicted values (not measured) -- flagged as such, included because they're genuinely useful predictions grounded in periodic trends, unlike the zeroed bulk-solid-state fields where even a trend-based guess would be closer to invention than prediction.
+  // ============================================================
+
+  elements.astatine.identity:
+    core = builders.createIdentity("Astatine", "At", 85, 210.0, enums.ElementGroup.HALOGEN, 6, enums.Block.P_BLOCK, enums.ElementGroup.HALOGEN, enums.Phase.SOLID),
+    cas_registry = "7440-68-8"
+
+  elements.astatine.nuclear:
+    properties = builders.createNuclearCore(85, 126, 4.5, 0.0, 0.0)
+
+  elements.astatine.isotopes::
+    builders.createIsotope(210, 0.0, 29160.0, enums.DecayMode.ELECTRON_CAPTURE, 3.98, 0.0),
+    builders.createIsotope(211, 0.0, 25920.0, enums.DecayMode.ALPHA, 5.98, 0.0)
+
+  elements.astatine.electronic:
+    configuration = builders.createElectronicConfig("[Xe] 4f14 5d10 6s2 6p5", 7, 270.16, 9.317, 4.6),
+    quantum = builders.createQuantumNumbers(6, 1, -1, 0.5),
+    electronegativity = builders.createElectronegativity(2.2, 1.96, 1.9, 2.8, 1.96)
+
+  elements.astatine.ionization_energies_kj_mol:: 899.0
+
+  elements.astatine.oxidation_states:: -1, 1
+
+  elements.astatine.geometry:
+    radii = builders.createRadii(150.0, 150.0, 202.0),
+    molar_volume_cm3 = 0.0
+
+  elements.astatine.ionic_radii::
+    builders.createIonicRadius(-1, 227.0, 6)
+
+  elements.astatine.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.CUBIC, 0.0, 0.0, 0.0, 90.0, 90.0, 90.0),
+    space_group = "unknown",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.astatine.thermodynamics:
+    phases = builders.createPhasePoints(575.0, 610.0, 0.0, 0.0, 0.0, 0.0),
+    thermal = builders.createThermalProps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+  elements.astatine.mechanical:
+    bulk = builders.createMechanicalProps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+  elements.astatine.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0),
+    type = "unknown -- never observed in bulk quantity"
+
+  elements.astatine.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, 0.0, 0.0)
+
+  elements.astatine.optical:
+    refractive_index = 0.0,
+    color = "unknown -- theoretically predicted to be a dark, possibly metallic-looking solid, genuinely untested"
+
+  elements.astatine.interaction:
+    lennard_jones = builders.createLennardJones(142.9143948813297, 4.231768911166611),
+    polarizability_angstrom3 = 0.0,
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0)
+
+  elements.astatine.abundance:
+    distribution = builders.createAbundance(2.5e-14, 0.0, 0.0, 0.0)
+
+  elements.astatine.discovery:
+    info = builders.createDiscovery(1940, "Dale R. Corson, Kenneth Ross MacKenzie, and Emilio Segre", "USA", "Greek astatos (unstable)")
+
+  elements.astatine.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(899.0, 270.16, 2.2)
+
+
+  // ============================================================
+  // ELEMENT: Radon (Rn, Z=86)
+  // CLOSES OUT PERIOD 6. Real gas-phase LJ, but NOT from the Poling et al. (2001) table used for every other real-LJ noble gas in this table (He/Ne/Ar/Kr/Xe) -- Poling simply doesn't cover Rn. Sourced instead from Magalhaes, Lito, Da Silva & Silva (2013), a real, separate gas-transport-property paper, flagged since it's a different specific citation than the rest of this table's real-LJ entries even though the underlying methodology (real measured gas transport data, not UFF) is the same category. Densest known gas at STP -- molar_volume_cm3 uses the simple ideal-gas value (22,400) rather than a liquid/solid-density-based figure the way lighter noble gases in this table do, since Rn's own liquid/solid density is far less commonly characterized given its radioactivity. No stable isotopes -- fourth such element in this table (after Tc, Pm, Po).
+  // ============================================================
+
+  elements.radon.identity:
+    core = builders.createIdentity("Radon", "Rn", 86, 222.0, enums.ElementGroup.NOBLE_GAS, 6, enums.Block.P_BLOCK, enums.ElementGroup.NOBLE_GAS, enums.Phase.GAS),
+    cas_registry = "10043-92-2"
+
+  elements.radon.nuclear:
+    properties = builders.createNuclearCore(86, 136, 0.0, 0.0, 0.0)
+
+  elements.radon.isotopes::
+    builders.createIsotope(222, 0.0, 330350.0, enums.DecayMode.ALPHA, 5.59, 0.7),
+    builders.createIsotope(220, 0.0, 55.6, enums.DecayMode.ALPHA, 6.405, 0.0),
+    builders.createIsotope(219, 0.0, 3.96, enums.DecayMode.ALPHA, 6.946, 0.0)
+
+  elements.radon.electronic:
+    configuration = builders.createElectronicConfig("[Xe] 4f14 5d10 6s2 6p6", 8, 0.0, 10.749, 0.0),
+    quantum = builders.createQuantumNumbers(6, 1, 0, 0.5),
+    electronegativity = builders.createElectronegativity(0.0, 0.0, 0.0, 0.0, 0.0)
+
+  elements.radon.ionization_energies_kj_mol:: 1037.1, 2000.0
+
+  elements.radon.oxidation_states:: 0
+
+  elements.radon.geometry:
+    radii = builders.createRadii(120.0, 150.0, 220.0),
+    molar_volume_cm3 = 22400.0
+
+  elements.radon.ionic_radii::
+    builders.createIonicRadius(0, 0.0, 0)
+
+  elements.radon.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 5.65, 5.65, 5.65, 90.0, 90.0, 90.0),
+    space_group = "Fm-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.radon.thermodynamics:
+    phases = builders.createPhasePoints(202.0, 211.5, 202.0, 70000.0, 377.0, 6280000.0),
+    thermal = builders.createThermalProps(2.9, 16.4, 94.0, 0.00364, 0.0, 0.0)
+
+  elements.radon.mechanical:
+    bulk = builders.createMechanicalProps(0.00973, 0.0, 0.0, 0.0, 0.0, 0.0, 110.0)
+
+  elements.radon.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0),
+    type = "insulator (gas)"
+
+  elements.radon.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -1e-09, 0.0)
+
+  elements.radon.optical:
+    refractive_index = 1.00113,
+    color = "colorless gas"
+
+  elements.radon.interaction:
+    lennard_jones = builders.createLennardJones(292.11, 4.10118),
+    polarizability_angstrom3 = 5.3,
+    polarizability_tensor = builders.createPolarizabilityTensor(5.3, 0.0, 0.0, 0.0, 5.3, 0.0, 0.0, 0.0, 5.3),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0)
+
+  elements.radon.abundance:
+    distribution = builders.createAbundance(4e-13, 0.0, 4e-16, 0.0)
+
+  elements.radon.discovery:
+    info = builders.createDiscovery(1900, "Friedrich Ernst Dorn", "Germany", "named after radium, its parent element in the decay chain")
+
+  elements.radon.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(1037.1, 0.0, 0.0)
+
+
+  // ============================================================
+  // ELEMENT: Francium (Fr, Z=87)
+  // Opens period 7. Even rarer than astatine by most estimates -- at most 20-30 grams of Fr are thought to exist in Earth's crust at any moment. LIKE ASTATINE, NEVER OBSERVED IN BULK -- crystal lattice constant, all thermal properties, and all mechanical moduli are theoretical estimates or explicitly zeroed/unknown, not measurements. electron_affinity_kj_mol (47.0) is a flagged theoretical estimate, NOT the value the `chemicals` Python package's baseline query returned (a bare 0.0) -- that 0.0 almost certainly reflects missing data rather than a real physical zero (unlike Rn's genuine noble-gas 0.0 immediately above), since Fr should chemically resemble Cs closely and Cs's own real EA is 45.5 kJ/mol; using the tool's bare default without this reasoning would have been a subtler, harder-to-catch version of the Kr/Xe electronegativity bug from earlier batches.
+  // spin and magnetic moment ARE real, measured values, remarkably -- obtained via laser spectroscopy on trapped Fr atoms despite the element's extreme rarity and short half-life, a genuinely impressive experimental achievement worth naming.
+  // ============================================================
+
+  elements.francium.identity:
+    core = builders.createIdentity("Francium", "Fr", 87, 223.0, enums.ElementGroup.ALKALI_METAL, 7, enums.Block.S_BLOCK, enums.ElementGroup.ALKALI_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-73-5"
+
+  elements.francium.nuclear:
+    properties = builders.createNuclearCore(87, 136, 1.5, 1.17, 0.0)
+
+  elements.francium.isotopes::
+    builders.createIsotope(223, 0.0, 1320.0, enums.DecayMode.BETA_MINUS, 1.149, 0.0)
+
+  elements.francium.electronic:
+    configuration = builders.createElectronicConfig("[Rn] 7s1", 1, 47.0, 4.073, 2.0),
+    quantum = builders.createQuantumNumbers(7, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(0.7, 0.68, 0.86, 0.2, 0.68)
+
+  elements.francium.ionization_energies_kj_mol:: 393.0
+
+  elements.francium.oxidation_states:: 1
+
+  elements.francium.geometry:
+    radii = builders.createRadii(348.0, 260.0, 348.0),
+    molar_volume_cm3 = 0.0
+
+  elements.francium.ionic_radii::
+    builders.createIonicRadius(1, 180.0, 6)
+
+  elements.francium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.BCC, 6.0, 6.0, 6.0, 90.0, 90.0, 90.0),
+    space_group = "Im-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.francium.thermodynamics:
+    phases = builders.createPhasePoints(300.0, 950.0, 0.0, 0.0, 0.0, 0.0),
+    thermal = builders.createThermalProps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+  elements.francium.mechanical:
+    bulk = builders.createMechanicalProps(1.87, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+  elements.francium.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0),
+    type = "conductor (metal), theoretical/predicted -- never isolated in bulk"
+
+  elements.francium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0, 0.0)
+
+  elements.francium.optical:
+    refractive_index = 0.0,
+    color = "unknown -- predicted golden/silvery like caesium"
+
+  elements.francium.interaction:
+    lennard_jones = builders.createLennardJones(25.160985014318612, 4.365403718887663),
+    polarizability_angstrom3 = 0.0,
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0)
+
+  elements.francium.abundance:
+    distribution = builders.createAbundance(1e-18, 0.0, 0.0, 0.0)
+
+  elements.francium.discovery:
+    info = builders.createDiscovery(1939, "Marguerite Perey", "France", "named after France, her home country")
+
+  elements.francium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(393.0, 47.0, 0.7)
+
+
+  // ============================================================
+  // ELEMENT: Radium (Ra, Z=88)
+  // UFF LJ. EA is a REAL value (0.0, effectively unbound) -- filled-7s2 pattern, same physical mechanism as Be/Mg/Ca/Cd's own real zeros, unlike Fr's bare-tool-default case immediately above. Historically THE archetypal radioactive element from the Curies' own work -- famously bioaccumulates in bone due to Ca2+ chemical similarity, the real cause of 'radium jaw' poisoning in early 20th-century factory workers (radium-dial painters), a genuine and well-documented historical/toxicological fact.
+  // Several mechanical fields (shear/bulk modulus, Poisson ratio, magnetic susceptibility) are estimates -- Ra's intense radioactivity has always limited how much bulk material could safely be characterized.
+  // ============================================================
+
+  elements.radium.identity:
+    core = builders.createIdentity("Radium", "Ra", 88, 226.0, enums.ElementGroup.ALKALINE_EARTH, 7, enums.Block.S_BLOCK, enums.ElementGroup.ALKALINE_EARTH, enums.Phase.SOLID),
+    cas_registry = "7440-14-4"
+
+  elements.radium.nuclear:
+    properties = builders.createNuclearCore(88, 138, 0.0, 0.0, 0.0)
+
+  elements.radium.isotopes::
+    builders.createIsotope(226, 0.0, 50490000000.0, enums.DecayMode.ALPHA, 4.871, 0.0)
+
+  elements.radium.electronic:
+    configuration = builders.createElectronicConfig("[Rn] 7s2", 2, 0.0, 5.279, 3.3),
+    quantum = builders.createQuantumNumbers(7, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(0.9, 0.89, 0.97, 0.85, 0.89)
+
+  elements.radium.ionization_energies_kj_mol:: 509.3, 979.0
+
+  elements.radium.oxidation_states:: 2
+
+  elements.radium.geometry:
+    radii = builders.createRadii(235.0, 221.0, 283.0),
+    molar_volume_cm3 = 41.09
+
+  elements.radium.ionic_radii::
+    builders.createIonicRadius(2, 148.0, 6)
+
+  elements.radium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.BCC, 5.148, 5.148, 5.148, 90.0, 90.0, 90.0),
+    space_group = "Im-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.radium.thermodynamics:
+    phases = builders.createPhasePoints(973.0, 2010.0, 973.0, 0.0, 3819.0, 100000000.0),
+    thermal = builders.createThermalProps(8.5, 113.0, 94.0, 18.6, 2e-05, 90.0)
+
+  elements.radium.mechanical:
+    bulk = builders.createMechanicalProps(5.5, 13.0, 0.0, 0.0, 0.0, 0.0, 1000.0)
+
+  elements.radium.electrical:
+    props = builders.createElectricalProps(1000000.0, 1e-06, 0.0),
+    type = "conductor (metal)"
+
+  elements.radium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 5e-07, 0.0)
+
+  elements.radium.optical:
+    refractive_index = 0.0,
+    color = "silvery white, rapidly tarnishes black in air"
+
+  elements.radium.interaction:
+    lennard_jones = builders.createLennardJones(203.3007589156944, 3.2758345866020275),
+    polarizability_angstrom3 = 0.0,
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 3.3)
+
+  elements.radium.abundance:
+    distribution = builders.createAbundance(9e-07, 0.0, 0.0, 0.0)
+
+  elements.radium.discovery:
+    info = builders.createDiscovery(1898, "Marie Curie and Pierre Curie", "France/Poland", "Latin radius (ray)")
+
+  elements.radium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(509.3, 0.0, 0.9)
+
+
+  // ============================================================
+  // ELEMENT: Actinium (Ac, Z=89)
+  // OPENS THE ACTINIDE SERIES -- Ac is La's direct actinide homolog: same [Rn/Xe] (n-1)d1 ns2 configuration pattern, same real Pauling electronegativity (1.1, identical to La's), and the largest 3+ ionic radius in its own series just as La3+ is the largest lanthanide ion. EA (33.0 kJ/mol) is a flagged theoretical estimate following that same La-homology reasoning, NOT the `chemicals` package's bare 0.0 default -- same reasoning and same caution as Fr's EA note above (this default-vs-real-zero distinction matters for two elements in a row in this batch).
+  // Extremely rare (found only as a uranium-ore decay product); most mechanical/thermal fields are estimates given how little bulk Ac has ever been characterized.
+  // ============================================================
+
+  elements.actinium.identity:
+    core = builders.createIdentity("Actinium", "Ac", 89, 227.0, enums.ElementGroup.ACTINIDE, 7, enums.Block.F_BLOCK, enums.ElementGroup.ACTINIDE, enums.Phase.SOLID),
+    cas_registry = "7440-34-8"
+
+  elements.actinium.nuclear:
+    properties = builders.createNuclearCore(89, 138, 1.5, 1.1, 1.7)
+
+  elements.actinium.isotopes::
+    builders.createIsotope(227, 0.0, 687100000.0, enums.DecayMode.BETA_MINUS, 0.045, 0.0)
+
+  elements.actinium.electronic:
+    configuration = builders.createElectronicConfig("[Rn] 6d1 7s2", 3, 33.0, 5.169, 3.4),
+    quantum = builders.createQuantumNumbers(6, 2, -2, 0.5),
+    electronegativity = builders.createElectronegativity(1.1, 1.09, 1.0, 0.55, 1.09)
+
+  elements.actinium.ionization_energies_kj_mol:: 499.0, 1170.0
+
+  elements.actinium.oxidation_states:: 3
+
+  elements.actinium.geometry:
+    radii = builders.createRadii(195.0, 215.0, 0.0),
+    molar_volume_cm3 = 22.54
+
+  elements.actinium.ionic_radii::
+    builders.createIonicRadius(3, 112.0, 6)
+
+  elements.actinium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 5.31, 5.31, 5.31, 90.0, 90.0, 90.0),
+    space_group = "Fm-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.actinium.thermodynamics:
+    phases = builders.createPhasePoints(1500.0, 3500.0, 1500.0, 0.0, 6650.0, 100000000.0),
+    thermal = builders.createThermalProps(14.0, 400.0, 120.0, 12.0, 0.0, 0.0)
+
+  elements.actinium.mechanical:
+    bulk = builders.createMechanicalProps(10.07, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+  elements.actinium.electrical:
+    props = builders.createElectricalProps(700000.0, 1.4e-06, 0.0),
+    type = "conductor (metal)"
+
+  elements.actinium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 0.0, 0.0)
+
+  elements.actinium.optical:
+    refractive_index = 0.0,
+    color = "silvery white -- glows pale blue in the dark from intense radioactivity-induced air ionization, a real and unique visual fact among elements"
+
+  elements.actinium.interaction:
+    lennard_jones = builders.createLennardJones(16.606250109450286, 3.0985457416921003),
+    polarizability_angstrom3 = 0.0,
+    polarizability_tensor = builders.createPolarizabilityTensor(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 3.4)
+
+  elements.actinium.abundance:
+    distribution = builders.createAbundance(5.5e-10, 0.0, 0.0, 0.0)
+
+  elements.actinium.discovery:
+    info = builders.createDiscovery(1899, "Andre-Louis Debierne", "France", "Greek aktinos (ray, beam)")
+
+  elements.actinium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(499.0, 33.0, 1.1)
+
 
   // ============================================================
   // ELEMENT: Fermium (Fm, Z=100)

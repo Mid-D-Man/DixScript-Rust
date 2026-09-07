@@ -1,0 +1,277 @@
+{
+  "build": "1",
+  "branch": "master",
+  "commit": "cbb793e9",
+  "date": "",
+  "compiler_version": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "cmake_version": "cmake version 3.31.6",
+  "package": "mdix-c",
+  "tests": {
+    "status": "success",
+    "total": 40,
+    "passed": 40,
+    "failed": 0,
+    "duration_s": 0.0,
+    "failed_names": []
+  },
+  "suites": [
+    {
+      "name": "mdix_c_api_tests",
+      "package": null,
+      "passed": 20,
+      "failed": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "load_str_and_get_values",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "load_str_malformed_returns_null",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "is_compressed_and_is_encrypted_false_for_plain_load",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "get_loaded_version_returns_nonempty_string",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "get_all_keys_covers_nested_paths",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "select_many_as_json_returns_valid_json_array",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "select_many_as_json_no_match_returns_empty_array",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "validate_accepts_wellformed_source",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "validate_rejects_malformed_source",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_sources_default_weights_primary_wins",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_sources_secondary_wins_strategy",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_sources_weighted_explicit_weights",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_sources_array_strategy_concat",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_sources_throw_on_conflict_fails",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_sources_empty_count_fails",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "builder_from_handle_carries_over_root_values",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "watcher_reports_change_on_first_check",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "watcher_missing_file_reports_error",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "strip_comments_removes_comment_text",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "compact_source_roundtrips_through_validate",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "mdix_cpp_wrapper_tests",
+      "package": null,
+      "passed": 20,
+      "failed": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "database_load_str_and_typed_getters",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "database_load_str_malformed_is_error",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "is_compressed_and_is_encrypted_false_for_plain_load",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "get_loaded_version_returns_nonempty",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "get_all_keys_covers_nested_paths",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "query_many_returns_json_array",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "validate_accepts_and_rejects",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_sources_default_weights_primary_wins",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_sources_secondary_wins_strategy",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_sources_weighted_explicit_weights",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_sources_weighted_mismatched_lengths_is_error",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_sources_array_strategy_concat_dedup",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_sources_throw_on_conflict_fails",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_sources_empty_list_is_error",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "builder_from_handle_round_trips_and_saves",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "watcher_reports_change_and_reloads",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "watcher_force_reload_reloads_unconditionally",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "watcher_missing_file_reports_error",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "strip_comments_removes_comment_text",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "compact_source_roundtrips_through_validate",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        }
+      ]
+    }
+  ]
+}

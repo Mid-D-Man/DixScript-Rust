@@ -16,10 +16,20 @@
 
     .dependencies = .{},
 
+    // FIX: "mdix" was missing from this list. build.zig's `mdix` module
+    // (b.addModule("mdix", .{ .root_source_file = b.path("mdix/mdix.zig") }))
+    // and its tests (mdix/tests/tests.zig) both live under mdix/, but only
+    // mdix_ffi was declared here. `zig fetch` only copies declared `.paths`
+    // into a consumer's local package cache — anyone depending on this
+    // package via a tagged ref or tarball URL would have had mdix/ silently
+    // stripped, and `@import("mdix")` would fail to resolve on their end
+    // despite building fine in-repo. Confirmed directly against build.zig's
+    // actual b.addModule()/b.path() calls, not assumed.
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "mdix_ffi",
+        "mdix",
         "examples",
         "README.md",
     },

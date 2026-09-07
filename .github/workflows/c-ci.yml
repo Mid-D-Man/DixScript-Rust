@@ -1,0 +1,416 @@
+name: DixScript — C/C++ Package CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Force run regardless of commit message'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+
+  # ── Step 1: decide whether this workflow should run ──────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - name: Decide whether to run C/C++ CI
+        id: decide
+        run: |
+          RUN=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-c' && RUN=true || true
+          fi
+          echo "should_run=$RUN" >> $GITHUB_OUTPUT
+          echo "C/C++ CI triggered: $RUN"
+
+  # ── Step 2: build Rust FFI, configure/build mdix-c via CMake, run both
+  #    self-contained test binaries directly (no ctest wrapper — same
+  #    "run it, tee it, trust the exit code" idiom zig-ci.yml/odin-ci.yml
+  #    already use for their own suites) ─────────────────────────────────────
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.should_run == 'true'
+    outputs:
+      status:          ${{ steps.result.outputs.status }}
+      total:           ${{ steps.result.outputs.total }}
+      passed:          ${{ steps.result.outputs.passed }}
+      failed:          ${{ steps.result.outputs.failed }}
+      duration_s:      ${{ steps.result.outputs.duration_s }}
+      compiler_ver:    ${{ steps.toolver.outputs.compiler_ver }}
+      cmake_ver:       ${{ steps.toolver.outputs.cmake_ver }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Rust toolchain — builds mdix-ffi, same as every other wrapper's CI ────
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-c-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-c-
+
+      - name: Build mdix-ffi (generates libmdix_ffi.so)
+        run: |
+          cargo build -p mdix-ffi --release
+          ls -lh target/release/libmdix_ffi.so
+
+      # ── Place the built lib where mdix-c/CMakeLists.txt looks for it ─────────
+      # (its non-Windows/non-Apple branch searches
+      # ${CMAKE_CURRENT_SOURCE_DIR}/lib/linux-x64 with NO_DEFAULT_PATH — see
+      # mdix-c/CMakeLists.txt and mdix-c/README.md's "Download" layout, which
+      # this mirrors exactly so a real user's manual setup matches CI's.)
+      - name: Stage mdix_ffi for CMake
+        run: |
+          mkdir -p mdix-c/lib/linux-x64
+          cp target/release/libmdix_ffi.so mdix-c/lib/linux-x64/libmdix_ffi.so
+          ls -lh mdix-c/lib/linux-x64/
+
+      - name: Toolchain versions
+        id: toolver
+        run: |
+          echo "compiler_ver=$(cc --version | head -n1)" >> $GITHUB_OUTPUT
+          echo "cmake_ver=$(cmake --version | head -n1)" >> $GITHUB_OUTPUT
+
+      # ── Configure + build — mdix-c already has a real CMakeLists.txt with
+      #    an MDIX_BUILD_TESTS option that registers both test binaries; no
+      #    build system needs inventing here ────────────────────────────────
+      - name: Configure (CMake)
+        run: |
+          cmake -S mdix-c -B mdix-c/build \
+            -DMDIX_BUILD_TESTS=ON \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (CMake)
+        run: cmake --build mdix-c/build --parallel
+
+      # ── Run each test binary directly rather than through ctest — ctest
+      #    would need `-V` to surface the per-test PASS/ok output this
+      #    project's report page wants, so cut it out and run+tee directly,
+      #    the same idiom test-ffi/test-mdix already use in zig-ci.yml.
+      #    mdix_test_c/mdix_test_cpp both load libmdix_ffi.so at runtime
+      #    (CMakeLists.txt only sets LD_LIBRARY_PATH for ctest-invoked runs,
+      #    so it's set by hand here). ──────────────────────────────────────
+      - name: Run mdix_test_c (C API)
+        id: test-c
+        continue-on-error: true
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/mdix-c/lib/linux-x64
+        run: |
+          START=$(date +%s)
+          ./mdix-c/build/mdix_test_c 2>&1 | tee c-test-output.txt
+          TEST_EXIT=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "C_EXIT=$TEST_EXIT"           >> $GITHUB_ENV
+          echo "C_DURATION_S=$((END - START))" >> $GITHUB_ENV
+          exit 0
+
+      - name: Run mdix_test_cpp (C++ wrapper)
+        id: test-cpp
+        continue-on-error: true
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/mdix-c/lib/linux-x64
+        run: |
+          START=$(date +%s)
+          ./mdix-c/build/mdix_test_cpp 2>&1 | tee cpp-test-output.txt
+          TEST_EXIT=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "CPP_EXIT=$TEST_EXIT"           >> $GITHUB_ENV
+          echo "CPP_DURATION_S=$((END - START))" >> $GITHUB_ENV
+          exit 0
+
+      # ── Parse both binaries' own text output into per-test pass/fail.
+      #    Each RUN() macro prints "  <45-char-padded-name>" with no
+      #    trailing newline, then the test body's first CHECK() appends
+      #    "ok\n"/"FAIL (file:line: expr)\n" on that same line — so that
+      #    first result line carries the name. A test with more than one
+      #    CHECK() prints its later results as bare "ok"/"FAIL ..." lines
+      #    with no name prefix, so the last-seen name is tracked and any
+      #    such bare FAIL flips that test to failed and appends the detail.
+      #    Confirmed against the real source (mdix-c/tests/test_mdix_c.c,
+      #    test_mdix_cpp.cpp's TEST/RUN/CHECK macros), not guessed. ────────
+      - name: Parse test results
+        id: result
+        if: always()
+        run: |
+          python3 - << 'PYEOF'
+          import json, os, re
+
+          # Non-greedy name group, zero-or-more (not one-or-more) separator:
+          # printf("  %-45s", name) only pads with spaces up to width 45 —
+          # a name of 45+ chars (several real ones are, e.g.
+          # is_compressed_and_is_encrypted_false_for_plain_load at 51) gets
+          # NO padding at all and glues directly onto "ok"/"FAIL" with zero
+          # spaces between them. A fixed "\s+" here silently dropped every
+          # such test from the report entirely — confirmed by simulating
+          # the real macros' exact output, not assumed. Safe against the
+          # current 40 real test names (none contain "ok" or "FAIL" as a
+          # substring, checked directly) but a *future* test named e.g.
+          # "...returns_ok" would need re-checking against this pattern.
+          NAMED_RE = re.compile(r'^  ([A-Za-z_][A-Za-z0-9_]*?)\s*(ok|FAIL\b.*)$')
+          BARE_RE  = re.compile(r'^(ok|FAIL\b.*)$')
+
+          def parse_binary_output(path):
+              tests = []
+              if not os.path.exists(path):
+                  return tests
+              with open(path, encoding="utf-8", errors="replace") as f:
+                  lines = f.read().splitlines()
+              current = None
+              for line in lines:
+                  m = NAMED_RE.match(line)
+                  if m:
+                      name, result = m.groups()
+                      status = "passed" if result == "ok" else "failed"
+                      tests.append({
+                          "name": name, "status": status,
+                          "duration_ms": None,
+                          "output": "" if status == "passed" else result,
+                      })
+                      current = tests[-1]
+                      continue
+                  m = BARE_RE.match(line)
+                  if m and current is not None:
+                      result = m.group(1)
+                      if result != "ok":
+                          current["status"] = "failed"
+                          sep = "\n" if current["output"] else ""
+                          current["output"] = current["output"] + sep + result
+              return tests
+
+          def suite_from(name, path, duration_s):
+              tests = parse_binary_output(path)
+              passed = sum(1 for t in tests if t["status"] == "passed")
+              failed = sum(1 for t in tests if t["status"] == "failed")
+              return {
+                  "name": name, "package": None,
+                  "passed": passed, "failed": failed,
+                  "duration_s": duration_s, "tests": tests,
+              }
+
+          def f_env(key):
+              try:
+                  return float(os.environ.get(key, "0") or 0)
+              except ValueError:
+                  return 0.0
+
+          c_suite   = suite_from("mdix_c_api_tests",       "c-test-output.txt",   f_env("C_DURATION_S"))
+          cpp_suite = suite_from("mdix_cpp_wrapper_tests", "cpp-test-output.txt", f_env("CPP_DURATION_S"))
+
+          # Exit code is the authoritative pass/fail signal, decoupled from
+          # whatever the text happened to parse to — same split zig-ci.yml's
+          # parser keeps for its own suites (a crash mid-run could exit
+          # non-zero without ever printing a FAIL line the parser above
+          # would catch).
+          c_exit_ok   = os.environ.get("C_EXIT",   "1") == "0"
+          cpp_exit_ok = os.environ.get("CPP_EXIT", "1") == "0"
+
+          with open("c-results-raw.json", "w", encoding="utf-8") as f:
+              json.dump({"suites": [c_suite, cpp_suite]}, f, indent=2)
+
+          total     = c_suite["passed"] + c_suite["failed"] + cpp_suite["passed"] + cpp_suite["failed"]
+          passed    = c_suite["passed"] + cpp_suite["passed"]
+          failed    = c_suite["failed"] + cpp_suite["failed"]
+          duration  = c_suite["duration_s"] + cpp_suite["duration_s"]
+          status    = "success" if (c_exit_ok and cpp_exit_ok and failed == 0) else "failed"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"status={status}\n")
+              out.write(f"total={total}\n")
+              out.write(f"passed={passed}\n")
+              out.write(f"failed={failed}\n")
+              out.write(f"duration_s={duration}\n")
+
+          print(f"status={status} total={total} passed={passed} failed={failed}")
+          PYEOF
+
+      - name: Upload raw results + logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c-test-output-${{ github.run_number }}
+          path: |
+            c-results-raw.json
+            c-test-output.txt
+            cpp-test-output.txt
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ── Step 3: build the report page, deploy to gh-pages ─────────────────────────
+  collect-and-deploy:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test]
+    if: |
+      always() &&
+      needs.parse-trigger.outputs.should_run == 'true' &&
+      needs.build-and-test.result != 'skipped'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download raw results
+        uses: actions/download-artifact@v4
+        with:
+          name: c-test-output-${{ github.run_number }}
+          path: c-test-artifact/
+        continue-on-error: true
+
+      - name: Generate c-results.json
+        env:
+          BUILD_NUM:      ${{ github.run_number }}
+          BRANCH:         ${{ github.ref_name }}
+          COMMIT:         ${{ github.sha }}
+          BUILD_DATE:     ${{ github.event.head_commit.timestamp }}
+          COMPILER_VER:   ${{ needs.build-and-test.outputs.compiler_ver || 'unknown' }}
+          CMAKE_VER:      ${{ needs.build-and-test.outputs.cmake_ver    || 'unknown' }}
+          TEST_STATUS:    ${{ needs.build-and-test.outputs.status       || 'skipped' }}
+          TEST_TOTAL:     ${{ needs.build-and-test.outputs.total        || '0' }}
+          TEST_PASSED:    ${{ needs.build-and-test.outputs.passed       || '0' }}
+          TEST_FAILED:    ${{ needs.build-and-test.outputs.failed       || '0' }}
+          TEST_DURATION_S: ${{ needs.build-and-test.outputs.duration_s  || '0' }}
+        run: |
+          python3 - << 'PYEOF'
+          import json, os
+
+          def int_env(key):
+              try:
+                  return int(os.environ.get(key, "0"))
+              except ValueError:
+                  return 0
+
+          def float_env(key):
+              try:
+                  return float(os.environ.get(key, "0"))
+              except ValueError:
+                  return 0.0
+
+          suites = []
+          raw_path = "c-test-artifact/c-results-raw.json"
+          if os.path.exists(raw_path):
+              with open(raw_path, encoding="utf-8") as f:
+                  raw = json.load(f)
+              suites = raw.get("suites", [])
+
+          result = {
+              "build":            os.environ.get("BUILD_NUM",  "0"),
+              "branch":           os.environ.get("BRANCH",     "unknown"),
+              "commit":           os.environ.get("COMMIT",     "unknown")[:8],
+              "date":             os.environ.get("BUILD_DATE", ""),
+              "compiler_version": os.environ.get("COMPILER_VER", "unknown"),
+              "cmake_version":    os.environ.get("CMAKE_VER",    "unknown"),
+              "package":          "mdix-c",
+              "tests": {
+                  "status":       os.environ.get("TEST_STATUS", "skipped"),
+                  "total":        int_env("TEST_TOTAL"),
+                  "passed":       int_env("TEST_PASSED"),
+                  "failed":       int_env("TEST_FAILED"),
+                  "duration_s":   float_env("TEST_DURATION_S"),
+                  "failed_names": [],
+              },
+              "suites": suites,
+          }
+
+          with open("c-results.json", "w", encoding="utf-8") as f:
+              json.dump(result, f, indent=2)
+          print(json.dumps(result, indent=2))
+          PYEOF
+
+      - name: Build HTML report
+        run: |
+          cp .github/c-test-template.html c-test-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  c-test-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       c-test-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            c-test-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     c-test-index.html
+          # c-test-template.html is a copy of zig-test-template.html (itself
+          # copied from odin-test-template.html / go-test-template.html) —
+          # its fetch() call still names the JSON file go-results.json
+          # literally; point it at this package's file, same as every other
+          # per-language CI does for its own.
+          sed -i "s/go-results\.json/c-results\.json/g"                c-test-index.html
+
+      # NOTE: this deploys the test-results page to /c/ (top level), the
+      # same convention every other language's CI uses for its own results
+      # page (/zig/, /odin/, /go/, ...). c-publish.yml and c-release.yml
+      # currently *also* deploy a build-info page directly to /c/index.html
+      # — whichever workflow runs last will overwrite the other's page at
+      # that path. odin-release.yml avoids exactly this collision by nesting
+      # its own build-info page at /odin/release/ instead of /odin/. Worth
+      # moving c-publish.yml/c-release.yml's deploy-page target to /c/release/
+      # to match — not done here since it wasn't part of this task and touches
+      # workflows this change didn't ask to modify.
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          mkdir -p "$WORK/c" "$WORK/c/builds/build_${BUILD_NUM}"
+
+          cp c-results.json "$WORK/c/c-results.json"
+          cp c-results.json "$WORK/c/builds/build_${BUILD_NUM}/c-results.json"
+
+          cp c-test-index.html "$WORK/c/index.html"
+          cp c-test-index.html "$WORK/c/builds/build_${BUILD_NUM}/index.html"
+
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "DixScript C/C++ CI — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+
+  # ── Step 4: print summary ─────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test, collect-and-deploy]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "======================================================="
+          echo "  DixScript — C/C++ Package CI Summary"
+          echo "======================================================="
+          echo "Build:     #${{ github.run_number }}"
+          echo "Branch:    ${{ github.ref_name }}"
+          echo "Compiler:  ${{ needs.build-and-test.outputs.compiler_ver || 'n/a' }}"
+          echo "CMake:     ${{ needs.build-and-test.outputs.cmake_ver    || 'n/a' }}"
+          echo "Tests:     ${{ needs.build-and-test.result || 'skipped' }} " \
+               "(${{ needs.build-and-test.outputs.passed || 0 }}/${{ needs.build-and-test.outputs.total || 0 }} passed)"
+          echo "Deploy:    ${{ needs.collect-and-deploy.result || 'skipped' }}"
+          echo ""
+          echo "C/C++ results: https://mid-d-man.github.io/DixScript-Rust/c/"

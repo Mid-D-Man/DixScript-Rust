@@ -68,8 +68,22 @@ jobs:
           java-version: '11'
           distribution: 'temurin'
 
+      # NOTE: mdix-java/ has no committed Gradle wrapper (no gradlew,
+      # gradlew.bat, or gradle/wrapper/) — `./gradlew test` fails
+      # immediately with "No such file or directory" before anything
+      # else runs. Rather than generating one (needs a real Gradle
+      # install + network access to services.gradle.org to do properly),
+      # tell setup-gradle to download and install a specific Gradle
+      # version directly instead — its documented "project doesn't use
+      # the Gradle Wrapper" mode. 8.5 is the newest version still fully
+      # inside Kotlin Gradle Plugin 1.9.23's officially-supported range
+      # (this build uses kotlin("jvm") version "1.9.23" — see
+      # build.gradle.kts); confirmed against Gradle's own compatibility
+      # docs, not guessed, though this is still a first real run.
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
 
       # ── Build Rust JNI library ────────────────────────────────────────────────
       - name: Build mdix-java native lib
@@ -92,7 +106,7 @@ jobs:
         working-directory: mdix-java
         run: |
           START=$(date +%s)
-          ./gradlew test --no-daemon 2>&1 | tee test-output.txt
+          gradle test --no-daemon 2>&1 | tee test-output.txt
           TEST_EXIT=${PIPESTATUS[0]}
           END=$(date +%s)
           echo "TEST_EXIT=$TEST_EXIT"          >> $GITHUB_ENV

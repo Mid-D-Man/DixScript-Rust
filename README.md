@@ -5,7 +5,7 @@
 </p>
 
   
-                                     **Config, Code, and Crypto in One `.mdix` File**
+  **Config, Code, and Crypto in One `.mdix` File**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org/)

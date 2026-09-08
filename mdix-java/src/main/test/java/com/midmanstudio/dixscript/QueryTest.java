@@ -23,8 +23,8 @@ class QueryTest {
         "    { name = \"Dragon\", health = 1000, aiType = \"BOSS\" }, " +
         "    { name = \"Slime\", health = 20, aiType = \"PASSIVE\" } " +
         "  levels:: " +
-        "    { id = 1, enemies:: { name = \"Rat\", health = 5, aiType = \"PASSIVE\" } }, " +
-        "    { id = 2, enemies:: { name = \"Bat\", health = 8, aiType = \"PASSIVE\" } } " +
+        "    { id = 1, enemies = [{ name = \"Rat\", health = 5, aiType = \"PASSIVE\" }] }, " +
+        "    { id = 2, enemies = [{ name = \"Bat\", health = 8, aiType = \"PASSIVE\" }] } " +
         ")";
 
     private Database db;

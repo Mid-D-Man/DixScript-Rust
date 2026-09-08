@@ -22,7 +22,7 @@ merge_primary_wins :: proc(t: ^testing.T) {
 	db, conflicts, ok := mdix.merge_sources({MERGE_PRIMARY, MERGE_SECONDARY}, .Primary_Wins, .Replace)
 	testing.expect(t, ok, "merge_sources should succeed")
 	defer mdix.destroy(&db)
-	defer delete(conflicts)
+	defer mdix.destroy_merge_conflicts(conflicts)
 
 	name, ok2 := mdix.get_string(db, "app_name")
 	defer delete(name)
@@ -41,7 +41,7 @@ merge_secondary_wins :: proc(t: ^testing.T) {
 	db, conflicts, ok := mdix.merge_sources({MERGE_PRIMARY, MERGE_SECONDARY}, .Secondary_Wins, .Replace)
 	testing.expect(t, ok, "merge_sources should succeed")
 	defer mdix.destroy(&db)
-	defer delete(conflicts)
+	defer mdix.destroy_merge_conflicts(conflicts)
 
 	name, ok2 := mdix.get_string(db, "app_name")
 	defer delete(name)
@@ -62,7 +62,7 @@ merge_no_conflicts_does_not_throw :: proc(t: ^testing.T) {
 	db, conflicts, ok := mdix.merge_sources({a, b}, .Throw_On_Conflict, .Replace)
 	testing.expect(t, ok, "merge with no actual conflicts should not fail under Throw_On_Conflict")
 	defer mdix.destroy(&db)
-	defer delete(conflicts)
+	defer mdix.destroy_merge_conflicts(conflicts)
 	testing.expect_value(t, len(conflicts), 0)
 }
 
@@ -78,7 +78,7 @@ merge_weighted :: proc(t: ^testing.T) {
 	)
 	testing.expect(t, ok, "merge_sources_weighted should succeed")
 	defer mdix.destroy(&db)
-	defer delete(conflicts)
+	defer mdix.destroy_merge_conflicts(conflicts)
 
 	name, ok2 := mdix.get_string(db, "app_name")
 	defer delete(name)
@@ -91,7 +91,7 @@ merge_array_concat :: proc(t: ^testing.T) {
 	db, conflicts, ok := mdix.merge_sources({MERGE_PRIMARY, MERGE_SECONDARY}, .Primary_Wins, .Concat)
 	testing.expect(t, ok, "merge_sources should succeed")
 	defer mdix.destroy(&db)
-	defer delete(conflicts)
+	defer mdix.destroy_merge_conflicts(conflicts)
 
 	n := mdix.array_length(db, "tags")
 	testing.expect_value(t, n, 3) // primary has 2, secondary has 1 -> concat = 3

@@ -64,7 +64,7 @@ final class ValueTypeTest extends TestCase
     public function testValueTypeAtReportsEnumWithoutThrowing(): void
     {
         $db = MdixDatabase::loadStr(<<<'MDIX'
-@ENUMS( Status:: ACTIVE = 0, INACTIVE = 1 )
+@ENUMS( Status { ACTIVE = 0, INACTIVE = 1 } )
 @DATA( status = Status.ACTIVE )
 MDIX);
         try {

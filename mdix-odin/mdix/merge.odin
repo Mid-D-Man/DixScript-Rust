@@ -163,3 +163,18 @@ parse_merge_conflicts :: proc(raw: cstring, allocator := context.allocator) -> [
 	}
 	return out
 }
+
+// destroy_merge_conflicts frees a []Merge_Conflict returned by
+// merge_sources / merge_sources_weighted, including each entry's path
+// and winning_label strings — not just the backing slice. delete(conflicts)
+// alone only frees the slice itself; Merge_Conflict's two string fields
+// are separately-cloned allocations (see parse_merge_conflicts above) that
+// Odin's delete() does not walk into automatically, so calling delete()
+// directly on the slice leaks both strings per entry.
+destroy_merge_conflicts :: proc(conflicts: []Merge_Conflict, allocator := context.allocator) {
+	for c in conflicts {
+		delete(c.path, allocator)
+		delete(c.winning_label, allocator)
+	}
+	delete(conflicts, allocator)
+}

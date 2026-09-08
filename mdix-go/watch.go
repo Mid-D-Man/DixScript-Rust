@@ -165,9 +165,6 @@ func (db *Database) hotReloadLoop(state *hotReloadState, path string, interval t
 			mod := fi.ModTime()
 			state.mu.Lock()
 			changed := mod.After(state.lastMod)
-			if changed {
-				state.lastMod = mod
-			}
 			state.mu.Unlock()
 			if !changed {
 				continue
@@ -175,9 +172,23 @@ func (db *Database) hotReloadLoop(state *hotReloadState, path string, interval t
 
 			h := internal.Load(path)
 			if h == nil {
+				// Don't record lastMod on a failed load: if we did, the
+				// next tick would see this same (already-recorded) mtime
+				// and treat the file as unchanged, so a transient failure
+				// here (e.g. a load attempt that landed mid-write) would
+				// permanently stop this change from ever being retried —
+				// silently stuck serving stale data until some *later*,
+				// unrelated write happens to touch the mtime again. Leave
+				// lastMod alone so the very next tick retries the same
+				// change, matching the "try again next tick" handling
+				// os.Stat failures already get above.
 				db.fireReloadFailed(state, loadError(path))
 				continue
 			}
+
+			state.mu.Lock()
+			state.lastMod = mod
+			state.mu.Unlock()
 
 			db.mu.Lock()
 			if db.closed {

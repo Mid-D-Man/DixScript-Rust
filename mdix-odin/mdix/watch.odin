@@ -86,13 +86,21 @@ hot_reload_check :: proc(hr: ^Hot_Reload, db: ^Database) -> (reloaded: bool) {
 	if time.diff(hr.last_mod, mod) <= 0 {
 		return false
 	}
-	hr.last_mod = mod
 
 	cpath := strings.clone_to_cstring(hr.path, context.temp_allocator)
 	new_handle := ffi.mdix_load(cpath)
 	if new_handle == nil {
+		// Don't record last_mod on a failed load: if we did, the next
+		// check would see this same (already-recorded) mtime and treat
+		// the file as unchanged, so a transient failure here (e.g. a
+		// load attempt that landed mid-write) would permanently stop
+		// this change from ever being retried. Leave last_mod alone so
+		// the very next check retries the same change — matching the
+		// "try again next check" handling the os.modification_time_by_path
+		// failure above already gets.
 		return false
 	}
+	hr.last_mod = mod
 
 	ffi.mdix_free(db.handle)
 	db.handle = new_handle

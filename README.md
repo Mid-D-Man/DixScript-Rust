@@ -1,4 +1,9 @@
-# DixScript: The Swiss Army Knife of Data Formats
+<p align="center">
+  <img src="dixscript-logo.svg" alt="DixScript Logo" width="180" />
+  <h1 align="center">DixScript</h1>
+  <p align="center"><b>The Swiss Army Knife of Data Formats</b></p>
+</p>
+
 
 **Config, Code, and Crypto in One `.mdix` File**
 

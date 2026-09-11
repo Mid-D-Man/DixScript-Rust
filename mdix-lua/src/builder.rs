@@ -5,7 +5,7 @@
 // Violating this raises an error immediately.
 
 use mlua::{
-    Error as LuaError, MetaMethod, Result as LuaResult,
+    AnyUserData, Error as LuaError, MetaMethod, Result as LuaResult,
     Table as LuaTable, UserData, UserDataMethods, Value as LuaValue,
 };
 use dixscript::Runtime::{DixLoadOptions, DixLoader};
@@ -225,12 +225,15 @@ impl UserData for LuaMdixBuilder {
 
         /// Add a @CONFIG section entry.
         ///   builder:set_config("version", "1.0.0")
-        methods.add_method_mut("set_config", |_, this, (key, value): (String, String)| {
-            if key.is_empty() {
-                return Err(LuaError::RuntimeError("[mdix] config key cannot be empty".to_string()));
+        methods.add_function("set_config", |_, (ud, key, value): (AnyUserData, String, String)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                if key.is_empty() {
+                    return Err(LuaError::RuntimeError("[mdix] config key cannot be empty".to_string()));
+                }
+                this.config.push((key, format!("\"{}\"", escape_mdix(&value))));
             }
-            this.config.push((key, format!("\"{}\"", escape_mdix(&value))));
-            Ok(())
+            Ok(ud)
         });
 
         // ── @ENUMS ─────────────────────────────────────────────────────────
@@ -242,36 +245,39 @@ impl UserData for LuaMdixBuilder {
         ///
         /// Explicit values (array of {name, value} pairs):
         ///   builder:add_enum("Status", {{"ACTIVE", 1}, {"INACTIVE", 0}})
-        methods.add_method_mut("add_enum", |_, this, (name, fields): (String, LuaTable)| {
-            if name.is_empty() {
-                return Err(LuaError::RuntimeError("[mdix] enum name cannot be empty".to_string()));
-            }
-            let len = fields.len()? as i64;
-            if len == 0 {
-                return Err(LuaError::RuntimeError("[mdix] enum must have at least one field".to_string()));
-            }
-            let mut parsed: Vec<(String, Option<i32>)> = Vec::with_capacity(len as usize);
-            for i in 1..=len {
-                let item: LuaValue = fields.get(i)?;
-                match item {
-                    LuaValue::String(s) => {
-                        parsed.push((s.to_str()?.to_string(), None));
-                    }
-                    LuaValue::Table(pair) => {
-                        let field_name: String = pair.get(1)?;
-                        let field_val:  i32    = pair.get(2)?;
-                        parsed.push((field_name, Some(field_val)));
-                    }
-                    other => {
-                        return Err(LuaError::RuntimeError(format!(
-                            "[mdix] enum fields must be strings or {{name, value}} pairs, got {}",
-                            other.type_name()
-                        )));
+        methods.add_function("add_enum", |_, (ud, name, fields): (AnyUserData, String, LuaTable)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                if name.is_empty() {
+                    return Err(LuaError::RuntimeError("[mdix] enum name cannot be empty".to_string()));
+                }
+                let len = fields.len()? as i64;
+                if len == 0 {
+                    return Err(LuaError::RuntimeError("[mdix] enum must have at least one field".to_string()));
+                }
+                let mut parsed: Vec<(String, Option<i32>)> = Vec::with_capacity(len as usize);
+                for i in 1..=len {
+                    let item: LuaValue = fields.get(i)?;
+                    match item {
+                        LuaValue::String(s) => {
+                            parsed.push((s.to_str()?.to_string(), None));
+                        }
+                        LuaValue::Table(pair) => {
+                            let field_name: String = pair.get(1)?;
+                            let field_val:  i32    = pair.get(2)?;
+                            parsed.push((field_name, Some(field_val)));
+                        }
+                        other => {
+                            return Err(LuaError::RuntimeError(format!(
+                                "[mdix] enum fields must be strings or {{name, value}} pairs, got {}",
+                                other.type_name()
+                            )));
+                        }
                     }
                 }
+                this.enums.push(EnumEntry { name, fields: parsed });
             }
-            this.enums.push(EnumEntry { name, fields: parsed });
-            Ok(())
+            Ok(ud)
         });
 
         // ── @DATA tier 1 — flat properties ─────────────────────────────────
@@ -279,18 +285,24 @@ impl UserData for LuaMdixBuilder {
 
         /// Set a string flat property.
         ///   builder:set_string("app_name", "AirStrike")
-        methods.add_method_mut("set_string", |_, this, (path, value): (String, String)| {
-            this.check_flat_ok(&path)?;
-            this.flat.push((path, format!("\"{}\"", escape_mdix(&value))));
-            Ok(())
+        methods.add_function("set_string", |_, (ud, path, value): (AnyUserData, String, String)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.check_flat_ok(&path)?;
+                this.flat.push((path, format!("\"{}\"", escape_mdix(&value))));
+            }
+            Ok(ud)
         });
 
         /// Set an integer flat property.
         ///   builder:set_int("port", 7777)
-        methods.add_method_mut("set_int", |_, this, (path, value): (String, i64)| {
-            this.check_flat_ok(&path)?;
-            this.flat.push((path, value.to_string()));
-            Ok(())
+        methods.add_function("set_int", |_, (ud, path, value): (AnyUserData, String, i64)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.check_flat_ok(&path)?;
+                this.flat.push((path, value.to_string()));
+            }
+            Ok(ud)
         });
 
         /// Set a 64-bit integer flat property, explicitly typed as Long.
@@ -301,19 +313,25 @@ impl UserData for LuaMdixBuilder {
         /// magnitude, matching DixScript's own `123L` literal syntax.
         ///
         ///   builder:set_long("created_at_ms", 1750000000000)
-        methods.add_method_mut("set_long", |_, this, (path, value): (String, i64)| {
-            this.check_flat_ok(&path)?;
-            this.flat.push((path, format!("{}L", value)));
-            Ok(())
+        methods.add_function("set_long", |_, (ud, path, value): (AnyUserData, String, i64)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.check_flat_ok(&path)?;
+                this.flat.push((path, format!("{}L", value)));
+            }
+            Ok(ud)
         });
 
         /// Set a double-precision flat property (no type suffix — this is
         /// DixScript's default for any bare decimal literal).
         ///   builder:set_double("gravity", 9.81)
-        methods.add_method_mut("set_double", |_, this, (path, value): (String, f64)| {
-            this.check_flat_ok(&path)?;
-            this.flat.push((path, value.to_string()));
-            Ok(())
+        methods.add_function("set_double", |_, (ud, path, value): (AnyUserData, String, f64)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.check_flat_ok(&path)?;
+                this.flat.push((path, value.to_string()));
+            }
+            Ok(ud)
         });
 
         /// Set a single-precision flat property, explicitly typed as
@@ -321,74 +339,98 @@ impl UserData for LuaMdixBuilder {
         /// always lexes as Double, matching the `withFloat`/`withDouble`
         /// split already in mdix-wasm.
         ///   builder:set_float("scale", 1.5)
-        methods.add_method_mut("set_float", |_, this, (path, value): (String, f32)| {
-            this.check_flat_ok(&path)?;
-            this.flat.push((path, format!("{}f", value)));
-            Ok(())
+        methods.add_function("set_float", |_, (ud, path, value): (AnyUserData, String, f32)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.check_flat_ok(&path)?;
+                this.flat.push((path, format!("{}f", value)));
+            }
+            Ok(ud)
         });
 
         /// Alias for set_double — kept for backwards compatibility with
         /// code written before set_float/set_double were split out.
         ///   builder:set_number("gravity", 9.81)
-        methods.add_method_mut("set_number", |_, this, (path, value): (String, f64)| {
-            this.check_flat_ok(&path)?;
-            this.flat.push((path, value.to_string()));
-            Ok(())
+        methods.add_function("set_number", |_, (ud, path, value): (AnyUserData, String, f64)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.check_flat_ok(&path)?;
+                this.flat.push((path, value.to_string()));
+            }
+            Ok(ud)
         });
 
         /// Set a boolean flat property.
         ///   builder:set_bool("debug", false)
-        methods.add_method_mut("set_bool", |_, this, (path, value): (String, bool)| {
-            this.check_flat_ok(&path)?;
-            let s = if value { "true" } else { "false" };
-            this.flat.push((path, s.to_string()));
-            Ok(())
+        methods.add_function("set_bool", |_, (ud, path, value): (AnyUserData, String, bool)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.check_flat_ok(&path)?;
+                let s = if value { "true" } else { "false" };
+                this.flat.push((path, s.to_string()));
+            }
+            Ok(ud)
         });
 
         /// Set a date flat property. value must be "YYYY-MM-DD".
         ///   builder:set_date("release", "2025-12-31")
-        methods.add_method_mut("set_date", |_, this, (path, value): (String, String)| {
-            this.check_flat_ok(&path)?;
-            this.flat.push((path, value));
-            Ok(())
+        methods.add_function("set_date", |_, (ud, path, value): (AnyUserData, String, String)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.check_flat_ok(&path)?;
+                this.flat.push((path, value));
+            }
+            Ok(ud)
         });
 
         /// Set a hex color flat property. value must start with '#'.
         ///   builder:set_hex_color("sky_color", "#87CEEB")
-        methods.add_method_mut("set_hex_color", |_, this, (path, value): (String, String)| {
-            this.check_flat_ok(&path)?;
-            if !value.starts_with('#') {
-                return Err(LuaError::RuntimeError(
-                    "[mdix] hex color must start with '#', e.g. \"#FF5733\"".to_string()
-                ));
+        methods.add_function("set_hex_color", |_, (ud, path, value): (AnyUserData, String, String)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.check_flat_ok(&path)?;
+                if !value.starts_with('#') {
+                    return Err(LuaError::RuntimeError(
+                        "[mdix] hex color must start with '#', e.g. \"#FF5733\"".to_string()
+                    ));
+                }
+                this.flat.push((path, value));
             }
-            this.flat.push((path, value));
-            Ok(())
+            Ok(ud)
         });
 
         /// Set a base64 blob flat property.
         ///   builder:set_blob("icon", "SGVsbG8=")
-        methods.add_method_mut("set_blob", |_, this, (path, value): (String, String)| {
-            this.check_flat_ok(&path)?;
-            this.flat.push((path, format!("b:(\"{}\")", value)));
-            Ok(())
+        methods.add_function("set_blob", |_, (ud, path, value): (AnyUserData, String, String)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.check_flat_ok(&path)?;
+                this.flat.push((path, format!("b:(\"{}\")", value)));
+            }
+            Ok(ud)
         });
 
         /// Set a regex flat property.
         ///   builder:set_regex("email_pattern", "^[a-z@.]+$")
-        methods.add_method_mut("set_regex", |_, this, (path, value): (String, String)| {
-            this.check_flat_ok(&path)?;
-            this.flat.push((path, format!("r:(\"{}\")", escape_mdix(&value))));
-            Ok(())
+        methods.add_function("set_regex", |_, (ud, path, value): (AnyUserData, String, String)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.check_flat_ok(&path)?;
+                this.flat.push((path, format!("r:(\"{}\")", escape_mdix(&value))));
+            }
+            Ok(ud)
         });
 
         /// Set a flat property that references a named enum field.
         ///   builder:set_enum("log_level", "LogLevel", "INFO")
         ///   -- produces: log_level = LogLevel.INFO
-        methods.add_method_mut("set_enum", |_, this, (path, enum_name, field): (String, String, String)| {
-            this.check_flat_ok(&path)?;
-            this.flat.push((path, format!("{}.{}", enum_name, field)));
-            Ok(())
+        methods.add_function("set_enum", |_, (ud, path, enum_name, field): (AnyUserData, String, String, String)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.check_flat_ok(&path)?;
+                this.flat.push((path, format!("{}.{}", enum_name, field)));
+            }
+            Ok(ud)
         });
 
         /// Set a flat property with automatic type detection from Lua value.
@@ -398,11 +440,14 @@ impl UserData for LuaMdixBuilder {
         ///   builder:set("name",    "AirStrike")
         ///   builder:set("flags",   {1, 2, 3})
         ///   builder:set("config",  {host = "localhost", port = 7777})
-        methods.add_method_mut("set", |_, this, (path, value): (String, LuaValue)| {
-            this.check_flat_ok(&path)?;
-            let formatted = lua_to_mdix(&value)?;
-            this.flat.push((path, formatted));
-            Ok(())
+        methods.add_function("set", |_, (ud, path, value): (AnyUserData, String, LuaValue)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.check_flat_ok(&path)?;
+                let formatted = lua_to_mdix(&value)?;
+                this.flat.push((path, formatted));
+            }
+            Ok(ud)
         });
 
         // ── @DATA tier 2 — grouped ─────────────────────────────────────────
@@ -413,33 +458,36 @@ impl UserData for LuaMdixBuilder {
         ///
         ///   builder:with_table("server", {host = "localhost", port = 7777, ssl = false})
         ///   -- produces: server: host = "localhost", port = 7777, ssl = false
-        methods.add_method_mut("with_table", |_, this, (path, props): (String, LuaTable)| {
-            if path.is_empty() {
-                return Err(LuaError::RuntimeError("[mdix] path cannot be empty".to_string()));
+        methods.add_function("with_table", |_, (ud, path, props): (AnyUserData, String, LuaTable)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                if path.is_empty() {
+                    return Err(LuaError::RuntimeError("[mdix] path cannot be empty".to_string()));
+                }
+                let mut properties: Vec<(String, String)> = Vec::new();
+                for pair in props.clone().pairs::<LuaValue, LuaValue>() {
+                    let (k, v) = pair?;
+                    let key = match &k {
+                        LuaValue::String(s)  => s.to_str()?.to_string(),
+                        LuaValue::Integer(i) => i.to_string(),
+                        other => {
+                            return Err(LuaError::RuntimeError(format!(
+                                "[mdix] with_table: property keys must be strings, got {}",
+                                other.type_name()
+                            )));
+                        }
+                    };
+                    properties.push((key, lua_to_mdix(&v)?));
+                }
+                if properties.is_empty() {
+                    return Err(LuaError::RuntimeError(
+                        "[mdix] with_table: table must have at least one property".to_string()
+                    ));
+                }
+                this.has_grouped = true;
+                this.tables.push(TableEntry { path, props: properties });
             }
-            let mut properties: Vec<(String, String)> = Vec::new();
-            for pair in props.clone().pairs::<LuaValue, LuaValue>() {
-                let (k, v) = pair?;
-                let key = match &k {
-                    LuaValue::String(s)  => s.to_str()?.to_string(),
-                    LuaValue::Integer(i) => i.to_string(),
-                    other => {
-                        return Err(LuaError::RuntimeError(format!(
-                            "[mdix] with_table: property keys must be strings, got {}",
-                            other.type_name()
-                        )));
-                    }
-                };
-                properties.push((key, lua_to_mdix(&v)?));
-            }
-            if properties.is_empty() {
-                return Err(LuaError::RuntimeError(
-                    "[mdix] with_table: table must have at least one property".to_string()
-                ));
-            }
-            this.has_grouped = true;
-            this.tables.push(TableEntry { path, props: properties });
-            Ok(())
+            Ok(ud)
         });
 
         /// Add a group array (double-colon syntax).
@@ -456,19 +504,22 @@ impl UserData for LuaMdixBuilder {
         ///   -- enemies::
         ///   --   { name = "Goblin", hp = 50 },
         ///   --   { name = "Orc", hp = 100 }
-        methods.add_method_mut("with_array", |_, this, (path, items): (String, LuaTable)| {
-            if path.is_empty() {
-                return Err(LuaError::RuntimeError("[mdix] path cannot be empty".to_string()));
+        methods.add_function("with_array", |_, (ud, path, items): (AnyUserData, String, LuaTable)| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                if path.is_empty() {
+                    return Err(LuaError::RuntimeError("[mdix] path cannot be empty".to_string()));
+                }
+                let len = items.len()? as i64;
+                let mut formatted: Vec<String> = Vec::with_capacity(len as usize);
+                for i in 1..=len {
+                    let v: LuaValue = items.get(i)?;
+                    formatted.push(lua_to_mdix(&v)?);
+                }
+                this.has_grouped = true;
+                this.arrays.push(ArrayEntry { path, items: formatted });
             }
-            let len = items.len()? as i64;
-            let mut formatted: Vec<String> = Vec::with_capacity(len as usize);
-            for i in 1..=len {
-                let v: LuaValue = items.get(i)?;
-                formatted.push(lua_to_mdix(&v)?);
-            }
-            this.has_grouped = true;
-            this.arrays.push(ArrayEntry { path, items: formatted });
-            Ok(())
+            Ok(ud)
         });
 
         // ── Finalization ────────────────────────────────────────────────────
@@ -500,17 +551,23 @@ impl UserData for LuaMdixBuilder {
         /// Clear only the tier-2 grouped data (tables and arrays).
         /// Flat properties, config, and enums are kept.
         /// Useful for re-using the builder with a different grouped section.
-        methods.add_method_mut("reset_grouped", |_, this, ()| {
-            this.tables.clear();
-            this.arrays.clear();
-            this.has_grouped = false;
-            Ok(())
+        methods.add_function("reset_grouped", |_, ud: AnyUserData| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                this.tables.clear();
+                this.arrays.clear();
+                this.has_grouped = false;
+            }
+            Ok(ud)
         });
 
         /// Reset everything: flat, grouped, config, and enums.
-        methods.add_method_mut("reset", |_, this, ()| {
-            *this = LuaMdixBuilder::new();
-            Ok(())
+        methods.add_function("reset", |_, ud: AnyUserData| {
+            {
+                let mut this = ud.borrow_mut::<LuaMdixBuilder>()?;
+                *this = LuaMdixBuilder::new();
+            }
+            Ok(ud)
         });
 
         // ── Meta ─────────────────────────────────────────────────────────────
@@ -522,4 +579,4 @@ impl UserData for LuaMdixBuilder {
             ))
         });
     }
-        }
+}

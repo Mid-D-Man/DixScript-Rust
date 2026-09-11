@@ -31,6 +31,7 @@ BENCH_TARGETS = [
     "binary_serialization_benchmark",
     "runtime_benchmark",
     "stress_test_benchmark",
+    "arena_vs_box_benchmark",
 ]
 
 SEP = "─" * 60

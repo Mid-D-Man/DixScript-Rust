@@ -29,6 +29,7 @@ on:
           - binary_serialization_benchmark
           - runtime_benchmark
           - stress_test_benchmark
+          - arena_vs_box_benchmark
 
 permissions:
   contents: write
@@ -282,6 +283,7 @@ jobs:
             --bench binary_serialization_benchmark \
             --bench runtime_benchmark \
             --bench stress_test_benchmark \
+            --bench arena_vs_box_benchmark \
             2>&1 || true
 
       - name: Generate flamegraphs
@@ -315,6 +317,7 @@ jobs:
           run_flame "binary_serialization_benchmark" "binary_serialization_benchmark"
           run_flame "runtime_benchmark"              "runtime_benchmark"
           run_flame "stress_test_benchmark"          "stress_test_benchmark"
+          run_flame "arena_vs_box_benchmark"         "arena_vs_box_benchmark"
 
       - name: Build flamegraph index HTML
         run: |

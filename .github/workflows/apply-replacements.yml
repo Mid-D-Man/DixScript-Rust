@@ -25,6 +25,14 @@ on:
           - 'skip'
           - 'backup'
           - 'rename'
+      delete_processed_archives:
+        description: 'After a successful non-dry-run apply, delete the processed archive(s) from .mdix/replacements/ so they cannot be accidentally re-run later'
+        required: false
+        type: choice
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
   push:
     paths:
       - '.mdix/replacements/**'
@@ -35,6 +43,7 @@ jobs:
     permissions:
       contents: write
     with:
-      template:      ${{ inputs.template || '.mdix/replacements/replacements.mdix' }}
-      dry_run:       ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'true' }}
-      file_strategy: ${{ inputs.file_strategy || 'overwrite' }}
+      template:                  ${{ inputs.template || '.mdix/replacements/replacements.mdix' }}
+      dry_run:                   ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'true' }}
+      file_strategy:              ${{ inputs.file_strategy || 'overwrite' }}
+      delete_processed_archives:  ${{ inputs.delete_processed_archives || 'false' }}

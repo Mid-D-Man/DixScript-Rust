@@ -153,7 +153,7 @@ impl DixLoader {
             }
         }
 
-        let source_text = fs::read_to_string(mdix_path).map_err(|e| {
+        let source_bytes = fs::read(mdix_path).map_err(|e| {
             let msg = format!("Failed to read file {}: {}", mdix_path, e);
             self.error_manager.add_runtime_error(
                 RuntimeErrorType::InvalidOperation,
@@ -164,8 +164,8 @@ impl DixLoader {
             msg
         })?;
 
-        let compiled_ast = self.compile_source(
-            &source_text, mdix_path, to_ast_compatibility_mode(options.compatibility_mode),
+        let compiled_ast = self.compile_source_from_bytes(
+            &source_bytes, mdix_path, to_ast_compatibility_mode(options.compatibility_mode),
         )?;
 
         // throw_on_missing_sections: "expected section" has no crate-wide
@@ -507,11 +507,11 @@ impl DixLoader {
             return Err(format!("File not found: {}", file_path));
         }
 
-        let source_text = fs::read_to_string(file_path)
+        let source_bytes = fs::read(file_path)
             .map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
 
-        self.compile_source(
-            &source_text, file_path, crate::Compiler::AST::data_types::CompatibilityMode::Strict,
+        self.compile_source_from_bytes(
+            &source_bytes, file_path, crate::Compiler::AST::data_types::CompatibilityMode::Strict,
         )
     }
 
@@ -609,9 +609,30 @@ impl DixLoader {
 
     // ── Compilation pipeline (Approach B: tokenizer-first) ────────────────────
 
+    /// Convenience wrapper for callers that already have text in memory
+    /// (`load_from_str`, `compile_with_dlm_from_str`, and anywhere else that
+    /// never touches the filesystem itself). `str::as_bytes()` is a free,
+    /// zero-cost view — this changes nothing about how those callers work.
     fn compile_source(
         &self,
         source_text: &str,
+        source_file_path: &str,
+        compatibility_mode: crate::Compiler::AST::data_types::CompatibilityMode,
+    ) -> Result<DixScript, String> {
+        self.compile_source_from_bytes(source_text.as_bytes(), source_file_path, compatibility_mode)
+    }
+
+    /// Real compile pipeline. Takes `&[u8]` rather than `&str` specifically
+    /// so a source file containing an `@RAW` `content -> {}` block with a
+    /// genuinely non-UTF-8 payload can still be tokenized — only the spans
+    /// that become identifier/string/etc. tokens get validated as UTF-8
+    /// (inside the tokenizer), and `@RAW` payload bytes never do at all.
+    /// The two actual file-reading call sites (`load_text`,
+    /// `compile_to_resolved_ast`) call this directly via `fs::read`, not
+    /// `fs::read_to_string`, for exactly this reason.
+    fn compile_source_from_bytes(
+        &self,
+        source_bytes: &[u8],
         source_file_path: &str,
         compatibility_mode: crate::Compiler::AST::data_types::CompatibilityMode,
     ) -> Result<DixScript, String> {
@@ -626,8 +647,8 @@ impl DixLoader {
             ..OperationalSettings::default()
         };
 
-        let tokenizer  = Tokenizer::new_with_error_manager(
-            source_text,
+        let tokenizer  = Tokenizer::new_with_error_manager_from_bytes(
+            source_bytes,
             &initial_settings,
             self.error_manager.clone(),
         );

@@ -108,7 +108,7 @@ impl VersionConstraints {
             .to_string();
 
         let supported_sections = &[
-            "CONFIG", "IMPORTS", "DLM", "ENUMS", "QUICKFUNCS", "DATA", "SECURITY",
+            "CONFIG", "IMPORTS", "DLM", "ENUMS", "QUICKFUNCS", "DATA", "SECURITY", "RAW",
         ];
 
         if supported_sections.contains(&normalized_section.as_str()) {
@@ -167,7 +167,7 @@ impl VersionConstraints {
             return false;
         }
         let valid_sections: HashSet<&str> =
-            ["quickfuncs", "enums", "imports", "dlm", "data", "security"]
+            ["quickfuncs", "enums", "imports", "dlm", "data", "security", "raw"]
                 .iter()
                 .copied()
                 .collect();

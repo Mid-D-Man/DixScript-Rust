@@ -11,6 +11,7 @@ pub enum SectionId {
     QuickFuncs,
     Data,
     Security,
+    Raw,
 }
 
 impl SectionId {
@@ -25,6 +26,7 @@ impl SectionId {
             SectionId::QuickFuncs => "QUICKFUNCS",
             SectionId::Data       => "DATA",
             SectionId::Security   => "SECURITY",
+            SectionId::Raw        => "RAW",
         }
     }
 
@@ -49,6 +51,7 @@ impl SectionId {
             "QUICKFUNCS" => SectionId::QuickFuncs,
             "DATA"       => SectionId::Data,
             "SECURITY"   => SectionId::Security,
+            "RAW"        => SectionId::Raw,
             _            => SectionId::None,
         }
     }
@@ -127,6 +130,19 @@ pub enum TokenType {
     SectionQuickFuncs,
     SectionData,
     SectionSecurity,
+    SectionRaw,
+
+    // ── @RAW content block ───────────────────────────────────────────────────
+    /// Emitted by `scan_raw_content_block` for `content -> { ---tag--- … ---tag--- }`.
+    /// `start`/`end` are byte offsets into the tokenizer's own `input` slice —
+    /// the payload bytes themselves are never copied, decoded, or validated
+    /// as UTF-8 here; this token only remembers where they are. `tag` is the
+    /// delimiter text (already UTF-8, since delimiter tags are restricted to
+    /// plain ASCII) — matched exactly against the opening delimiter's tag,
+    /// but *not yet* checked for uniqueness against other `@RAW` blocks in
+    /// the same file; that's a semantic-analysis-time concern once every
+    /// section has been parsed.
+    RawContent { tag: String, start: usize, end: usize },
 
     // ── Diagnostic / structural ───────────────────────────────────────────────
     Comment(String),
@@ -151,6 +167,7 @@ impl TokenType {
     #[inline] pub fn section_quickfuncs() -> Self { TokenType::SectionQuickFuncs }
     #[inline] pub fn section_data()       -> Self { TokenType::SectionData }
     #[inline] pub fn section_security()   -> Self { TokenType::SectionSecurity }
+    #[inline] pub fn section_raw()        -> Self { TokenType::SectionRaw }
     #[inline] pub fn bool_true()          -> Self { TokenType::Bool(true) }
     #[inline] pub fn bool_false()         -> Self { TokenType::Bool(false) }
     #[inline] pub fn get_symbol(c: char)  -> Self { TokenType::Symbol(c) }
@@ -165,6 +182,7 @@ impl TokenType {
                 | TokenType::SectionQuickFuncs
                 | TokenType::SectionData
                 | TokenType::SectionSecurity
+                | TokenType::SectionRaw
         )
     }
 
@@ -177,6 +195,7 @@ impl TokenType {
             TokenType::SectionQuickFuncs => Some("QUICKFUNCS"),
             TokenType::SectionData       => Some("DATA"),
             TokenType::SectionSecurity   => Some("SECURITY"),
+            TokenType::SectionRaw        => Some("RAW"),
             TokenType::Keyword(k) if k.starts_with('@') => Some(&k[1..]),
             _ => None,
         }
@@ -235,6 +254,9 @@ impl fmt::Display for TokenType {
             TokenType::SectionData             => write!(f, "SectionData(@DATA)"),
             TokenType::SectionSecurity         => write!(f, "SectionSecurity(@SECURITY)"),
             TokenType::SectionImports          => write!(f, "SectionImports(@IMPORTS)"),
+            TokenType::SectionRaw              => write!(f, "SectionRaw(@RAW)"),
+            TokenType::RawContent { tag, start, end } =>
+                write!(f, "RawContent(tag={}, bytes={}..{})", tag, start, end),
             TokenType::Comment(c)              => write!(f, "Comment({})", c),
             TokenType::Error(e)                => write!(f, "Error({})", e),
             TokenType::EndOfFile               => write!(f, "EndOfFile"),

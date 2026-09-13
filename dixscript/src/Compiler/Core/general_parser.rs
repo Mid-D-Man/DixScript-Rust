@@ -45,6 +45,13 @@ enum ParsedSection {
     QuickFuncs(Option<QuickFuncsSection>),
     Data(Option<DataSection>),
     Security(Option<SecuritySection>),
+    /// Not `Option<RawSection>` like every other variant — one
+    /// `parse_section_inner` call handles exactly one `@RAW(...)`
+    /// occurrence, and `assign_section_to_script` appends it to
+    /// `script.raw: Vec<RawBlock>` rather than overwriting, so multiple
+    /// `@RAW` blocks in one file each land correctly instead of the last
+    /// one clobbering the others.
+    Raw(Option<RawBlock>),
 }
 
 pub struct GeneralParser<'a> {
@@ -59,6 +66,7 @@ pub struct GeneralParser<'a> {
     has_enums_enabled:      bool,
     has_dlm_enabled:        bool,
     has_quickfuncs_enabled: bool,
+    has_raw_enabled:        bool,
     is_advanced_mode:       bool,
     /// See module-level doc comment.
     propagate_error_manager: bool,
@@ -138,6 +146,7 @@ impl<'a> GeneralParser<'a> {
         let has_enums_enabled      = operational_settings.is_feature_enabled("enums");
         let has_dlm_enabled        = operational_settings.is_feature_enabled("dlm");
         let has_imports_enabled    = operational_settings.is_feature_enabled("imports");
+        let has_raw_enabled        = operational_settings.is_feature_enabled("raw");
 
         let t_filter  = Instant::now();
         let filtered  = CommentFilter::filter(tokens)?;
@@ -163,6 +172,7 @@ impl<'a> GeneralParser<'a> {
             has_enums_enabled,
             has_dlm_enabled,
             has_quickfuncs_enabled,
+            has_raw_enabled,
             is_advanced_mode,
             propagate_error_manager,
         })
@@ -265,6 +275,7 @@ impl<'a> GeneralParser<'a> {
             TokenType::SectionQuickFuncs => { self.advance(); "QUICKFUNCS" }
             TokenType::SectionData       => { self.advance(); "DATA"       }
             TokenType::SectionSecurity   => { self.advance(); "SECURITY"   }
+            TokenType::SectionRaw        => { self.advance(); "RAW"        }
             other => return Err(ParseException::new(format!(
                 "Expected section keyword, found: {}", other
             ))),
@@ -395,6 +406,7 @@ impl<'a> GeneralParser<'a> {
             "QUICKFUNCS" => Ok(ParsedSection::QuickFuncs(make_section_parser!(QuickFuncsSectionParser).parse_section())),
             "DATA"       => Ok(ParsedSection::Data(make_section_parser!(DataSectionParser).parse_section())),
             "SECURITY"   => Ok(ParsedSection::Security(make_section_parser!(SecuritySectionParser).parse_section())),
+            "RAW"        => Ok(ParsedSection::Raw(make_section_parser!(RawSectionParser).parse_section())),
             _ => Err(ParseException::new(format!("Unknown section: @{}", section.name))),
         };
 
@@ -427,6 +439,8 @@ impl<'a> GeneralParser<'a> {
             ParsedSection::QuickFuncs(r) => script.quick_functions = r,
             ParsedSection::Data(r)       => script.data            = r,
             ParsedSection::Security(r)   => script.security        = r,
+            // Append, not overwrite — see the ParsedSection::Raw doc comment.
+            ParsedSection::Raw(r)        => { if let Some(block) = r { script.raw.push(block); } }
         }
     }
 
@@ -451,6 +465,7 @@ impl<'a> GeneralParser<'a> {
             "QUICKFUNCS"        => self.has_quickfuncs_enabled,
             "ENUMS"             => self.has_enums_enabled,
             "DATA" | "SECURITY" => true,
+            "RAW"               => self.has_raw_enabled,
             _                   => false,
         }
     }

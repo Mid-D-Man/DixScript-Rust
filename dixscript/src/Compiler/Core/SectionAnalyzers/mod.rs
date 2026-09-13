@@ -27,6 +27,7 @@ pub mod security_section_analyzer;
 pub mod data_section_analyzer;
 pub mod quickfuncs_section_analyzer;
 pub mod imports_section_analyzer;
+pub mod raw_section_analyzer;
 
 // Re-exports for convenience
 pub use enums_section_analyzer::EnumsSectionAnalyzer;
@@ -35,6 +36,7 @@ pub use security_section_analyzer::SecuritySectionAnalyzer;
 pub use data_section_analyzer::DataSectionAnalyzer;
 pub use quickfuncs_section_analyzer::QuickFuncsSectionAnalyzer;
 pub use imports_section_analyzer::ImportsSectionAnalyzer;
+pub use raw_section_analyzer::RawSectionAnalyzer;
 
 // ==================== SHARED RESULT TYPES ====================
 

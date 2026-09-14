@@ -1,32 +1,15 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "lexer.rs"
+// ============================================================================
 //! DixScript Lexer — tokenises a `.mdix` source buffer into a `Vec<Token>`.
 //!
-//! ## Byte-oriented input (v1.0.1)
-//!
-//! `Tokenizer`'s input is `&[u8]`, not `&str`. This was already true in
-//! substance — every hot-path scan below worked off `self.input.as_bytes()`
-//! and the `TokenizerState` helpers (`peek`/`peek_next`/`peek_at`/`advance`)
-//! already did raw single-byte `as char` casts, not real UTF-8 decoding —
-//! so this changes the *declared* type to match what the code already did,
-//! not the actual scanning behavior. The one place that ever did real UTF-8
-//! validation, `TokenizerState::slice`, still does exactly that (via
-//! `std::str::from_utf8`, falling back to `""` on invalid input) — it just
-//! takes `&[u8]` instead of `&str` now, since that's what's already being
-//! sliced under the hood.
-//!
-//! `Tokenizer::new`/`new_with_error_manager` (the `&str`-taking versions)
-//! are kept as thin wrappers over the new `_from_bytes` cores specifically
-//! so every *existing* caller — every bench, every LSP feature, mdix-cli,
-//! the import resolver, `compactor.rs` — keeps compiling unchanged. Only
-//! `Runtime/loader.rs`'s file-reading paths, which need real byte-level
-//! access for `@RAW` payloads that may not be valid UTF-8, call the
-//! `_from_bytes` entry points directly.
-//!
-//! This is what actually makes `@RAW` able to hold genuine binary: the
-//! payload bytes between a `content -> { ---tag--- … ---tag--- }` block's
-//! delimiters are recorded as a `(start, end)` byte range and never passed
-//! through `str::from_utf8` at all (see `scan_raw_content_block`) — unlike
-//! every other token, which still goes through `TokenizerState::slice`'s
-//! UTF-8 validation exactly as before.
+//! `Tokenizer`'s input is `&[u8]`. `new`/`new_with_error_manager` (the
+//! `&str`-taking versions) are thin wrappers over `_from_bytes` cores, kept
+//! for every existing caller that only ever has text. `@RAW` content-block
+//! payloads (see `scan_raw_content_block`) are recorded as byte offsets and
+//! never pass through UTF-8 validation; every other token still does, via
+//! `TokenizerState::slice`.
 //!
 //! ## Numeric literal additions (v1.0.0)
 //!

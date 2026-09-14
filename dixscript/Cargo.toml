@@ -156,6 +156,9 @@ harness = false
 [[bench]]
 name    = "arena_vs_box_benchmark"
 harness = false
+[[bench]]
+name    = "raw_section_benchmark"
+harness = false
 
 # ── Feature flags ──────────────────────────────────────────────────────────────
 # Default pulls in everything — existing consumers (desktop, CI, mdix-cli,

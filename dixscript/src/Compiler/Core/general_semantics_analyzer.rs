@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/general_semantics_analyzer.rs"
+// ============================================================================
 //! Central semantic analysis orchestrator — runs all section analyzers in dependency order.
 
 use std::collections::HashMap;

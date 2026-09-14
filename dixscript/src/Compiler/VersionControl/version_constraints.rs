@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/VersionControl/version_constraints.rs and version_manager.rs"
+// ============================================================================
 //! Version Constraints - Validates DixScript features against version requirements
 //! Uses native Rust collections (no DixCore wrappers)
 

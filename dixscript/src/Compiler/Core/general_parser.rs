@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/general_parser.rs"
+// ============================================================================
 //! GeneralParser — filters comments, extracts sections, delegates to section parsers.
 //!
 //! ## Error manager propagation

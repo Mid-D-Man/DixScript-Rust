@@ -1,3 +1,8 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md (referenced from the Compiler modules it
+// benchmarks)
+// ============================================================================
 //! Arena (bumpalo) vs Box/Vec/Clone AST — prototype benchmark
 //!
 //! This does NOT exercise dixscript's real Compiler::AST types. It's a

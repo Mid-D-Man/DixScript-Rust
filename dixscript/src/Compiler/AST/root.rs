@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/AST/raw.rs"
+// ============================================================================
 use super::config::ConfigSection;
 use super::imports::ImportsSection;
 use super::dlm::DLMSection;

@@ -1,27 +1,14 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/AST/raw.rs"
+// ============================================================================
 use super::position::Position;
 use super::values::Value;
 
-/// A single `@RAW(...)` block.
-///
-/// Unlike every other section, `@RAW` is list-shaped from the AST root down
-/// (see `DixScript::raw` in `root.rs`, `Vec<RawBlock>` not
-/// `Option<RawSection>`) — each block is a complete, independently
-/// identified payload container, not a fragment of one shared collection
-/// the way multiple `@DATA`/`@QUICKFUNCS`/`@ENUMS` blocks get merged into a
-/// single logical section. There is nothing to merge *within* an `@RAW`
-/// block; a file with several of them just has several `RawBlock`s.
-///
-/// `content` is `Option<RawContent>` rather than required, even though a
-/// real `@RAW` block always needs one: the parser stays permissive here
-/// (build the best AST it can from whatever's actually in the source) and
-/// leaves "content is missing" as a clear semantic error for
-/// `raw_section_analyzer.rs` to report, same separation every other
-/// section's parser/analyzer pair already uses.
-///
-/// Cross-block uniqueness (`meta_data.id`, the delimiter tag) is NOT
-/// enforced here — one `RawBlock` has no visibility into any other. That's
-/// `raw_section_analyzer.rs`'s job, once every block in the file has been
-/// parsed.
+/// A single `@RAW(...)` block. `Vec<RawBlock>` at the AST root, not
+/// `Option<RawSection>` — see docs/dixscript/compiler.md for why. `content`
+/// is `Option` rather than required; a missing one is a semantic error from
+/// `raw_section_analyzer.rs`, not a parse failure.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawBlock {
     pub meta_data: Vec<RawField>,
@@ -106,15 +93,11 @@ impl std::fmt::Display for RawField {
     }
 }
 
-/// The `content -> { ---tag--- … ---tag--- }` block.
-///
-/// `start`/`end` are byte offsets into the ORIGINAL source buffer the
-/// lexer scanned (see `TokenType::RawContent` in `token.rs`) — the payload
-/// bytes are never copied into this struct, and never validated as UTF-8.
-/// Resolving `start`/`end` into actual bytes needs that same source buffer
-/// to still be alive, which is `Runtime`-layer plumbing (the shared
-/// `Arc<[u8]>`/byte-range design discussed for `DixValue::RawPayload`), not
-/// something this AST node owns — it only remembers where the bytes are.
+/// The `content -> { ---tag--- … ---tag--- }` block. `start`/`end` are byte
+/// offsets into the source buffer the lexer scanned — never copied here,
+/// never validated as UTF-8. Resolving them into actual bytes needs that
+/// same buffer still alive, which is Runtime-layer plumbing, not something
+/// this AST node owns.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawContent {
     pub tag: String,

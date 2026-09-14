@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/SectionParsers/raw_section_parser.rs"
+// ============================================================================
 //! Parser for the `@RAW(...)` section.
 //!
 //! ```text
@@ -9,19 +13,10 @@
 //! RawValue      ::= StringLiteral | Integer | Long | Float | Double | Boolean | HexLiteral
 //! ```
 //!
-//! `content`'s right-hand side is never `{ ... }` tokens at this level —
-//! the lexer's `scan_raw_content_block` already consumed the entire
-//! `{ ---tag--- <bytes> ---tag--- }` block as one `TokenType::RawContent`
-//! token by the time this parser ever sees it (see `lexer.rs`'s
-//! `just_saw_content_arrow` trigger). So `content -> …` here is just
-//! "consume the arrow, then consume exactly one `RawContent` token" — no
-//! brace matching, no field list, nothing else to parse.
-//!
-//! Unlike `@SECURITY`, `meta_data`/`using`/`content` are the ONLY three
-//! recognized block names — an unrecognized key is a parse error here,
-//! not silently accepted. `meta_data`/`using`'s field-list parsing (and
-//! recovery strategy) otherwise mirrors `security_section_parser.rs`
-//! closely; see that file for the reasoning behind each recovery helper.
+//! `content`'s right-hand side is always exactly one `TokenType::RawContent`
+//! token, never `{`/`}` — the lexer already consumed the whole delimited
+//! block by the time this parser sees it. `meta_data`/`using`'s field-list
+//! parsing otherwise mirrors `security_section_parser.rs`.
 //!
 //! This parser builds the most complete `RawBlock` it can from whatever's
 //! actually in the source — a missing `content`, a missing `meta_data.id`,

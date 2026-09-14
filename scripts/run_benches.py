@@ -32,6 +32,7 @@ BENCH_TARGETS = [
     "runtime_benchmark",
     "stress_test_benchmark",
     "arena_vs_box_benchmark",
+    "raw_section_benchmark",
 ]
 
 SEP = "─" * 60

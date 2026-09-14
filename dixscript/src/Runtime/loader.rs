@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Runtime/loader.rs"
+// ============================================================================
 use std::fs;
 use std::path::Path;
 use std::time::SystemTime;

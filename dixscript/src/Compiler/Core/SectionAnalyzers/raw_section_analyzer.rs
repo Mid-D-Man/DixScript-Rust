@@ -1,24 +1,15 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/SectionAnalyzers/raw_section_analyzer.rs"
+// ============================================================================
 //! Semantic validation of `@RAW` blocks.
 //!
-//! Unlike every other analyzer here, this one takes a *slice* of sections
-//! (`&[RawBlock]`), not a single one — `DixScript::raw` is `Vec<RawBlock>`
-//! precisely because multiple `@RAW(...)` occurrences in one file don't
-//! merge into a shared collection the way `@DATA`/`@QUICKFUNCS`/`@ENUMS`
-//! do (see `raw_section_parser.rs`'s and `raw.rs`'s doc comments). That
-//! also means the cross-block checks below (unique `meta_data.id`, unique
-//! delimiter tag) can only happen here, once every block in the file has
-//! been parsed — no single `RawBlock` has visibility into any other.
-//!
-//! `meta_data` follows the same "fixed, known field set" approach as
-//! `@SECURITY`'s blocks: `id` and `format` are required; `checksum`/`size`
-//! are optional but type-checked if present. `using` is intentionally
-//! NOT validated against a fixed key set — different `using.module`
-//! decoders legitimately need different hint keys, so only the well-known
-//! ones (`filter`/`compression`/`threads`/`module`) get a type check when
-//! present, and anything else is accepted without comment. Neither block
-//! is schema-checked in the `@SCHEMA` sense — that's `@DATA`-only, by
-//! design (see the @SCHEMA design discussion this section groundwork grew
-//! out of).
+//! Takes a slice (`&[RawBlock]`), not a single section — the cross-block
+//! checks (unique `meta_data.id`, unique delimiter tag) need every block in
+//! the file visible at once. `meta_data` requires `id`/`format`, type-checks
+//! `checksum`/`size` when present. `using` is intentionally not validated
+//! against a fixed key set — different `module` decoders need different
+//! hint keys.
 
 use crate::Compiler::AST::{RawBlock, Position, Value};
 use crate::Compiler::Utilities::SymbolTable;

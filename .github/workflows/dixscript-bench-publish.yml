@@ -30,6 +30,7 @@ on:
           - runtime_benchmark
           - stress_test_benchmark
           - arena_vs_box_benchmark
+          - raw_section_benchmark
 
 permissions:
   contents: write
@@ -284,6 +285,7 @@ jobs:
             --bench runtime_benchmark \
             --bench stress_test_benchmark \
             --bench arena_vs_box_benchmark \
+            --bench raw_section_benchmark \
             2>&1 || true
 
       - name: Generate flamegraphs
@@ -318,6 +320,7 @@ jobs:
           run_flame "runtime_benchmark"              "runtime_benchmark"
           run_flame "stress_test_benchmark"          "stress_test_benchmark"
           run_flame "arena_vs_box_benchmark"         "arena_vs_box_benchmark"
+          run_flame "raw_section_benchmark"          "raw_section_benchmark"
 
       - name: Build flamegraph index HTML
         run: |

@@ -630,7 +630,7 @@ mod tests {
         DixScript {
             data: Some(DataSection::new(vec![entry], Position::UNKNOWN)),
             config: None, imports: None, dlm: None,
-            enums: None, quick_functions: None, security: None,
+            enums: None, quick_functions: None, security: None, raw: Vec::new(),
         }
     }
 
@@ -707,7 +707,7 @@ mod tests {
         let ast = DixScript {
             data: Some(DataSection::new(vec![e1, e2], Position::UNKNOWN)),
             config: None, imports: None, dlm: None,
-            enums: None, quick_functions: None, security: None,
+            enums: None, quick_functions: None, security: None, raw: Vec::new(),
         };
         let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
 
@@ -744,7 +744,7 @@ mod tests {
         let ast = DixScript {
             data: Some(DataSection::new(vec![entry], Position::UNKNOWN)),
             config: None, imports: None, dlm: None,
-            enums: None, quick_functions: None, security: None,
+            enums: None, quick_functions: None, security: None, raw: Vec::new(),
         };
         let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
 
@@ -764,7 +764,7 @@ mod tests {
         let ast = DixScript {
             data: Some(DataSection::new(entries, Position::UNKNOWN)),
             config: None, imports: None, dlm: None,
-            enums: None, quick_functions: None, security: None,
+            enums: None, quick_functions: None, security: None, raw: Vec::new(),
         };
         let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
 
@@ -825,7 +825,7 @@ mod tests {
         let ast = DixScript {
             data: Some(DataSection::new(vec![entry], Position::UNKNOWN)),
             config: None, imports: None, dlm: None,
-            enums: None, quick_functions: None, security: None,
+            enums: None, quick_functions: None, security: None, raw: Vec::new(),
         };
         let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
 
@@ -905,7 +905,7 @@ mod tests {
         let ast = DixScript {
             data: Some(DataSection::new(vec![entry], Position::UNKNOWN)),
             config: None, imports: None, dlm: None,
-            enums: None, quick_functions: None, security: None,
+            enums: None, quick_functions: None, security: None, raw: Vec::new(),
         };
         let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
 
@@ -966,7 +966,7 @@ mod tests {
         let ast = DixScript {
             data: Some(DataSection::new(vec![entry], Position::UNKNOWN)),
             config: None, imports: None, dlm: None,
-            enums: None, quick_functions: None, security: None,
+            enums: None, quick_functions: None, security: None, raw: Vec::new(),
         };
         let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
 
@@ -1023,7 +1023,7 @@ mod tests {
                 position: Position::UNKNOWN,
             }),
             imports: None, dlm: None, enums: None, quick_functions: None,
-            data: None, security: None,
+            data: None, security: None, raw: Vec::new(),
         };
         let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
         let cfg = data.config.unwrap();
@@ -1054,7 +1054,7 @@ mod tests {
                 position: Position::UNKNOWN,
             }),
             imports: None, dlm: None, enums: None, quick_functions: None,
-            data: None, security: None,
+            data: None, security: None, raw: Vec::new(),
         };
         let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
         let cfg = data.config.unwrap();

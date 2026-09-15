@@ -370,6 +370,11 @@ impl BinaryUnpacker {
             quick_functions: None,
             data,
             security,
+            // Binary-serialized files don't currently carry @RAW blocks —
+            // the binary format has no encoding for them yet. Known gap,
+            // not attempted here; revisit if/when @RAW needs to survive a
+            // compact/binary round-trip.
+            raw: Vec::new(),
         })
     }
 }

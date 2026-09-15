@@ -459,7 +459,7 @@ mod tests {
         // guards against a regression in that path.
         let ast = DixScript {
             config: None, imports: None, dlm: None,
-            enums: None, quick_functions: None, security: None,
+            enums: None, quick_functions: None, security: None, raw: Vec::new(),
             data: Some(DataSection {
                 entries: vec![DataEntry::ObjectProperty {
                     name: "server".into(),

@@ -281,6 +281,12 @@ impl MdixMerger {
             quick_functions: self.merge_quickfuncs(sources, conflicts, errors),
             data:            self.merge_data(sources, conflicts, errors),
             security:        self.merge_security(sources, conflicts, errors),
+            // `mdix merge` doesn't merge @RAW blocks across sources yet —
+            // no merge_raw exists (concatenating sources' raw Vecs and
+            // detecting cross-source id/tag collisions as MergeConflicts,
+            // mirroring merge_data, is the right shape for it, but that's
+            // real new work, not attempted here). Known, disclosed gap.
+            raw: Vec::new(),
         }
     }
 

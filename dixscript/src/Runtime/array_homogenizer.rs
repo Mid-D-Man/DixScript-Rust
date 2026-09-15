@@ -151,7 +151,7 @@ mod tests {
         DixScript {
             data: Some(DataSection { entries, position: Position::UNKNOWN }),
             config: None, imports: None, dlm: None,
-            enums: None, quick_functions: None, security: None,
+            enums: None, quick_functions: None, security: None, raw: Vec::new(),
         }
     }
 

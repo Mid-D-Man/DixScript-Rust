@@ -359,6 +359,7 @@ fn bench_converter(c: &mut Criterion) {
                 position: Position::UNKNOWN,
             }),
             security: None,
+            raw: Vec::new(),
         }
     };
 
@@ -440,6 +441,7 @@ fn bench_format_options(c: &mut Criterion) {
         enums: None,
         quick_functions: None,
         security: None,
+        raw: Vec::new(),
     };
 
     let mut group = c.benchmark_group("to_mdix");

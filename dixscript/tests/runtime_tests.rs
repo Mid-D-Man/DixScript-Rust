@@ -661,6 +661,7 @@ fn converter_to_hashmap_medium() {
             position: Position::UNKNOWN,
         }),
         security: None,
+        raw: Vec::new(),
     };
 
     let t = Instant::now();
@@ -869,6 +870,7 @@ fn format_options_to_mdix_all_styles() {
         enums: None,
         quick_functions: None,
         security: None,
+        raw: Vec::new(),
     };
 
     for (label, opts) in [

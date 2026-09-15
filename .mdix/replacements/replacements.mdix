@@ -12,7 +12,7 @@
 @DATA(
   target_root = "."
 
-  overrides::
+  /*overrides::
     target("README.md", "README.md")
-    target("CONTRIBUTING.md", "CONTRIBUTING.md")
+    target("CONTRIBUTING.md", "CONTRIBUTING.md")*/
 )

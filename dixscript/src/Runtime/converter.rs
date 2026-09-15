@@ -305,6 +305,8 @@ impl DixConverter {
             quick_functions: None,
             security: None,
             data: Some(DataSection { entries: data_entries, position: Position::UNKNOWN }),
+            // JSON/TOML have no concept of @RAW to convert from.
+            raw: Vec::new(),
         })
     }
 
@@ -1336,6 +1338,7 @@ mod tests {
             data: Some(DataSection { entries, position: Position::UNKNOWN }),
             config: None, imports: None, dlm: None,
             enums: None, quick_functions: None, security: None,
+            raw: Vec::new(),
         }
     }
 

@@ -185,3 +185,36 @@ wiring the feature gate through, not part of any pre-existing plan.
   missing `"raw_section"`. Same class of problem as above, one layer
   down: without it, `@RAW` would never be considered a supported feature
   of version 1.0.0 at all, regardless of a file's own `@CONFIG`.
+
+### Adding `DixScript.raw` broke every other struct-literal construction site
+- Real CI (`cargo bench --no-run`, the actual crate compiled with every
+  file together) caught 11 more `DixScript { ... }` construction sites
+  across 9 files that a per-file `rustc --crate-type lib` check cannot
+  catch, because it never sees the other files that construct the same
+  struct: `Compiler/Core/BinarySerialization/binary_unpacker.rs`,
+  `Runtime/converter.rs` (x2), `Runtime/data_builder.rs`, `Runtime/merge.rs`,
+  `Runtime/dix_data.rs` (x9, test helpers), `Runtime/array_homogenizer.rs`,
+  `Runtime/dix_deserialize.rs`, `benches/runtime_benchmark.rs` (x2),
+  `tests/runtime_tests.rs` (x2). All fixed the same way: `raw: Vec::new()`,
+  since none of these code paths (binary deserialization, JSON/TOML-to-AST
+  conversion, the programmatic AST builder, `mdix merge`, test fixtures)
+  currently produce or need `@RAW` blocks. `mdix merge` specifically is a
+  known, disclosed gap rather than a real fix — it doesn't merge `@RAW`
+  blocks across sources at all yet; a real `merge_raw` (concatenate plus
+  cross-source id/tag collision detection, mirroring `merge_data`) is real
+  new work, not attempted here.
+- `Utilities/token_debug_printer.rs`'s `format_token_type` match was
+  non-exhaustive once `SectionRaw`/`RawContent` existed — same reason,
+  a file this session's per-file checks never had a reason to open.
+- `raw_section_parser.rs`'s `recover_to_entry_boundary` had a genuine bug
+  a per-file check also missed, but for a different reason: `matches!(self.current().token_type, TokenType::Identifier(id) if ...)`
+  tried to move a `String` out through a shared reference. The per-file
+  check never got far enough to reach this, because `TokenType` itself
+  couldn't resolve standalone — the borrow-check step never ran on code
+  past an unresolved-type error, so this was masked by an error already
+  being tolerated as "expected." Fixed with `TokenType::Identifier(ref id)`.
+- Takeaway: single-file `rustc --crate-type lib` checks catch real syntax
+  errors, but can both miss cross-file-only errors (this whole `raw` field
+  gap) and mask real bugs behind an already-tolerated resolution error.
+  Real CI is the only actual gate — every batch's verification note already
+  said this, and this is the concrete case that shows why.

@@ -203,6 +203,9 @@ impl TokenDebugPrinter {
             TokenType::SectionQuickFuncs => "SectionQuickFuncs(@QUICKFUNCS)".to_string(),
             TokenType::SectionData       => "SectionData(@DATA)".to_string(),
             TokenType::SectionSecurity   => "SectionSecurity(@SECURITY)".to_string(),
+            TokenType::SectionRaw        => "SectionRaw(@RAW)".to_string(),
+            TokenType::RawContent { tag, start, end } =>
+                format!("RawContent(tag={}, bytes={}..{})", tag, start, end),
 
             // ── Diagnostic ───────────────────────────────────────────────────
             TokenType::Comment(c) => format!("Comment({})", Self::truncate(c, 50)),

@@ -473,7 +473,7 @@ impl<'a> RawSectionParser<'a> {
         if self.operational_settings.error_handling_strategy != ErrorHandlingStrategy::Recover { return false; }
         for _ in 0..50 {
             if self.is_at_end() || self.is_current_symbol(')') { return true; }
-            if matches!(self.current().token_type, TokenType::Identifier(id) if id == "meta_data" || id == "using" || id == "content") {
+            if matches!(self.current().token_type, TokenType::Identifier(ref id) if id == "meta_data" || id == "using" || id == "content") {
                 return true;
             }
             self.advance();

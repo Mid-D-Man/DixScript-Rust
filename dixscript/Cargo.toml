@@ -159,6 +159,9 @@ harness = false
 [[bench]]
 name    = "raw_section_benchmark"
 harness = false
+[[bench]]
+name    = "chemistry_db_comparison_benchmark"
+harness = false
 
 # ── Feature flags ──────────────────────────────────────────────────────────────
 # Default pulls in everything — existing consumers (desktop, CI, mdix-cli,

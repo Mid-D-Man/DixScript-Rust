@@ -33,6 +33,7 @@ BENCH_TARGETS = [
     "stress_test_benchmark",
     "arena_vs_box_benchmark",
     "raw_section_benchmark",
+    "chemistry_db_comparison_benchmark",
 ]
 
 SEP = "─" * 60

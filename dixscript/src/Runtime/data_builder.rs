@@ -91,6 +91,9 @@ impl DixDataBuilder {
             quick_functions: None,
             data:            data_section,
             security:        None,
+            // No raw_builder exists yet — this programmatic builder can't
+            // construct @RAW blocks. Known gap, not attempted here.
+            raw:             Vec::new(),
         })
     }
 

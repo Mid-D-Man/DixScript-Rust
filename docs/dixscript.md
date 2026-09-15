@@ -18,6 +18,15 @@ as not yet documented rather than assumed undocumented-on-purpose.
 
 - [Compiler](dixscript/compiler.md) — lexer, parser, semantic analysis,
   version/feature gating, and the `@RAW` section added in v1.0.1
+- Benchmarks comparing DixScript against JSON/TOML live in
+  `dixscript/benches/format_comparison_benchmark.rs` (synthetic small/
+  medium/large fixtures) and `dixscript/benches/chemistry_db_comparison_benchmark.rs`
+  (the real `mdix_files/chemistry_db` data, scaled up by duplicating its
+  actual element-block structure rather than synthetic flat fields —
+  written to answer whether DixScript's parse-time edge over TOML grows
+  with file size, using JSON/TOML fixtures generated at bench-setup time
+  via `DixConverter::to_json`/`to_toml` rather than hand-transcribed or
+  committed as static files)
 
 ## CI and Workflows
 

@@ -1,4 +1,136 @@
 name: DixScript — Test & Bench Publisher
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_type:
+        description: 'What to publish'
+        required: true
+        default: 'tests'
+        type: choice
+        options: [tests, bench, flame, cli, all]
+      bench_target:
+        # Select a single bench to avoid runner timeouts.
+        # stress_test_benchmark in particular is very slow on CI.
+        description: 'Benchmark target (bench/all publish_type only)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - format_comparison_benchmark
+          - throughput_benchmark
+          - lexer_throughput
+          - config_throughput
+          - general_parser_benchmark
+          - semantics_benchmark
+          - ast_enhancement_benchmark
+          - value_resolution_benchmark
+          - binary_serialization_benchmark
+          - runtime_benchmark
+          - stress_test_benchmark
+          - arena_vs_box_benchmark
+          - raw_section_benchmark
+          - chemistry_db_comparison_benchmark
+
+permissions:
+  contents: write
+  actions: read
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+jobs:
+
+  # ── 1. Decide what to run ──────────────────────────────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      run_tests:    ${{ steps.decide.outputs.run_tests }}
+      run_bench:    ${{ steps.decide.outputs.run_bench }}
+      run_flame:    ${{ steps.decide.outputs.run_flame }}
+      run_cli:      ${{ steps.decide.outputs.run_cli }}
+      bench_target: ${{ steps.decide.outputs.bench_target }}
+    steps:
+      - name: Decide what to publish
+        id: decide
+        run: |
+          T=false; B=false; F=false; C=false
+          # bench_target only meaningful from workflow_dispatch; commit runs always use 'all'
+          BT="${{ github.event.inputs.bench_target || 'all' }}"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            case "${{ github.event.inputs.publish_type }}" in
+              tests) T=true ;;
+              bench) B=true ;;
+              flame) F=true ;;
+              cli)   C=true ;;
+              all)   T=true; B=true; F=true; C=true ;;
+            esac
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-publish-(tests|all)' && T=true || true
+            echo "$MSG" | grep -qiE '\-\-publish-(bench|all)' && B=true || true
+            echo "$MSG" | grep -qiE '\-\-publish-(flame|all)' && F=true || true
+            echo "$MSG" | grep -qiE '\-\-publish-(cli|all)'   && C=true || true
+            BT="all"
+          fi
+
+          echo "run_tests=$T"     >> $GITHUB_OUTPUT
+          echo "run_bench=$B"     >> $GITHUB_OUTPUT
+          echo "run_flame=$F"     >> $GITHUB_OUTPUT
+          echo "run_cli=$C"       >> $GITHUB_OUTPUT
+          echo "bench_target=$BT" >> $GITHUB_OUTPUT
+          echo "Tests=$T  Bench=$B  Flame=$F  Cli=$C  BenchTarget=$BT"
+
+  # ── 2. Run tests ───────────────────────────────────────────────────────────
+  run-tests:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_tests == 'true'
+    timeout-minutes: 120  # 2 hours - adjust as needed
+  
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Get Rust version
+        id: rustver
+        run: echo "ver=$(rustc --version)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build test binaries
+        run: cargo test --no-run 2>&1
+
+      - name: Run all tests
+        continue-on-error: true
+        run: |
+          cargo test --color=never --no-fail-fast -- --show-output 2>&1 | tee test-raw.txt
+          exit 0
+
+      - name: Parse results to JSON
+        env:
+          BUILD_NUM:    ${{ github.run_number }}
+          BRANCH:       ${{ github.ref_name }}
+          COMMIT:       ${{ github.sha }}
+          BUILD_DATE:   ${{ github.event.head_commit.timestamp }}
+          RUST_VERSION: ${{ steps.rustver.outputs.ver }}
+        run: python3 scripts/parse_test_results.py
+
+      - name: Write job summary
+        if: always()
         run: python3 scripts/generate_summary.py tests test-results.json
 
       - name: Build HTML report
@@ -132,3 +264,326 @@ name: DixScript — Test & Bench Publisher
             sudo mkdir -p "/usr/lib/linux-tools/$(uname -r)"
             sudo ln -sf "$PERF_BIN" "/usr/lib/linux-tools/$(uname -r)/perf" 2>/dev/null || true
           fi
+          perf --version || echo "WARNING: perf not available"
+
+      - name: Install cargo-flamegraph
+        run: |
+          cargo install flamegraph --locked 2>/dev/null || \
+          cargo install flamegraph          2>/dev/null || true
+
+      - name: Pre-build bench targets
+        continue-on-error: true
+        run: |
+          cargo build --profile bench \
+            --bench format_comparison_benchmark \
+            --bench throughput_benchmark \
+            --bench lexer_throughput \
+            --bench config_throughput \
+            --bench general_parser_benchmark \
+            --bench semantics_benchmark \
+            --bench ast_enhancement_benchmark \
+            --bench value_resolution_benchmark \
+            --bench binary_serialization_benchmark \
+            --bench runtime_benchmark \
+            --bench stress_test_benchmark \
+            --bench arena_vs_box_benchmark \
+            --bench raw_section_benchmark \
+            --bench chemistry_db_comparison_benchmark \
+            2>&1 || true
+
+      - name: Generate flamegraphs
+        continue-on-error: true
+        run: |
+          mkdir -p flame-output
+          export PATH="$HOME/.cargo/bin:$PATH"
+          if ! command -v perf &>/dev/null; then exit 0; fi
+          if ! cargo flamegraph --version &>/dev/null 2>&1; then exit 0; fi
+
+          run_flame() {
+            local target="$1" outfile="$2"
+            cargo flamegraph --profile bench --bench "$target" \
+              --output "flame-output/${outfile}.svg" --no-inline -- --bench 2>&1 || true
+            if [ -f "flame-output/${outfile}.svg" ] && \
+               [ "$(wc -c < "flame-output/${outfile}.svg")" -gt 512 ]; then
+              echo "OK: ${outfile}.svg"
+            else
+              rm -f "flame-output/${outfile}.svg"
+            fi
+          }
+
+          run_flame "format_comparison_benchmark"    "format_comparison_benchmark"
+          run_flame "throughput_benchmark"           "throughput_benchmark"
+          run_flame "lexer_throughput"               "lexer_throughput"
+          run_flame "config_throughput"              "config_throughput"
+          run_flame "general_parser_benchmark"       "general_parser_benchmark"
+          run_flame "semantics_benchmark"            "semantics_benchmark"
+          run_flame "ast_enhancement_benchmark"      "ast_enhancement_benchmark"
+          run_flame "value_resolution_benchmark"     "value_resolution_benchmark"
+          run_flame "binary_serialization_benchmark" "binary_serialization_benchmark"
+          run_flame "runtime_benchmark"              "runtime_benchmark"
+          run_flame "stress_test_benchmark"          "stress_test_benchmark"
+          run_flame "arena_vs_box_benchmark"         "arena_vs_box_benchmark"
+          run_flame "raw_section_benchmark"          "raw_section_benchmark"
+          run_flame "chemistry_db_comparison_benchmark" "chemistry_db_comparison_benchmark"
+
+      - name: Build flamegraph index HTML
+        run: |
+          BUILD_NUM="${{ github.run_number }}"
+          BRANCH="${{ github.ref_name }}"
+          COMMIT="${GITHUB_SHA:0:8}"
+          DATE="$(date -u)"
+          mkdir -p flame-output
+          CARDS_FILE="$(mktemp)"
+          SVG_COUNT=0
+
+          for svg in flame-output/*.svg; do
+            [ -f "$svg" ] || continue
+            SVG_COUNT=$((SVG_COUNT + 1))
+            name=$(basename "$svg" .svg)
+            cat >> "$CARDS_FILE" << CARDEOF
+          <div class="card" data-name="${name}">
+            <div class="card-header">
+              <h2>🔥 ${name}</h2>
+              <div class="card-actions">
+                <a class="btn btn-download" href="${name}.svg" download="${name}.svg">Download SVG</a>
+                <a class="btn btn-open" href="${name}.svg" target="_blank">Open</a>
+              </div>
+            </div>
+            <div class="card-body">
+              <iframe id="frame-${name}" src="${name}.svg"
+                      title="${name} flamegraph" style="height:520px"></iframe>
+            </div>
+          </div>
+          CARDEOF
+          done
+
+          if [ "$SVG_COUNT" -eq 0 ]; then
+            echo '<div class="card"><div class="no-graph"><p>No flamegraphs generated.</p></div></div>' > "$CARDS_FILE"
+          fi
+
+          cp .github/flame-results-template.html flame-output/index.html
+          python3 - "$CARDS_FILE" << 'PYEOF'
+          import sys
+          cards = open(sys.argv[1], encoding='utf-8').read()
+          html  = open('flame-output/index.html', encoding='utf-8').read()
+          html  = html.replace('CARDS_PLACEHOLDER', cards)
+          open('flame-output/index.html', 'w', encoding='utf-8').write(html)
+          PYEOF
+          rm -f "$CARDS_FILE"
+
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${BUILD_NUM}/g" flame-output/index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${BRANCH}/g"       flame-output/index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${COMMIT}/g"       flame-output/index.html
+          sed -i "s|DATE_PLACEHOLDER|${DATE}|g"           flame-output/index.html
+
+      - name: Upload flamegraph artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flamegraph-${{ github.run_number }}
+          path: flame-output/
+          retention-days: 30
+
+  # ── 5. CLI Tests ───────────────────────────────────────────────────────────
+  run-cli-test:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_cli == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Get Rust version
+        id: rustver
+        run: echo "ver=$(rustc --version)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-cli-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build mdix-cli
+        run: |
+          cargo build -p mdix-cli
+          echo "Binary: $(ls -lh target/debug/mdix)"
+
+      - name: Verify test fixture files exist
+        run: |
+          for f in \
+            mdix_files/tests/cli/01_basic.mdix \
+            mdix_files/tests/cli/02_enums.mdix \
+            mdix_files/tests/cli/03_quickfuncs.mdix \
+            mdix_files/tests/cli/04_all_types.mdix \
+            mdix_files/tests/cli/05_game_config.mdix \
+            mdix_files/tests/cli/06_app_config.mdix; do
+            [ -f "$f" ] && echo "  ✓ $f" || echo "  ✗ MISSING: $f"
+          done
+
+      - name: Run CLI test suite
+        continue-on-error: true
+        env:
+          BUILD_NUM:    ${{ github.run_number }}
+          BRANCH:       ${{ github.ref_name }}
+          COMMIT:       ${{ github.sha }}
+          BUILD_DATE:   ${{ github.event.head_commit.timestamp }}
+          RUST_VERSION: ${{ steps.rustver.outputs.ver }}
+          MDIX_BINARY:  target/debug/mdix
+        run: python3 tools/run_cli_tests.py
+
+      - name: Write job summary
+        if: always()
+        run: python3 scripts/generate_summary.py cli cli-test-results.json
+
+      - name: Build HTML report
+        env:
+          RUST_VERSION: ${{ steps.rustver.outputs.ver }}
+        run: |
+          cp .github/dixscript-cli-test.html cli-test-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  cli-test-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       cli-test-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            cli-test-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     cli-test-index.html
+          sed -i "s|RUST_VERSION_PLACEHOLDER|${RUST_VERSION}|g"        cli-test-index.html
+
+      - name: Upload CLI test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-test-results-${{ github.run_number }}
+          path: |
+            cli-test-results.json
+            cli-test-index.html
+          retention-days: 30
+
+  # ── 6. Deploy to gh-pages ──────────────────────────────────────────────────
+  deploy-results:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, run-tests, run-bench, run-flame, run-cli-test]
+    if: |
+      always() &&
+      (needs.run-tests.result    == 'success' ||
+       needs.run-bench.result    == 'success' ||
+       needs.run-flame.result    == 'success' ||
+       needs.run-cli-test.result == 'success')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download test results
+        if: needs.run-tests.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results-${{ github.run_number }}
+          path: deploy/tests/
+
+      - name: Download bench results
+        if: needs.run-bench.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: bench-results-${{ github.run_number }}
+          path: deploy/bench/
+
+      - name: Download flamegraph artifacts
+        if: needs.run-flame.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: flamegraph-${{ github.run_number }}
+          path: deploy/flame/
+
+      - name: Download CLI test results
+        if: needs.run-cli-test.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-test-results-${{ github.run_number }}
+          path: deploy/cli/
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            echo "Creating fresh gh-pages branch"
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          if [ -d "deploy/tests" ]; then
+            mkdir -p "$WORK/tests" "$WORK/tests/builds/build_${BUILD_NUM}"
+            cp deploy/tests/test-results.json       "$WORK/tests/test-results.json"
+            cp deploy/tests/test-results-index.html "$WORK/tests/index.html"
+            cp deploy/tests/test-results.json       "$WORK/tests/builds/build_${BUILD_NUM}/test-results.json"
+            cp deploy/tests/test-results-index.html "$WORK/tests/builds/build_${BUILD_NUM}/index.html"
+          fi
+
+          if [ -d "deploy/bench" ]; then
+            mkdir -p "$WORK/bench" "$WORK/bench/builds/build_${BUILD_NUM}"
+            cp deploy/bench/bench-results.json       "$WORK/bench/bench-results.json"
+            cp deploy/bench/bench-results-index.html "$WORK/bench/index.html"
+            cp deploy/bench/bench-results.json       "$WORK/bench/builds/build_${BUILD_NUM}/bench-results.json"
+            cp deploy/bench/bench-results-index.html "$WORK/bench/builds/build_${BUILD_NUM}/index.html"
+          fi
+
+          if [ -d "deploy/flame" ]; then
+            mkdir -p "$WORK/flame" "$WORK/flame/builds/build_${BUILD_NUM}"
+            cp -r deploy/flame/* "$WORK/flame/"
+            cp -r deploy/flame/* "$WORK/flame/builds/build_${BUILD_NUM}/"
+          fi
+
+          if [ -d "deploy/cli" ]; then
+            mkdir -p "$WORK/cli" "$WORK/cli/builds/build_${BUILD_NUM}"
+            cp deploy/cli/cli-test-results.json "$WORK/cli/cli-test-results.json"
+            cp deploy/cli/cli-test-index.html   "$WORK/cli/index.html"
+            cp deploy/cli/cli-test-results.json "$WORK/cli/builds/build_${BUILD_NUM}/cli-test-results.json"
+            cp deploy/cli/cli-test-index.html   "$WORK/cli/builds/build_${BUILD_NUM}/index.html"
+          fi
+
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "DixScript CI — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+          echo ""
+          echo "Deployed → https://mid-d-man.github.io/DixScript-Rust/"
+
+  # ── 7. Summary ─────────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, run-tests, run-bench, run-flame, run-cli-test, deploy-results]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "======================================================="
+          echo "  DixScript — Publish Results Summary"
+          echo "======================================================="
+          echo "Build:        #${{ github.run_number }}"
+          echo "Branch:       ${{ github.ref_name }}"
+          echo "Bench target: ${{ needs.parse-trigger.outputs.bench_target }}"
+          echo "Tests:        ${{ needs.run-tests.result     || 'skipped' }}"
+          echo "Bench:        ${{ needs.run-bench.result     || 'skipped' }}"
+          echo "Flame:        ${{ needs.run-flame.result     || 'skipped' }}"
+          echo "CLI:          ${{ needs.run-cli-test.result  || 'skipped' }}"
+          echo "Deploy:       ${{ needs.deploy-results.result || 'skipped' }}"
+          echo ""
+          echo "View → https://mid-d-man.github.io/DixScript-Rust/"

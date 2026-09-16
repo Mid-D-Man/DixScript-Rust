@@ -87,7 +87,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: parse-trigger
     if: needs.parse-trigger.outputs.run_tests == 'true'
-
+    timeout-minutes: 120  # 2 hours - adjust as needed
+  
     steps:
       - uses: actions/checkout@v4
 

@@ -44,13 +44,15 @@ fn generate_multi_raw_input(num_blocks: usize, payload_bytes_each: usize) -> Str
 
 fn raw_lexer_scan_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("raw_section_lexer_scan");
-    group.measurement_time(Duration::from_secs(10));
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(5));
     let settings = OperationalSettings::default();
 
-    // Payload sizes chosen to bracket realistic asset-hint sizes up to a
-    // moderate texture-atlas-sized blob, without making the "large" case
-    // slow enough to bloat CI time.
-    for &payload_size in &[256usize, 4_096, 65_536, 1_048_576] {
+    // Pure memchr-based scanning (see scan_raw_content_block), no
+    // parsing/analysis -- unlikely to be the actual cost driver, but cut
+    // proactively alongside the pipeline group rather than leave an
+    // unverified assumption at 1MB.
+    for &payload_size in &[256usize, 4_096, 65_536] {
         let input = generate_single_raw_input(payload_size);
         group.throughput(Throughput::Bytes(input.len() as u64));
         group.bench_with_input(
@@ -77,10 +79,19 @@ fn raw_lexer_scan_benchmark(c: &mut Criterion) {
 
 fn raw_full_pipeline_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("raw_section_full_pipeline");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(30);
+    // sample_size(10) is criterion's documented floor. measurement_time
+    // is short and flat across all three tiers on purpose: two earlier
+    // attempts at "reasonable-sounding" larger tiers with progressive
+    // scaling (1,000 blocks / flat sample_size(30); then 150 blocks /
+    // tiered) both turned out to run far longer in real CI than expected,
+    // without ever being empirically measured first. This trades
+    // statistical richness for a bound that can't blow up regardless of
+    // per-iteration cost -- widen it later once a run actually confirms
+    // real per-iteration timing.
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(5));
 
-    for &num_blocks in &[10usize, 100, 1_000] {
+    for &num_blocks in &[5usize, 15, 40] {
         let input = generate_multi_raw_input(num_blocks, 64);
         group.throughput(Throughput::Elements(num_blocks as u64));
         group.bench_with_input(

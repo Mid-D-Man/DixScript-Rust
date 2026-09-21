@@ -1,0 +1,316 @@
+// Brought to u by MidManStudio
+//
+// A JSON decoder written entirely in DixScript's own QuickFuncs language --
+// no Rust code involved. Decodes a flat JSON object or array (string, number,
+// bool, null members/elements) into a real DixScript object/array.
+//
+// Zero recursion anywhere in this file. QuickFuncs has no loop construct,
+// and self/mutual-recursive QuickFunc calls turned out to be unreliable --
+// they crash outright in specific patterns and hit a real depth ceiling far
+// below what the interpreter's own limit is supposed to allow, even in
+// patterns that don't crash outright. So every place this file would
+// naturally want a loop, it instead either:
+//   (a) leans on a builtin that does the repetition on the Rust side in one
+//       call (.split() to find "how many members/elements are there" in one
+//       shot), or
+//   (b) unrolls the repetition into a fixed sequence of steps, bounded by a
+//       cap chosen generously for realistic data (16 members/elements per
+//       object/array, 18 digits per number -- covers the full range of a
+//       64-bit long). Extra capacity beyond what's actually present is a
+//       no-op (bounds-checked against .length()), not an error.
+//
+// Known, deliberate scope limits:
+//   - flat only: object/array VALUES must be string/number/bool/null, not a
+//     nested object or array. Nesting would need either bounded recursion
+//     (depth is naturally small and was reliable in testing, unlike sibling
+//     count) or another split-based trick -- not attempted here.
+//   - the member/element split is naive: `.split(",")` has no awareness of
+//     quotes or brackets, so a string VALUE containing a literal "," or a
+//     key/value containing literal ":" (beyond the one separating them) will
+//     misparse. Fine for typical config-shaped JSON, not spec-complete.
+//   - capped at 16 members/elements and 18 numeral digits; both are just
+//     more copies of the same unrolled line to raise.
+//   - string values are quote-stripped but not unescaped (\n, \", \\ etc.
+//     are left as literal backslash-sequences) -- straightforward to add
+//     with .replace() chains if needed, left out here to keep the first
+//     version focused.
+//   - malformed JSON isn't handled gracefully: charAt() past the end of the
+//     string is a hard compile error in DixScript, and QuickFuncs has no
+//     try/catch, so this targets well-formed input.
+//   - numbers always decode as Double, never Int -- QuickFuncs has no way to
+//     make one function's return type conditional on its input, and there's
+//     no string-to-number builtin at all (confirmed by reading every
+//     numeric conversion method), so the digit-accumulation below is doing
+//     real parsing work, not a shortcut.
+//   - object key order is not preserved (Object is backed by a HashMap).
+
+@CONFIG(
+  version = "1.0.0"
+  author = "MidManStudio"
+  features = "quickfuncs,data"
+  debug_mode = false
+)
+
+@QUICKFUNCS(
+
+  // ---- single-character digit lookup ---------------------------------
+
+  ~digitValue<int>(_ch<string>) {
+    chk: _ch {
+      -> "0" { return 0 }
+      -> "1" { return 1 }
+      -> "2" { return 2 }
+      -> "3" { return 3 }
+      -> "4" { return 4 }
+      -> "5" { return 5 }
+      -> "6" { return 6 }
+      -> "7" { return 7 }
+      -> "8" { return 8 }
+      -> "9" { return 9 }
+      -> miss { return -1 }
+    }
+  }
+
+  // Bounds-checked single-digit read. -1 for "not a digit" (out of range or
+  // a non-digit character) -- used by jsonScanNumeral to know where to stop.
+  ~digitAt<int>(_raw<string>, _idx<int>) {
+    if: _idx >= _raw.length() {
+      return -1
+    } else {
+      let ch = _raw.charAt(_idx)
+      let v = digitValue(ch)
+      return v
+    }
+  }
+
+  // Reads a run of ASCII digits starting at _start. Returns
+  // t:(value, digitCount, nextIndex). Unrolled to 18 digits (the full range
+  // of a 64-bit long) instead of recursing once per digit -- each step is a
+  // no-op once `done` flips, so shorter numbers just skip the rest.
+  ~jsonScanNumeral<tuple>(_raw<string>, _start<int>) {
+    let mut acc = 0.toLong()
+    let mut count = 0
+    let mut done = false
+
+    let d0 = digitAt(_raw, _start + 0)
+    if: !done && d0 >= 0 { acc = acc * 10 + d0
+      count = count + 1 } else { done = true }
+    let d1 = digitAt(_raw, _start + 1)
+    if: !done && d1 >= 0 { acc = acc * 10 + d1
+      count = count + 1 } else { done = true }
+    let d2 = digitAt(_raw, _start + 2)
+    if: !done && d2 >= 0 { acc = acc * 10 + d2
+      count = count + 1 } else { done = true }
+    let d3 = digitAt(_raw, _start + 3)
+    if: !done && d3 >= 0 { acc = acc * 10 + d3
+      count = count + 1 } else { done = true }
+    let d4 = digitAt(_raw, _start + 4)
+    if: !done && d4 >= 0 { acc = acc * 10 + d4
+      count = count + 1 } else { done = true }
+    let d5 = digitAt(_raw, _start + 5)
+    if: !done && d5 >= 0 { acc = acc * 10 + d5
+      count = count + 1 } else { done = true }
+    let d6 = digitAt(_raw, _start + 6)
+    if: !done && d6 >= 0 { acc = acc * 10 + d6
+      count = count + 1 } else { done = true }
+    let d7 = digitAt(_raw, _start + 7)
+    if: !done && d7 >= 0 { acc = acc * 10 + d7
+      count = count + 1 } else { done = true }
+    let d8 = digitAt(_raw, _start + 8)
+    if: !done && d8 >= 0 { acc = acc * 10 + d8
+      count = count + 1 } else { done = true }
+    let d9 = digitAt(_raw, _start + 9)
+    if: !done && d9 >= 0 { acc = acc * 10 + d9
+      count = count + 1 } else { done = true }
+    let d10 = digitAt(_raw, _start + 10)
+    if: !done && d10 >= 0 { acc = acc * 10 + d10
+      count = count + 1 } else { done = true }
+    let d11 = digitAt(_raw, _start + 11)
+    if: !done && d11 >= 0 { acc = acc * 10 + d11
+      count = count + 1 } else { done = true }
+    let d12 = digitAt(_raw, _start + 12)
+    if: !done && d12 >= 0 { acc = acc * 10 + d12
+      count = count + 1 } else { done = true }
+    let d13 = digitAt(_raw, _start + 13)
+    if: !done && d13 >= 0 { acc = acc * 10 + d13
+      count = count + 1 } else { done = true }
+    let d14 = digitAt(_raw, _start + 14)
+    if: !done && d14 >= 0 { acc = acc * 10 + d14
+      count = count + 1 } else { done = true }
+    let d15 = digitAt(_raw, _start + 15)
+    if: !done && d15 >= 0 { acc = acc * 10 + d15
+      count = count + 1 } else { done = true }
+    let d16 = digitAt(_raw, _start + 16)
+    if: !done && d16 >= 0 { acc = acc * 10 + d16
+      count = count + 1 } else { done = true }
+    let d17 = digitAt(_raw, _start + 17)
+    if: !done && d17 >= 0 { acc = acc * 10 + d17
+      count = count + 1 } else { done = true }
+
+    return t:(acc, count, _start + count)
+  }
+
+  // ---- numbers ---------------------------------------------------------
+
+  // Handles sign, integer part, and an optional fractional part. No
+  // exponent support yet (1e10-style notation) -- same unrolled technique
+  // would extend it, left out to keep this file a manageable size.
+  ~jsonParseNumber<double>(_raw<string>) {
+    let neg = _raw.charAt(0) == "-"
+    let afterSign = neg ? 1 : 0
+
+    let intScan = jsonScanNumeral(_raw, afterSign)
+    let intPart = intScan.first()
+    let afterInt = intScan.third()
+    let mut result = intPart.toDouble()
+
+    if: afterInt < _raw.length() && _raw.charAt(afterInt) == "." {
+      let fracScan = jsonScanNumeral(_raw, afterInt + 1)
+      let fracPart = fracScan.first()
+      let fracDigits = fracScan.second()
+      let fracPortion = fracPart.toDouble() / (10.0 ** fracDigits)
+      result = result + fracPortion
+    }
+
+    let finalValue = neg ? (0.0 - result) : result
+    return finalValue
+  }
+
+  // ---- scalars (string / number / bool / null) --------------------------
+
+  // Boxes the result in a 1-element tuple since a QuickFunc's return type
+  // can't vary by input -- callers unpack with .first().
+  ~jsonDecodeScalar<tuple>(_raw<string>) {
+    let trimmed = _raw.trim()
+    let first = trimmed.charAt(0)
+    if: first == "\"" {
+      let inner = trimmed.substring(1, trimmed.length() - 2)
+      return t:(inner)
+    } else {
+      if: trimmed == "true" {
+        return t:(true)
+      } else {
+        if: trimmed == "false" {
+          return t:(false)
+        } else {
+          if: trimmed == "null" {
+            return t:(null)
+          } else {
+            let n = jsonParseNumber(trimmed)
+            return t:(n)
+          }
+        }
+      }
+    }
+  }
+
+  // ---- object members ("key": value) -------------------------------------
+
+  ~jsonDecodeMember<tuple>(_member<string>) {
+    let trimmed = _member.trim()
+    let colonAt = trimmed.indexOf(":")
+    let rawKey = trimmed.substring(0, colonAt).trim()
+    let key = rawKey.substring(1, rawKey.length() - 2)
+    let rawVal = trimmed.substring(colonAt + 1, trimmed.length() - colonAt - 1)
+    let valBox = jsonDecodeScalar(rawVal)
+    let value = valBox.first()
+    return t:(key, value)
+  }
+
+  // One unrolled step: adds members[idx] to acc if it exists, otherwise
+  // passes acc through unchanged.
+  ~jsonAddMemberIfPresent<object>(_acc<object>, _members<array>, _idx<int>) {
+    let has = _members.length() > _idx
+    if: has {
+      let raw = _members.get(_idx)
+      let pair = jsonDecodeMember(raw)
+      let key = pair.first()
+      let value = pair.second()
+      let r = _acc.add(key, value)
+      return r
+    } else {
+      return _acc
+    }
+  }
+
+  // Entry point: flat JSON object -> DixScript object. Handles up to 16
+  // members; extras beyond that are silently dropped (raise the cap by
+  // copying the pattern of the last few lines below).
+  ~jsonDecodeFlatObject<object>(_json<string>) {
+    let trimmed = _json.trim()
+    let inner = trimmed.substring(1, trimmed.length() - 2)
+    let members = inner.split(",")
+    let acc0 = {}
+    let acc1 = jsonAddMemberIfPresent(acc0, members, 0)
+    let acc2 = jsonAddMemberIfPresent(acc1, members, 1)
+    let acc3 = jsonAddMemberIfPresent(acc2, members, 2)
+    let acc4 = jsonAddMemberIfPresent(acc3, members, 3)
+    let acc5 = jsonAddMemberIfPresent(acc4, members, 4)
+    let acc6 = jsonAddMemberIfPresent(acc5, members, 5)
+    let acc7 = jsonAddMemberIfPresent(acc6, members, 6)
+    let acc8 = jsonAddMemberIfPresent(acc7, members, 7)
+    let acc9 = jsonAddMemberIfPresent(acc8, members, 8)
+    let acc10 = jsonAddMemberIfPresent(acc9, members, 9)
+    let acc11 = jsonAddMemberIfPresent(acc10, members, 10)
+    let acc12 = jsonAddMemberIfPresent(acc11, members, 11)
+    let acc13 = jsonAddMemberIfPresent(acc12, members, 12)
+    let acc14 = jsonAddMemberIfPresent(acc13, members, 13)
+    let acc15 = jsonAddMemberIfPresent(acc14, members, 14)
+    let acc16 = jsonAddMemberIfPresent(acc15, members, 15)
+    return acc16
+  }
+
+  // ---- arrays -------------------------------------------------------------
+
+  ~jsonAddElementIfPresent<array>(_acc<array>, _elems<array>, _idx<int>) {
+    let has = _elems.length() > _idx
+    if: has {
+      let raw = _elems.get(_idx)
+      let valBox = jsonDecodeScalar(raw)
+      let value = valBox.first()
+      let r = _acc.push(value)
+      return r
+    } else {
+      return _acc
+    }
+  }
+
+  // Entry point: flat JSON array -> DixScript array. Same 16-element cap.
+  ~jsonDecodeFlatArray<array>(_json<string>) {
+    let trimmed = _json.trim()
+    let inner = trimmed.substring(1, trimmed.length() - 2)
+    let elems = inner.split(",")
+    let acc0 = []
+    let acc1 = jsonAddElementIfPresent(acc0, elems, 0)
+    let acc2 = jsonAddElementIfPresent(acc1, elems, 1)
+    let acc3 = jsonAddElementIfPresent(acc2, elems, 2)
+    let acc4 = jsonAddElementIfPresent(acc3, elems, 3)
+    let acc5 = jsonAddElementIfPresent(acc4, elems, 4)
+    let acc6 = jsonAddElementIfPresent(acc5, elems, 5)
+    let acc7 = jsonAddElementIfPresent(acc6, elems, 6)
+    let acc8 = jsonAddElementIfPresent(acc7, elems, 7)
+    let acc9 = jsonAddElementIfPresent(acc8, elems, 8)
+    let acc10 = jsonAddElementIfPresent(acc9, elems, 9)
+    let acc11 = jsonAddElementIfPresent(acc10, elems, 10)
+    let acc12 = jsonAddElementIfPresent(acc11, elems, 11)
+    let acc13 = jsonAddElementIfPresent(acc12, elems, 12)
+    let acc14 = jsonAddElementIfPresent(acc13, elems, 13)
+    let acc15 = jsonAddElementIfPresent(acc14, elems, 14)
+    let acc16 = jsonAddElementIfPresent(acc15, elems, 15)
+    return acc16
+  }
+)
+
+@DATA(
+  person = jsonDecodeFlatObject("{\"name\": \"Ada\", \"age\": 36, \"active\": true, \"score\": 3.14, \"note\": null}")
+
+  numbers_only = jsonDecodeFlatObject("{\"a\": 1, \"b\": -2, \"c\": 2.5, \"d\": -0.5}")
+
+  primes = jsonDecodeFlatArray("[2, 3, 5, 7, 11, 13]")
+
+  tags = jsonDecodeFlatArray("[\"math\", \"cs\", \"physics\"]")
+
+  mixed = jsonDecodeFlatArray("[true, false, null, 1, \"x\"]")
+
+  big_number = jsonParseNumber("123456789012345")
+)

@@ -99,7 +99,7 @@ fn raw_full_pipeline_benchmark(c: &mut Criterion) {
             &input,
             |b, input| {
                 b.iter(|| {
-                    let loader = DixLoader::new();
+                    let loader = DixLoader::new_silent();
                     black_box(
                         loader
                             .compile_to_resolved_ast_from_str(black_box(input), "raw_bench")

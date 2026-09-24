@@ -83,7 +83,7 @@ fn build_fixtures() -> Vec<ScaledFixture> {
     let real_source = std::fs::read_to_string(REAL_DB_PATH)
         .unwrap_or_else(|e| panic!("failed to read {REAL_DB_PATH}: {e}"));
 
-    let loader = DixLoader::new();
+    let loader = DixLoader::new_silent();
     let converter = DixConverter::new();
 
     // 1x/2x/4x (5/10/20 elements). Cut down from an earlier 1/4/12/24
@@ -155,7 +155,7 @@ fn bench_real_file_compile(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(8));
     group.throughput(Throughput::Bytes(real_source.len() as u64));
     group.bench_function("mdix_compile_with_real_imports", |b| {
-        let loader = DixLoader::new();
+        let loader = DixLoader::new_silent();
         b.iter(|| {
             loader
                 .compile_to_resolved_ast_from_str(black_box(&real_source), "chem_db_real")
@@ -181,7 +181,7 @@ fn bench_scaled_comparison(c: &mut Criterion) {
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(5));
 
-    let loader = DixLoader::new();
+    let loader = DixLoader::new_silent();
 
     for f in &fixtures {
         group.throughput(Throughput::Bytes(f.mdix_source.len() as u64));

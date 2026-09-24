@@ -24,9 +24,11 @@ namespace MidManStudio.Mdix.Localization
         public string DisplayName { get; }
 
         /// <summary>
-        /// Plural rule identifier read from the locale_plural_rule enum field value.
-        /// One of: ONE_OTHER, ZERO_ONE_OTHER, SLAVIC, ARABIC, NONE.
-        /// Passed to MdixPluralResolver.GetFormName() on every GetPlural call.
+        /// Plural rule family name read from the locale_plural_rule enum field
+        /// value -- one of the 27 real CLDR-derived families in
+        /// CldrPluralFamilies.All (see its own doc comment for the full list
+        /// and extraction method). Passed to MdixPluralResolver.GetFormName()
+        /// on every GetPlural call.
         /// </summary>
         public string PluralRule { get; }
 

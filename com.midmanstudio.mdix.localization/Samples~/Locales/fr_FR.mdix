@@ -14,7 +14,7 @@
 
   locale_display_name<string> = "Français (France)"
   locale_bcp47<string>        = "fr-FR"
-  locale_plural_rule<enum>    = loc.PluralRule.ONE_OTHER
+  locale_plural_rule<enum>    = loc.PluralRule.FRENCH_PORTUGUESE
   locale_script_dir<enum>     = loc.ScriptDir.LTR
   locale_gender_sys<enum>     = loc.GenderSystem.MASC_FEM
 

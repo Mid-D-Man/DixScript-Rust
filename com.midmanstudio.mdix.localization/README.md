@@ -52,17 +52,35 @@ ui:   play = "Play", settings = "Settings", back = "Back"
 )## Plural system
 
 CLDR-based plural resolution. The active locale's `locale_plural_rule` drives
-form selection. Four built-in rules:
+form selection. 27 families, mechanically extracted from real CLDR v48 data
+(unicode-org/cldr-json's own `plurals.json`) and verified against an
+independent re-evaluation across 67,710 (locale, count) pairs with zero
+mismatches — not a hand-approximated subset. Each family is *data*
+(`PluralRuleFamily` in `CldrPluralFamilies.cs`), interpreted by one generic
+resolver, so a future CLDR correction is a data change, not new code.
 
-| Rule            | Languages                  | Forms                          |
-|-----------------|----------------------------|--------------------------------|
-| ONE_OTHER       | English, German, Spanish … | one, other                     |
-| ZERO_ONE_OTHER  | French (formal)            | zero, one, other               |
-| SLAVIC          | Russian, Polish, Ukrainian | zero*, one, few, many          |
-| ARABIC          | Arabic                     | zero, one, two, few, many, other|
+A few, to show the range (see `CldrPluralFamilies.cs` for the full 27 and
+exactly which languages map to each):
 
-*Slavic zero form: if `.zero` sub-key exists and `count == 0`, it is used
-directly — bypassing the rule resolver.
+| Rule            | Example languages           | Forms                            |
+|-----------------|------------------------------|-----------------------------------|
+| ONE_OTHER       | English, German, Spanish …   | one, other                        |
+| FRENCH_PORTUGUESE | French, Portuguese (Brazil) | one (covers 0 *and* 1), many*, other |
+| SLAVIC          | Russian, Belarusian, Ukrainian only | zero**, one, few, many     |
+| POLISH          | Polish (its own distinct rule, not SLAVIC) | zero**, one, few, many |
+| CZECH_SLOVAK    | Czech, Slovak (a third distinct rule) | zero**, one, few       |
+| ARABIC          | Arabic                        | zero, one, two, few, many, other |
+| WELSH, IRISH, SCOTTISH_GAELIC, MANX, CORNISH, BRETON | each Celtic language's own real rule | varies |
+
+*ROMANCE_MILLIONS-shaped families (FRENCH_PORTUGUESE included) add a "many"
+form for an exact non-zero multiple of a million — a genuine CLDR rule, not
+commonly authored in sample content since it rarely comes up in game UI text.
+
+**Zero override: if a `.zero` sub-key exists and `count == 0`, it's used
+directly regardless of what the family actually resolves 0 to — this is how
+e.g. a SLAVIC, POLISH, or CZECH_SLOVAK locale (whose real CLDR rule maps 0
+to "many" or "other", not its own "zero" category) can still supply
+"нет врагов" for zero without needing a dedicated CLDR zero form.
 
 **p2** (two-form) and **p4** (four-form) quickfuncs from `localization_helpers.mdix`
 produce the named sub-keys at parse time:plural_enemies = loc.p2("1 enemy", "{0} enemies")

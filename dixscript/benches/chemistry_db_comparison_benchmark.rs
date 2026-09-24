@@ -83,10 +83,14 @@ fn build_fixtures() -> Vec<ScaledFixture> {
     let real_source = std::fs::read_to_string(REAL_DB_PATH)
         .unwrap_or_else(|e| panic!("failed to read {REAL_DB_PATH}: {e}"));
 
-    let loader = DixLoader::new();
+    let loader = DixLoader::new_silent();
     let converter = DixConverter::new();
 
-    [1usize, 4, 12, 24]
+    // 1x/2x/4x (5/10/20 elements). Cut down from an earlier 1/4/12/24
+    // attempt that was never actually confirmed against real CI timing --
+    // same reasoning as raw_section_benchmark.rs's tiers: shrink first,
+    // widen later once a real run confirms per-iteration cost.
+    [1usize, 2, 4]
         .iter()
         .map(|&multiplier| {
             let mdix_source = build_scaled_source(&real_source, multiplier);
@@ -147,10 +151,11 @@ fn bench_real_file_compile(c: &mut Criterion) {
         .unwrap_or_else(|e| panic!("failed to read {REAL_DB_PATH}: {e}"));
 
     let mut group = c.benchmark_group("chemistry_db_real_file");
+    group.sample_size(20);
     group.measurement_time(Duration::from_secs(8));
     group.throughput(Throughput::Bytes(real_source.len() as u64));
     group.bench_function("mdix_compile_with_real_imports", |b| {
-        let loader = DixLoader::new();
+        let loader = DixLoader::new_silent();
         b.iter(|| {
             loader
                 .compile_to_resolved_ast_from_str(black_box(&real_source), "chem_db_real")
@@ -167,10 +172,16 @@ fn bench_scaled_comparison(c: &mut Criterion) {
     print_size_report(&fixtures);
 
     let mut group = c.benchmark_group("chemistry_db_scaled_vs_toml_json");
-    group.measurement_time(Duration::from_secs(10));
-    group.sample_size(30);
+    // Flat, small, and floor-value sample_size on purpose -- see the note
+    // on the multiplier list above and raw_section_benchmark.rs's matching
+    // note. mdix_compile is a full compile (real imports, real builder/
+    // unit QuickFunc calls evaluated) so it's the actual cost driver here;
+    // json_parse/toml_parse (plain deserialization) will finish well under
+    // budget regardless.
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(5));
 
-    let loader = DixLoader::new();
+    let loader = DixLoader::new_silent();
 
     for f in &fixtures {
         group.throughput(Throughput::Bytes(f.mdix_source.len() as u64));
@@ -210,7 +221,7 @@ fn bench_scaled_comparison(c: &mut Criterion) {
 
 criterion_group!(
     name    = chemistry_db_benches;
-    config  = Criterion::default().measurement_time(Duration::from_secs(10)).sample_size(30);
+    config  = Criterion::default().measurement_time(Duration::from_secs(5)).sample_size(10);
     targets = bench_real_file_compile, bench_scaled_comparison
 );
 criterion_main!(chemistry_db_benches);

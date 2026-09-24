@@ -160,6 +160,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: parse-trigger
     if: needs.parse-trigger.outputs.run_bench == 'true'
+    timeout-minutes: 120
 
     steps:
       - uses: actions/checkout@v4
@@ -181,9 +182,18 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ubuntu-latest-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ubuntu-latest-cargo-bench-
 
-      - name: Check all benchmark targets compile
-        run: cargo bench --no-run --color=always 2>&1
+      - name: Check benchmark target(s) compile
+        env:
+          BENCH_TARGET: ${{ needs.parse-trigger.outputs.bench_target }}
+        run: |
+          if [ "${BENCH_TARGET:-all}" = "all" ]; then
+            cargo bench -p dixscript --no-run --color=always 2>&1
+          else
+            cargo bench -p dixscript --bench "${BENCH_TARGET}" --no-run --color=always 2>&1
+          fi
 
       - name: Run benchmarks
         continue-on-error: true

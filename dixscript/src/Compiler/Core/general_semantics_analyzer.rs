@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/general_semantics_analyzer.rs"
+// ============================================================================
 //! Central semantic analysis orchestrator — runs all section analyzers in dependency order.
 
 use std::collections::HashMap;
@@ -194,6 +198,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         }
 
         self.analyze_phase6_independent();
+        self.analyze_phase6b_raw();
 
         if !self.analyze_phase7_data_driven() && self.should_terminate() {
             return self.finalize_result();
@@ -428,6 +433,26 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         );
         let result = analyzer.analyze(dlm, &mut self.symbol_table);
         self.add_section_result("DLM", result);
+    }
+
+    /// Mirrors `analyze_phase6_independent` (DLM) — `@RAW` doesn't feed
+    /// into or depend on any other section's analysis, so this runs
+    /// unconditionally alongside it. Takes `&self.ast.raw` (a slice, not a
+    /// single section) since cross-block id/tag uniqueness needs every
+    /// block visible at once — see `raw_section_analyzer.rs`'s top doc
+    /// comment.
+    fn analyze_phase6b_raw(&mut self) {
+        if self.ast.raw.is_empty() {
+            return;
+        }
+
+        let em = self.make_error_manager();
+        let mut analyzer = RawSectionAnalyzer::new_with_error_manager(
+            self.operational_settings,
+            em,
+        );
+        let result = analyzer.analyze(&self.ast.raw, &mut self.symbol_table);
+        self.add_section_result("RAW", result);
     }
 
     fn analyze_phase7_data_driven(&mut self) -> bool {

@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/VersionControl/version_constraints.rs and version_manager.rs"
+// ============================================================================
 //! Version Constraints - Validates DixScript features against version requirements
 //! Uses native Rust collections (no DixCore wrappers)
 
@@ -108,7 +112,7 @@ impl VersionConstraints {
             .to_string();
 
         let supported_sections = &[
-            "CONFIG", "IMPORTS", "DLM", "ENUMS", "QUICKFUNCS", "DATA", "SECURITY",
+            "CONFIG", "IMPORTS", "DLM", "ENUMS", "QUICKFUNCS", "DATA", "SECURITY", "RAW",
         ];
 
         if supported_sections.contains(&normalized_section.as_str()) {
@@ -167,7 +171,7 @@ impl VersionConstraints {
             return false;
         }
         let valid_sections: HashSet<&str> =
-            ["quickfuncs", "enums", "imports", "dlm", "data", "security"]
+            ["quickfuncs", "enums", "imports", "dlm", "data", "security", "raw"]
                 .iter()
                 .copied()
                 .collect();

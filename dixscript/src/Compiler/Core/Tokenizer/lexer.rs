@@ -1,4 +1,15 @@
-//! DixScript Lexer — tokenises a `.mdix` source string into a `Vec<Token>`.
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "lexer.rs"
+// ============================================================================
+//! DixScript Lexer — tokenises a `.mdix` source buffer into a `Vec<Token>`.
+//!
+//! `Tokenizer`'s input is `&[u8]`. `new`/`new_with_error_manager` (the
+//! `&str`-taking versions) are thin wrappers over `_from_bytes` cores, kept
+//! for every existing caller that only ever has text. `@RAW` content-block
+//! payloads (see `scan_raw_content_block`) are recorded as byte offsets and
+//! never pass through UTF-8 validation; every other token still does, via
+//! `TokenizerState::slice`.
 //!
 //! ## Numeric literal additions (v1.0.0)
 //!
@@ -92,35 +103,38 @@ impl TokenizerState {
         TokenizerState { position: 0, line: 1, column: 1, input_length }
     }
     #[inline] fn is_at_end(&self) -> bool { self.position >= self.input_length }
-    #[inline] fn peek(&self, input: &str) -> char {
-        if self.is_at_end() { '\0' } else { input.as_bytes()[self.position] as char }
+    #[inline] fn peek(&self, input: &[u8]) -> char {
+        if self.is_at_end() { '\0' } else { input[self.position] as char }
     }
-    #[inline] fn peek_next(&self, input: &str) -> char {
+    #[inline] fn peek_next(&self, input: &[u8]) -> char {
         if self.position + 1 >= self.input_length { '\0' }
-        else { input.as_bytes()[self.position + 1] as char }
+        else { input[self.position + 1] as char }
     }
-    #[inline] fn peek_at(&self, input: &str, offset: usize) -> char {
+    #[inline] fn peek_at(&self, input: &[u8], offset: usize) -> char {
         let pos = self.position + offset;
-        if pos >= self.input_length { '\0' } else { input.as_bytes()[pos] as char }
+        if pos >= self.input_length { '\0' } else { input[pos] as char }
     }
-    #[inline] fn advance(&mut self, input: &str) -> char {
+    #[inline] fn advance(&mut self, input: &[u8]) -> char {
         if self.is_at_end() { return '\0'; }
-        let current = input.as_bytes()[self.position] as char;
+        let current = input[self.position] as char;
         self.position += 1;
         if current == '\n' { self.line += 1; self.column = 1; } else { self.column += 1; }
         current
     }
-    #[inline] fn slice<'a>(&self, input: &'a str, start: usize, length: usize) -> &'a str {
-        let bytes = input.as_bytes();
-        let end   = (start + length).min(bytes.len());
-        std::str::from_utf8(&bytes[start..end]).unwrap_or("")
+    /// Real UTF-8 validation lives here, and only here — every token that
+    /// carries text (identifiers, string literals, comments, numeric raw
+    /// slices) goes through this. Falls back to `""` on invalid UTF-8 rather
+    /// than panicking, same as before this file took `&[u8]` input.
+    #[inline] fn slice<'a>(&self, input: &'a [u8], start: usize, length: usize) -> &'a str {
+        let end = (start + length).min(input.len());
+        std::str::from_utf8(&input[start..end]).unwrap_or("")
     }
 }
 
 // ── Tokenizer struct ──────────────────────────────────────────────────────────
 
 pub struct Tokenizer<'src> {
-    input:    &'src str,
+    input:    &'src [u8],
     settings: &'src OperationalSettings,
 
     version_allows_all_tokens: bool,
@@ -134,8 +148,12 @@ pub struct Tokenizer<'src> {
 }
 
 impl<'src> Tokenizer<'src> {
-    pub fn new_with_error_manager(
-        input:         &'src str,
+    /// Core constructor. `input` is not required to be valid UTF-8 as a
+    /// whole — only the spans that actually become `Identifier`/`String`/
+    /// `Comment`/etc. tokens get validated (via `TokenizerState::slice`),
+    /// and `@RAW` content-block payloads never do at all.
+    pub fn new_with_error_manager_from_bytes(
+        input:         &'src [u8],
         settings:      &'src OperationalSettings,
         error_manager: ErrorManager,
     ) -> Self {
@@ -161,6 +179,22 @@ impl<'src> Tokenizer<'src> {
             static_calls_found:          Vec::new(),
             token_pool:                  Vec::with_capacity(estimated_tokens),
         }
+    }
+
+    pub fn new_from_bytes(input: &'src [u8], settings: &'src OperationalSettings) -> Self {
+        Self::new_with_error_manager_from_bytes(input, settings, ErrorManager::get_shared_instance())
+    }
+
+    /// Convenience wrapper for text-only source. `str::as_bytes()` is a
+    /// free, zero-cost view (no copy) — every existing caller that only
+    /// ever has a `&str` keeps working exactly as before, with no changes
+    /// needed on their end.
+    pub fn new_with_error_manager(
+        input:         &'src str,
+        settings:      &'src OperationalSettings,
+        error_manager: ErrorManager,
+    ) -> Self {
+        Self::new_with_error_manager_from_bytes(input.as_bytes(), settings, error_manager)
     }
 
     pub fn new(input: &'src str, settings: &'src OperationalSettings) -> Self {
@@ -239,7 +273,7 @@ impl<'src> Tokenizer<'src> {
 
     #[inline]
     fn skip_whitespace(&self, state: &mut TokenizerState) {
-        let bytes = self.input.as_bytes();
+        let bytes = self.input;
         let start = state.position;
         let end   = platform::find_whitespace_end(bytes, start);
         if end == start { return; }
@@ -349,8 +383,21 @@ impl<'src> Tokenizer<'src> {
     #[inline]
     fn is_ident_cont_at(&self, pos: usize) -> bool {
         if pos >= self.input.len() { return false; }
-        let b = self.input.as_bytes()[pos];
+        let b = self.input[pos];
         (b as u32) < 256 && IDENT_CONT[b as usize]
+    }
+
+    /// True when the last two tokens pushed were `content` `->` — the exact
+    /// and only trigger for treating the next `{` as the start of an `@RAW`
+    /// content block instead of a plain brace. `meta_data -> {` and
+    /// `using -> {` in the same `@RAW(...)` section are unaffected, since
+    /// their preceding identifier is `meta_data`/`using`, not `content`.
+    #[inline]
+    fn just_saw_content_arrow(&self) -> bool {
+        let n = self.token_pool.len();
+        n >= 2
+            && matches!(self.token_pool[n - 1].token_type, TokenType::SwitchCase)
+            && matches!(&self.token_pool[n - 2].token_type, TokenType::Identifier(id) if id == "content")
     }
 }
 
@@ -443,6 +490,14 @@ impl<'src> Tokenizer<'src> {
             return Ok(Some(self.scan_identifier_or_keyword(state)));
         }
 
+        // @RAW content block: `content -> { ---tag--- <bytes> ---tag--- }`.
+        // Only triggered inside @RAW, and only right after `content ->` —
+        // every other `{` (including `meta_data -> {` / `using -> {` in the
+        // same section) falls through to scan_single_character as normal.
+        if current == '{' && self.current_section == SectionId::Raw && self.just_saw_content_arrow() {
+            return self.scan_raw_content_block(state);
+        }
+
         self.scan_single_character(state)
     }
 
@@ -452,7 +507,7 @@ impl<'src> Tokenizer<'src> {
         state.advance(self.input);
         state.advance(self.input);
         let comment_start = state.position;
-        let bytes = self.input.as_bytes();
+        let bytes = self.input;
         if let Some(offset) = memchr(b'\n', &bytes[state.position..]) {
             let content = state.slice(self.input, comment_start, offset).to_string();
             state.position += offset + 1;
@@ -471,7 +526,7 @@ impl<'src> Tokenizer<'src> {
         state.advance(self.input);
         state.advance(self.input);
         let comment_start = state.position;
-        let bytes = self.input.as_bytes();
+        let bytes = self.input;
 
         if let Some(offset) = memchr::memmem::find(&bytes[state.position..], b"*/") {
             let end_abs       = state.position + offset;
@@ -501,8 +556,11 @@ impl<'src> Tokenizer<'src> {
         if self.should_terminate() {
             return Err(format!("Unterminated multi-line comment at line {}, col {}", start_line, start_column));
         }
-        let content = state.slice(self.input, comment_start, bytes.len() - comment_start).to_string();
-        Ok(Some(Token::new(TokenType::Comment(content), start_line, start_column, self.current_section)))
+        let partial = state.slice(self.input, comment_start, bytes.len() - comment_start).to_string();
+        state.position = bytes.len();
+        Ok(Some(Token::new(
+            TokenType::Comment(partial), start_line, start_column, self.current_section,
+        )))
     }
 
     fn try_scan_section_keyword(&self, state: &mut TokenizerState) -> Option<Token> {
@@ -515,7 +573,7 @@ impl<'src> Tokenizer<'src> {
 
         let section_start = state.position;
         while !state.is_at_end() {
-            let b = self.input.as_bytes()[state.position];
+            let b = self.input[state.position];
             if b.is_ascii_alphabetic() { state.advance(self.input); } else { break; }
         }
         let section_len = state.position - section_start;
@@ -533,6 +591,7 @@ impl<'src> Tokenizer<'src> {
             "QUICKFUNCS" => Some(TokenType::SectionQuickFuncs),
             "DATA"       => Some(TokenType::SectionData),
             "SECURITY"   => Some(TokenType::SectionSecurity),
+            "RAW"        => Some(TokenType::SectionRaw),
             _ => None,
         };
 
@@ -547,13 +606,174 @@ impl<'src> Tokenizer<'src> {
         }
     }
 
+    /// Scans an `@RAW` `content -> { ---tag--- <bytes> ---tag--- }` block.
+    ///
+    /// Positioned at the `{` when called (triggered by `scan_token` seeing
+    /// `content ->` immediately before it, while `current_section ==
+    /// SectionId::Raw`). Finds the opening `---<tag>` delimiter, records
+    /// every byte up to the matching `---<tag>` closer as a `(start, end)`
+    /// range into `self.input` — never copied, never passed through
+    /// `str::from_utf8` — then expects the closing `}`.
+    ///
+    /// Opening and closing tag must match exactly (checked here). Tag
+    /// *uniqueness across the whole file* is NOT checked here — this
+    /// function only ever sees one block at a time, and cross-block
+    /// collision detection needs every `@RAW` block already parsed, which
+    /// is semantic-analysis-time information this lexer pass doesn't have.
+    fn scan_raw_content_block(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
+        let start_line   = state.line;
+        let start_column = state.column;
+        state.advance(self.input); // consume '{'
+
+        self.skip_whitespace(state);
+
+        if !(state.peek(self.input) == '-'
+            && state.peek_next(self.input) == '-'
+            && state.peek_at(self.input, 2) == '-')
+        {
+            self.error_manager.add_lexical_error(
+                LexicalErrorType::InvalidCharacter,
+                "Expected '---<tag>' opening delimiter after 'content -> {'".to_string(),
+                state.line, state.column, None, None,
+            );
+            if self.should_terminate() {
+                return Err(format!(
+                    "Malformed @RAW content block at line {}, col {}", state.line, state.column
+                ));
+            }
+            return Ok(Some(Token::new(
+                TokenType::Error("Malformed @RAW content block: missing opening delimiter".to_string()),
+                start_line, start_column, self.current_section,
+            )));
+        }
+        state.advance(self.input);
+        state.advance(self.input);
+        state.advance(self.input); // '---'
+
+        let tag_start = state.position;
+        while !state.is_at_end() {
+            let c = state.peek(self.input);
+            if c == '\n' || c == '\r' { break; }
+            state.advance(self.input);
+        }
+        let tag = state.slice(self.input, tag_start, state.position - tag_start).to_string();
+
+        if tag.is_empty() {
+            self.error_manager.add_lexical_error(
+                LexicalErrorType::InvalidCharacter,
+                "Empty @RAW content delimiter tag".to_string(),
+                start_line, start_column, None, None,
+            );
+            if self.should_terminate() {
+                return Err(format!(
+                    "Empty @RAW content delimiter tag at line {}, col {}", start_line, start_column
+                ));
+            }
+        }
+
+        // Consume the line terminator after the opening delimiter.
+        if state.peek(self.input) == '\r' { state.advance(self.input); }
+        if state.peek(self.input) == '\n' { state.advance(self.input); }
+
+        let payload_start = state.position;
+        let bytes         = self.input;
+        let closer        = format!("---{}", tag);
+        let payload_end;
+
+        loop {
+            match memchr::memmem::find(&bytes[state.position..], b"---") {
+                Some(offset) => {
+                    let candidate_pos = state.position + offset;
+
+                    // Advance state up to the candidate '---' first, so
+                    // line/column tracking (and any newlines inside the
+                    // payload scanned so far) stay correct regardless of
+                    // which branch below is taken.
+                    let scanned  = &bytes[state.position..candidate_pos];
+                    let newlines = memchr::memchr_iter(b'\n', scanned).count();
+                    if newlines > 0 {
+                        state.line += newlines;
+                        let last_nl = memchr::memchr_iter(b'\n', scanned).next_back().unwrap();
+                        state.column = candidate_pos - (state.position + last_nl);
+                    } else {
+                        state.column += candidate_pos - state.position;
+                    }
+                    state.position = candidate_pos;
+
+                    let is_match = bytes[candidate_pos..].starts_with(closer.as_bytes())
+                        && matches!(
+                            bytes.get(candidate_pos + closer.len()),
+                            None | Some(b'\r') | Some(b'\n')
+                        );
+
+                    if is_match {
+                        payload_end = candidate_pos;
+                        for _ in 0..closer.len() { state.advance(self.input); }
+                        break;
+                    } else {
+                        // Not a full match for *our* tag — either a `---`
+                        // that isn't a delimiter at all, or another block's
+                        // delimiter appearing inside this payload (a real
+                        // problem, but detecting *that* specifically needs
+                        // file-wide information this function doesn't have;
+                        // semantic analysis is where cross-block tag
+                        // uniqueness gets enforced). Skip past these three
+                        // bytes and keep scanning for our own closer.
+                        state.advance(self.input);
+                        state.advance(self.input);
+                        state.advance(self.input);
+                    }
+                }
+                None => {
+                    self.error_manager.add_lexical_error(
+                        LexicalErrorType::UnterminatedString,
+                        format!("Unterminated @RAW content block: no closing '---{}---' found", tag),
+                        start_line, start_column, None, None,
+                    );
+                    if self.should_terminate() {
+                        return Err(format!(
+                            "Unterminated @RAW content block (tag '{}') starting at line {}, col {}",
+                            tag, start_line, start_column
+                        ));
+                    }
+                    state.position = bytes.len();
+                    return Ok(Some(Token::new(
+                        TokenType::Error(format!("Unterminated @RAW content block: '{}'", tag)),
+                        start_line, start_column, self.current_section,
+                    )));
+                }
+            }
+        }
+
+        self.skip_whitespace(state);
+        if state.peek(self.input) != '}' {
+            self.error_manager.add_lexical_error(
+                LexicalErrorType::InvalidCharacter,
+                "Expected '}' to close @RAW content block".to_string(),
+                state.line, state.column, None, None,
+            );
+            if self.should_terminate() {
+                return Err(format!(
+                    "Missing '}}' after @RAW content block at line {}, col {}", state.line, state.column
+                ));
+            }
+        } else {
+            state.advance(self.input); // consume '}'
+        }
+
+        Ok(Some(Token::new(
+            TokenType::RawContent { tag, start: payload_start, end: payload_end },
+            start_line, start_column, self.current_section,
+        )))
+    }
+
     fn scan_string_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_line   = state.line;
         let start_column = state.column;
         let quote        = state.peek(self.input) as u8;
         state.advance(self.input);
 
-        let bytes        = self.input.as_bytes();
+        let bytes        = self.input;
         let search_start = state.position;
         let mut pos      = search_start;
         let mut content  = String::new();
@@ -640,7 +860,7 @@ impl<'src> Tokenizer<'src> {
         let start_column = state.column;
         state.advance(self.input); // consume opening `
 
-        let bytes         = self.input.as_bytes();
+        let bytes         = self.input;
         let content_start = state.position;
 
         if let Some(offset) = memchr::memchr(b'`', &bytes[state.position..]) {
@@ -739,7 +959,7 @@ impl<'src> Tokenizer<'src> {
         let start_column = state.column;
         let start_line   = state.line;
         let start_pos    = state.position;
-        let bytes        = self.input.as_bytes();
+        let bytes        = self.input;
 
         let mut has_dot            = false;
         let mut has_exponent       = false;
@@ -849,7 +1069,7 @@ impl<'src> Tokenizer<'src> {
         let mut has_long_suffix  = false;
 
         if !state.is_at_end() {
-            let nb = self.input.as_bytes()[state.position];
+            let nb = self.input[state.position];
             match nb {
                 b'L' | b'l' if !has_dot && !has_exponent => {
                     // Only consume as Long suffix if not followed by ident continuation
@@ -955,7 +1175,7 @@ impl<'src> Tokenizer<'src> {
         state.advance(self.input); // 'x' / 'X'
 
         let hex_start = state.position;
-        let bytes     = self.input.as_bytes();
+        let bytes     = self.input;
         let mut has_underscore = false;
 
         while !state.is_at_end() {
@@ -1072,7 +1292,7 @@ impl<'src> Tokenizer<'src> {
         state.advance(self.input); // 'b' / 'B'
 
         let bin_start      = state.position;
-        let bytes          = self.input.as_bytes();
+        let bytes          = self.input;
         let mut has_digits = false;
 
         while !state.is_at_end() {
@@ -1169,7 +1389,7 @@ impl<'src> Tokenizer<'src> {
         let start_line   = state.line;
         let start_pos    = state.position;
         state.advance(self.input); // '#'
-        let bytes = self.input.as_bytes();
+        let bytes = self.input;
         while !state.is_at_end()
             && (bytes[state.position] as u32) < 256
             && HEX_DIGIT[bytes[state.position] as usize]
@@ -1249,7 +1469,7 @@ impl<'src> Tokenizer<'src> {
         let start_column = state.column;
         let start_line   = state.line;
         let start_pos    = state.position;
-        let bytes        = self.input.as_bytes();
+        let bytes        = self.input;
 
         loop {
             if state.is_at_end() { break; }

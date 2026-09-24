@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/VersionControl/version_constraints.rs and version_manager.rs"
+// ============================================================================
 //! Version Manager - Manages DixScript version features and compatibility
 //!
 //! SINGLETON PATTERN using LazyLock (thread-safe, zero-cost after first access)
@@ -119,6 +123,7 @@ impl VersionManager {
             TokenType::SectionDLM => self.supports_feature("dlm_section"),
             TokenType::SectionData => self.supports_feature("data_section"),
             TokenType::SectionSecurity => self.supports_feature("security_section"),
+            TokenType::SectionRaw => self.supports_feature("raw_section"),
             _ => true,
         }
     }
@@ -189,6 +194,10 @@ impl VersionManager {
             unsupported.push("SECURITY section".to_string());
         }
 
+        if !script.raw.is_empty() && !self.supports_feature("raw_section") {
+            unsupported.push("RAW section".to_string());
+        }
+
         unsupported
     }
 
@@ -227,6 +236,7 @@ impl VersionManager {
         features.insert("quickfuncs_section".to_string());
         features.insert("data_section".to_string());
         features.insert("security_section".to_string());
+        features.insert("raw_section".to_string());
 
         // CONFIG features
         features.insert("feature_control".to_string());

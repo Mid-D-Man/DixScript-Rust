@@ -139,7 +139,7 @@ jobs:
         run: |
           cp .github/dixscript-test-template.html test-results-index.html
           sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  test-results-index.html
-          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       test-results-index.html
+          sed -i "s#BRANCH_PLACEHOLDER#${{ github.ref_name }}#g"       test-results-index.html
           sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            test-results-index.html
           sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     test-results-index.html
           sed -i "s|RUST_VERSION_PLACEHOLDER|${RUST_VERSION}|g"        test-results-index.html
@@ -161,6 +161,7 @@ jobs:
     needs: parse-trigger
     if: needs.parse-trigger.outputs.run_bench == 'true'
     timeout-minutes: 120
+
     steps:
       - uses: actions/checkout@v4
 
@@ -181,9 +182,18 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ubuntu-latest-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ubuntu-latest-cargo-bench-
 
-      - name: Check all benchmark targets compile
-        run: cargo bench --no-run --color=always 2>&1
+      - name: Check benchmark target(s) compile
+        env:
+          BENCH_TARGET: ${{ needs.parse-trigger.outputs.bench_target }}
+        run: |
+          if [ "${BENCH_TARGET:-all}" = "all" ]; then
+            cargo bench -p dixscript --no-run --color=always 2>&1
+          else
+            cargo bench -p dixscript --bench "${BENCH_TARGET}" --no-run --color=always 2>&1
+          fi
 
       - name: Run benchmarks
         continue-on-error: true
@@ -209,7 +219,7 @@ jobs:
         run: |
           cp .github/bench-results-template.html bench-results-index.html
           sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  bench-results-index.html
-          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       bench-results-index.html
+          sed -i "s#BRANCH_PLACEHOLDER#${{ github.ref_name }}#g"       bench-results-index.html
           sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            bench-results-index.html
           sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     bench-results-index.html
           sed -i "s|RUST_VERSION_PLACEHOLDER|${RUST_VERSION}|g"        bench-results-index.html
@@ -372,7 +382,7 @@ jobs:
           rm -f "$CARDS_FILE"
 
           sed -i "s/BUILD_NUM_PLACEHOLDER/${BUILD_NUM}/g" flame-output/index.html
-          sed -i "s/BRANCH_PLACEHOLDER/${BRANCH}/g"       flame-output/index.html
+          sed -i "s#BRANCH_PLACEHOLDER#${BRANCH}#g"       flame-output/index.html
           sed -i "s/COMMIT_PLACEHOLDER/${COMMIT}/g"       flame-output/index.html
           sed -i "s|DATE_PLACEHOLDER|${DATE}|g"           flame-output/index.html
 
@@ -449,7 +459,7 @@ jobs:
         run: |
           cp .github/dixscript-cli-test.html cli-test-index.html
           sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  cli-test-index.html
-          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       cli-test-index.html
+          sed -i "s#BRANCH_PLACEHOLDER#${{ github.ref_name }}#g"       cli-test-index.html
           sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            cli-test-index.html
           sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     cli-test-index.html
           sed -i "s|RUST_VERSION_PLACEHOLDER|${RUST_VERSION}|g"        cli-test-index.html

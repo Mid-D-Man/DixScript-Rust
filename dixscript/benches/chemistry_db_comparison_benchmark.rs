@@ -36,7 +36,19 @@
 //!    the same way. The real file entry uses `REAL_DB_PATH` directly —
 //!    nothing to write, its imports already resolve as-is.
 //!
-//! 2. The real `elements_database.mdix` has grown to 118 elements (was 5
+//! 2. The size report used to compare `mdix_source.len()` (the raw source
+//!    file -- compact, unresolved `@IMPORTS` references, unevaluated
+//!    `builders.createIdentity(...)` calls) directly against `json.len()`/
+//!    `toml.len()` (built from the fully RESOLVED AST). That's source code
+//!    size against compiled output size, not the same data in two formats.
+//!    Now also computes `resolved_mdix_len` via
+//!    `DixConverter::to_mdix(&ast, None)` on the same resolved AST used for
+//!    json/toml -- that's the actual apples-to-apples comparison; the raw
+//!    source size is still reported alongside it (it's a real, separately
+//!    meaningful number -- how compact the format you actually author is --
+//!    just not the same measurement).
+//!
+//! 3. The real `elements_database.mdix` has grown to 118 elements (was 5
 //!    when this benchmark was written) and no longer has the
 //!    `"// ELEMENT: Hydrogen"`-style comment banners this file used to
 //!    locate slice boundaries with — elements are marked by their
@@ -122,7 +134,15 @@ fn build_scaled_source(real_source: &str, multiplier: usize) -> String {
 struct ScaledFixture {
     label: String,
     element_count: usize,
+    /// Raw source text -- compact, has unresolved `builders.createIdentity(...)`
+    /// calls and `@IMPORTS` references, NOT comparable size-wise to json/toml
+    /// (see `resolved_mdix_len`). Still reported on its own: it's the real
+    /// answer to "how big is the file I actually write/store".
     mdix_source: String,
+    /// Size of `DixConverter::to_mdix(&ast, None)` -- the SAME resolved data
+    /// as `json`/`toml` below, serialized back to .mdix instead. This is the
+    /// fair, apples-to-apples size comparison; `mdix_source.len()` is not.
+    resolved_mdix_len: usize,
     /// Real file on disk holding `mdix_source` -- for the synthetic scaled
     /// tiers this is a written temp file inside `mdix_files/chemistry_db/`
     /// (deleted on drop); for the real-file entry it's `REAL_DB_PATH`
@@ -156,6 +176,14 @@ fn compile_and_convert(
         .compile_to_resolved_ast(mdix_path.to_str().expect("fixture path is valid UTF-8"))
         .unwrap_or_else(|e| panic!("{label} ({element_count} elements) failed to compile: {e}"));
 
+    // Same resolved AST, serialized back to .mdix instead of json/toml --
+    // this, not mdix_source.len(), is the size that's actually comparable
+    // to json.len()/toml.len() below (see the struct's own doc comments).
+    let resolved_mdix_len = converter
+        .to_mdix(&ast, None)
+        .unwrap_or_else(|e| panic!("to_mdix (resolved) failed for {label}: {e}"))
+        .len();
+
     let json = converter
         .to_json(&ast, false)
         .unwrap_or_else(|e| panic!("to_json failed for {label}: {e}"));
@@ -168,7 +196,7 @@ fn compile_and_convert(
         }
     };
 
-    ScaledFixture { label, element_count, mdix_source, mdix_path, owns_file, json, toml }
+    ScaledFixture { label, element_count, mdix_source, resolved_mdix_len, mdix_path, owns_file, json, toml }
 }
 
 /// Builds every comparison point: the synthetic 5/10/20-element scaled
@@ -230,19 +258,28 @@ fn build_fixtures() -> Vec<ScaledFixture> {
 
 fn print_size_report(fixtures: &[ScaledFixture]) {
     println!("\n=== chemistry_db real-structure size/scaling comparison ===");
-    println!("{:<16} {:>10} {:>10} {:>10} {:>10}", "elements", "mdix(B)", "json(B)", "toml(B)", "json/mdix");
+    println!(
+        "{:<9} {:>10} {:>14} {:>10} {:>10} {:>12}",
+        "elements", "source(B)", "resolved_mdix(B)", "json(B)", "toml(B)", "json/resolved"
+    );
     for f in fixtures {
         let toml_str = f.toml.as_ref().map(|t| t.len().to_string()).unwrap_or_else(|| "n/a".to_string());
         println!(
-            "{:<16} {:>10} {:>10} {:>10} {:>9.2}x",
+            "{:<9} {:>10} {:>14} {:>10} {:>10} {:>11.2}x",
             f.element_count,
             f.mdix_source.len(),
+            f.resolved_mdix_len,
             f.json.len(),
             toml_str,
-            f.json.len() as f64 / f.mdix_source.len() as f64,
+            f.json.len() as f64 / f.resolved_mdix_len as f64,
         );
     }
-    println!();
+    println!(
+        "\nsource(B) is the raw .mdix file -- unresolved @IMPORTS refs and\n\
+         unevaluated builder/unit calls, NOT comparable to json/toml.\n\
+         resolved_mdix(B) is the SAME resolved data as json/toml, serialized\n\
+         back to .mdix -- that's the fair size comparison, in the last column.\n"
+    );
 }
 
 // ── Bench: real, unmodified file (ground truth, direct path, no comparison) ──

@@ -19,9 +19,11 @@ PluginImporter:
   - first:
       Editor: Editor
     second:
-      enabled: 0
+      enabled: 1
       settings:
         DefaultValueInitialized: true
+        CPU: AnyCPU
+        OS: AnyOS
   - first:
       Standalone: Win64
     second:

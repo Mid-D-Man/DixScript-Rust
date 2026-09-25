@@ -6,12 +6,20 @@
 //! DixScript vs JSON vs TOML using the real chemistry_db data, not a
 //! synthetic fixture — answers whether DixScript's parse-time advantage
 //! over TOML holds, grows, or shrinks as file size grows, using a dataset
-//! with the same structural complexity as 5 real elements (126 properties
+//! with the same structural complexity as real elements (126 properties
 //! each, most values computed via QuickFunc calls like
 //! `builders.createIdentity(...)`) rather than flat repeated key/value
 //! pairs like `format_comparison_benchmark.rs`'s `bench_scaled_payloads`.
 //!
-//! Two fixes recorded here so they don't get silently re-broken:
+//! Comparison points: 5/10/20 elements (synthetic, scaled from a real
+//! 5-element slice of the file) AND the full real file (118 elements,
+//! unscaled) — all four go through the same mdix/json/toml comparison
+//! now, not just the scaled ones. The scaled tiers exist to show the
+//! trend at small sizes without waiting on a full compile each time;
+//! the real 118-element entry is what actually answers "does this hold
+//! at real scale" rather than extrapolating from the trend.
+//!
+//! Fixes recorded here so they don't get silently re-broken:
 //!
 //! 1. `compile_to_resolved_ast_from_str`'s `label` argument is NOT a base
 //!    path for `@IMPORTS` resolution — see its own doc comment in
@@ -21,26 +29,23 @@
 //!    paths, so loading it via `from_str` fails every import with "Failed
 //!    to read file: No such file or directory" the moment semantic
 //!    analysis runs. Only `compile_to_resolved_ast(file_path)` resolves
-//!    them, relative to the real file's own directory. `bench_real_file_compile`
-//!    now uses that directly. The synthetic *scaled* sources below aren't
-//!    real files on disk by construction, so they're written to real temp
-//!    `.mdix` files inside `mdix_files/chemistry_db/` (same directory as
-//!    `core/`) specifically so their imports resolve the same way.
+//!    them, relative to the real file's own directory. The synthetic
+//!    scaled sources aren't real files on disk by construction, so they're
+//!    written to real temp `.mdix` files inside `mdix_files/chemistry_db/`
+//!    (same directory as `core/`) specifically so their imports resolve
+//!    the same way. The real file entry uses `REAL_DB_PATH` directly —
+//!    nothing to write, its imports already resolve as-is.
 //!
 //! 2. The real `elements_database.mdix` has grown to 118 elements (was 5
 //!    when this benchmark was written) and no longer has the
 //!    `"// ELEMENT: Hydrogen"`-style comment banners this file used to
 //!    locate slice boundaries with — elements are marked by their
-//!    `elements.<name>.` key prefixes only now. Scaling the *entire*
-//!    118-element file 1x/2x/4x would be compiling up to ~472 elements
-//!    (~59,000 properties) per iteration, nothing like what `sample_size`/
-//!    `measurement_time` below were tuned against and nothing like the
-//!    original "repeat one real 5-element unit" intent. `build_scaled_source`
-//!    now re-derives just the original 5-element (hydrogen..boron) slice
-//!    from within the real file by finding where `elements.carbon.` starts
-//!    (first element outside `ELEMENT_KEYS`, confirmed next in periodic-table
-//!    order right after boron) and using that as the slice's end boundary,
-//!    instead of a banner that no longer exists.
+//!    `elements.<name>.` key prefixes only now. `build_scaled_source`
+//!    re-derives just the original 5-element (hydrogen..boron) slice from
+//!    within the real file by finding where `elements.carbon.` starts
+//!    (first element outside `ELEMENT_KEYS`, confirmed next in
+//!    periodic-table order right after boron) and using that as the
+//!    slice's end boundary, instead of a banner that no longer exists.
 //!
 //! JSON and TOML fixtures are never hand-transcribed and never committed
 //! as static files: this benchmark loads the real .mdix source (resolving
@@ -118,20 +123,58 @@ struct ScaledFixture {
     label: String,
     element_count: usize,
     mdix_source: String,
-    /// Real file on disk (inside `mdix_files/chemistry_db/`, alongside
-    /// `core/`) holding `mdix_source` — needed so `@IMPORTS` resolves; see
-    /// the file-header note on `compile_to_resolved_ast_from_str`.
-    mdix_temp_path: PathBuf,
+    /// Real file on disk holding `mdix_source` -- for the synthetic scaled
+    /// tiers this is a written temp file inside `mdix_files/chemistry_db/`
+    /// (deleted on drop); for the real-file entry it's `REAL_DB_PATH`
+    /// itself, which must NEVER be deleted (see `owns_file`).
+    mdix_path: PathBuf,
+    /// True only for temp files this struct created and should clean up.
+    /// False for the real-file entry, which reuses `REAL_DB_PATH` as-is.
+    owns_file: bool,
     json: String,
     toml: Option<String>, // None if the resolved data doesn't round-trip to TOML cleanly
 }
 
 impl Drop for ScaledFixture {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.mdix_temp_path); // best-effort; CI checkout is ephemeral anyway
+        if self.owns_file {
+            let _ = fs::remove_file(&self.mdix_path); // best-effort; CI checkout is ephemeral anyway
+        }
     }
 }
 
+fn compile_and_convert(
+    loader: &DixLoader,
+    converter: &DixConverter,
+    label: String,
+    element_count: usize,
+    mdix_source: String,
+    mdix_path: PathBuf,
+    owns_file: bool,
+) -> ScaledFixture {
+    let ast = loader
+        .compile_to_resolved_ast(mdix_path.to_str().expect("fixture path is valid UTF-8"))
+        .unwrap_or_else(|e| panic!("{label} ({element_count} elements) failed to compile: {e}"));
+
+    let json = converter
+        .to_json(&ast, false)
+        .unwrap_or_else(|e| panic!("to_json failed for {label}: {e}"));
+
+    let toml = match converter.to_toml(&ast) {
+        Ok(t) => Some(t),
+        Err(e) => {
+            eprintln!("note: to_toml failed at {label} ({element_count} elements): {e} -- skipping TOML at this scale");
+            None
+        }
+    };
+
+    ScaledFixture { label, element_count, mdix_source, mdix_path, owns_file, json, toml }
+}
+
+/// Builds every comparison point: the synthetic 5/10/20-element scaled
+/// tiers, PLUS the real, unscaled, full 118-element file -- all four go
+/// through the same mdix/json/toml comparison in `bench_scaled_comparison`
+/// now, not just the scaled ones.
 fn build_fixtures() -> Vec<ScaledFixture> {
     let real_source = std::fs::read_to_string(REAL_DB_PATH)
         .unwrap_or_else(|e| panic!("failed to read {REAL_DB_PATH}: {e}"));
@@ -143,59 +186,55 @@ fn build_fixtures() -> Vec<ScaledFixture> {
     // attempt that was never actually confirmed against real CI timing --
     // same reasoning as raw_section_benchmark.rs's tiers: shrink first,
     // widen later once a real run confirms per-iteration cost.
-    [1usize, 2, 4]
+    let mut fixtures: Vec<ScaledFixture> = [1usize, 2, 4]
         .iter()
         .map(|&multiplier| {
             let mdix_source = build_scaled_source(&real_source, multiplier);
             let element_count = ELEMENT_KEYS.len() * multiplier;
 
-            let mdix_temp_path =
-                PathBuf::from(REAL_DB_DIR).join(format!(".bench_scaled_x{multiplier}.mdix"));
-            fs::write(&mdix_temp_path, &mdix_source).unwrap_or_else(|e| {
-                panic!("failed to write temp fixture {mdix_temp_path:?}: {e}")
-            });
+            let mdix_path = PathBuf::from(REAL_DB_DIR).join(format!(".bench_scaled_x{multiplier}.mdix"));
+            fs::write(&mdix_path, &mdix_source)
+                .unwrap_or_else(|e| panic!("failed to write temp fixture {mdix_path:?}: {e}"));
 
-            // Resolve through the real pipeline -- same imports, same
-            // builder/unit QuickFunc calls, evaluated for real.
-            let ast = loader
-                .compile_to_resolved_ast(
-                    mdix_temp_path.to_str().expect("temp fixture path is valid UTF-8"),
-                )
-                .unwrap_or_else(|e| panic!("scaled chemistry_db (x{multiplier}) failed to compile: {e}"));
-
-            let json = converter
-                .to_json(&ast, false)
-                .unwrap_or_else(|e| panic!("to_json failed for x{multiplier}: {e}"));
-
-            let toml = match converter.to_toml(&ast) {
-                Ok(t) => Some(t),
-                Err(e) => {
-                    eprintln!("note: to_toml failed at x{multiplier} ({element_count} elements): {e} -- skipping TOML at this scale");
-                    None
-                }
-            };
-
-            ScaledFixture {
-                label: format!("{element_count}_elements"),
+            compile_and_convert(
+                &loader,
+                &converter,
+                format!("{element_count}_elements"),
                 element_count,
                 mdix_source,
-                mdix_temp_path,
-                json,
-                toml,
-            }
+                mdix_path,
+                true,
+            )
         })
-        .collect()
+        .collect();
+
+    // The real, unscaled file -- every element actually in it, counted by
+    // its `elements.<name>.identity:` markers rather than trusting the
+    // file's own declared `total_elements` field (self-verifying instead
+    // of assuming the header stays in sync with the actual content).
+    let real_element_count = real_source.matches(".identity:").count();
+    fixtures.push(compile_and_convert(
+        &loader,
+        &converter,
+        "real_full_file".to_string(),
+        real_element_count,
+        real_source.clone(),
+        PathBuf::from(REAL_DB_PATH),
+        false,
+    ));
+
+    fixtures
 }
 
 // ── Size report ────────────────────────────────────────────────────────────
 
 fn print_size_report(fixtures: &[ScaledFixture]) {
     println!("\n=== chemistry_db real-structure size/scaling comparison ===");
-    println!("{:<14} {:>10} {:>10} {:>10} {:>10}", "elements", "mdix(B)", "json(B)", "toml(B)", "json/mdix");
+    println!("{:<16} {:>10} {:>10} {:>10} {:>10}", "elements", "mdix(B)", "json(B)", "toml(B)", "json/mdix");
     for f in fixtures {
         let toml_str = f.toml.as_ref().map(|t| t.len().to_string()).unwrap_or_else(|| "n/a".to_string());
         println!(
-            "{:<14} {:>10} {:>10} {:>10} {:>9.2}x",
+            "{:<16} {:>10} {:>10} {:>10} {:>9.2}x",
             f.element_count,
             f.mdix_source.len(),
             f.json.len(),
@@ -206,14 +245,9 @@ fn print_size_report(fixtures: &[ScaledFixture]) {
     println!();
 }
 
-// ── Bench: real, unmodified file (ground truth, now 118 elements) ──────────
+// ── Bench: real, unmodified file (ground truth, direct path, no comparison) ──
 
 fn bench_real_file_compile(c: &mut Criterion) {
-    // Read once just for throughput sizing -- compile_to_resolved_ast does
-    // its own read internally (needed for @IMPORTS resolution, see the
-    // file-header note), so this file gets read twice per iteration now.
-    // Real file is 445KB; that overhead is a rounding error next to actual
-    // compile cost and the only way to make imports resolve at all.
     let real_source = std::fs::read_to_string(REAL_DB_PATH)
         .unwrap_or_else(|e| panic!("failed to read {REAL_DB_PATH}: {e}"));
 
@@ -232,19 +266,20 @@ fn bench_real_file_compile(c: &mut Criterion) {
     group.finish();
 }
 
-// ── Bench: DixScript vs JSON vs TOML, across scales ─────────────────────────
+// ── Bench: DixScript vs JSON vs TOML, across scales, real file included ────
 
 fn bench_scaled_comparison(c: &mut Criterion) {
     let fixtures = build_fixtures();
     print_size_report(&fixtures);
 
     let mut group = c.benchmark_group("chemistry_db_scaled_vs_toml_json");
-    // Flat, small, and floor-value sample_size on purpose -- see the note
-    // on the multiplier list above and raw_section_benchmark.rs's matching
-    // note. mdix_compile is a full compile (real imports, real builder/
-    // unit QuickFunc calls evaluated) so it's the actual cost driver here;
-    // json_parse/toml_parse (plain deserialization) will finish well under
-    // budget regardless.
+    // Flat, small, floor-value sample_size on purpose for the scaled tiers
+    // -- see the note on the multiplier list above and
+    // raw_section_benchmark.rs's matching note. The real-file entry is a
+    // genuinely heavier compile (hundreds of ms); criterion adapts its own
+    // iteration count to measurement_time regardless, so the same config
+    // still produces a clean sample count for it, just fewer iterations
+    // per sample.
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(5));
 
@@ -252,17 +287,13 @@ fn bench_scaled_comparison(c: &mut Criterion) {
 
     for f in &fixtures {
         group.throughput(Throughput::Bytes(f.mdix_source.len() as u64));
-        group.bench_with_input(
-            BenchmarkId::new("mdix_compile", &f.label),
-            &f.mdix_temp_path,
-            |b, path| {
-                b.iter(|| {
-                    loader
-                        .compile_to_resolved_ast(black_box(path.to_str().expect("valid utf8")))
-                        .expect("generated scaled source should always compile")
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("mdix_compile", &f.label), &f.mdix_path, |b, path| {
+            b.iter(|| {
+                loader
+                    .compile_to_resolved_ast(black_box(path.to_str().expect("valid utf8")))
+                    .expect("fixture source should always compile")
+            });
+        });
 
         group.throughput(Throughput::Bytes(f.json.len() as u64));
         group.bench_with_input(BenchmarkId::new("json_parse", &f.label), &f.json, |b, src| {

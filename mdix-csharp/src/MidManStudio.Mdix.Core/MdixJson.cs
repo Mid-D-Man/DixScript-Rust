@@ -141,9 +141,9 @@ namespace MidManStudio.Mdix.Core
             return false;
         }
 
-        public Dictionary<string, MdixJsonElement>.Enumerator EnumerateObject() =>
+        public IEnumerable<KeyValuePair<string, MdixJsonElement>> EnumerateObject() =>
             ValueKind == MdixJsonValueKind.Object
-                ? _props!.GetEnumerator()
+                ? _props!
                 : throw new MdixJsonException($"Cannot enumerate a token of type '{ValueKind}' as an object.");
 
         // ── Array accessors ─────────────────────────────────────────────
@@ -158,9 +158,9 @@ namespace MidManStudio.Mdix.Core
                 ? _items![index]
                 : throw new MdixJsonException($"Cannot index into a token of type '{ValueKind}'.");
 
-        public List<MdixJsonElement>.Enumerator EnumerateArray() =>
+        public IEnumerable<MdixJsonElement> EnumerateArray() =>
             ValueKind == MdixJsonValueKind.Array
-                ? _items!.GetEnumerator()
+                ? _items!
                 : throw new MdixJsonException($"Cannot enumerate a token of type '{ValueKind}' as an array.");
 
         /// <summary>

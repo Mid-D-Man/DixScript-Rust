@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using MidManStudio.Mdix.Core.Internal;
@@ -495,12 +494,15 @@ namespace MidManStudio.Mdix.Core
             {
                 try
                 {
-                    var s = System.Text.Json.JsonSerializer.Deserialize<string>(json);
-                    return s != null
-                        ? MdixResult<string>.Ok(s)
-                        : MdixError.NativeError($"GetJsonString('{path}'): value was JSON null.");
+                    var element = MdixJson.Parse(json);
+                    if (element.ValueKind == MdixJsonValueKind.Null)
+                        return MdixError.NativeError($"GetJsonString('{path}'): value was JSON null.");
+                    if (element.ValueKind != MdixJsonValueKind.String)
+                        return MdixError.NativeError(
+                            $"GetJsonString('{path}'): expected a JSON string, got '{json}'.");
+                    return MdixResult<string>.Ok(element.GetString()!);
                 }
-                catch (System.Text.Json.JsonException ex)
+                catch (MdixJsonException ex)
                 {
                     return MdixError.NativeError(
                         $"GetJsonString('{path}'): expected a JSON string, got '{json}' ({ex.Message}).");
@@ -970,12 +972,12 @@ namespace MidManStudio.Mdix.Core
 
         #region Private helpers — tuple parsing
 
-        private static MdixResult<T> ParseJsonElement<T>(JsonElement element, string path)
+        private static MdixResult<T> ParseJsonElement<T>(MdixJsonElement element, string path)
         {
             try
             {
                 object? value;
-                if      (typeof(T) == typeof(string))  value = element.ValueKind == JsonValueKind.String ? element.GetString() : element.ToString();
+                if      (typeof(T) == typeof(string))  value = element.ValueKind == MdixJsonValueKind.String ? element.GetString() : element.ToString();
                 else if (typeof(T) == typeof(int))     value = element.GetInt32();
                 else if (typeof(T) == typeof(long))    value = element.GetInt64();
                 else if (typeof(T) == typeof(float))   value = (float)element.GetDouble();
@@ -992,15 +994,14 @@ namespace MidManStudio.Mdix.Core
             }
         }
 
-        private static MdixResult<JsonElement[]> ParseJsonArray(
+        private static MdixResult<MdixJsonElement[]> ParseJsonArray(
             string json, string path, int expectedLength)
         {
             try
             {
-                var doc  = JsonDocument.Parse(json);
-                var root = doc.RootElement;
+                var root = MdixJson.Parse(json);
 
-                if (root.ValueKind != JsonValueKind.Array)
+                if (root.ValueKind != MdixJsonValueKind.Array)
                     return MdixError.TypeMismatch(
                         path, $"tuple[{expectedLength}]", root.ValueKind.ToString());
 
@@ -1010,14 +1011,13 @@ namespace MidManStudio.Mdix.Core
                         $"tuple with at least {expectedLength} elements",
                         $"array with {root.GetArrayLength()} elements");
 
-                var elements = new JsonElement[expectedLength];
+                var elements = new MdixJsonElement[expectedLength];
                 for (int i = 0; i < expectedLength; i++)
                     elements[i] = root[i].Clone();
 
-                doc.Dispose();
-                return MdixResult<JsonElement[]>.Ok(elements);
+                return MdixResult<MdixJsonElement[]>.Ok(elements);
             }
-            catch (JsonException ex)
+            catch (MdixJsonException ex)
             {
                 return MdixError.ParseError($"Invalid tuple JSON at '{path}': {ex.Message}");
             }

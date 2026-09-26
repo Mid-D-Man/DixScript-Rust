@@ -8,11 +8,29 @@
 //! cross-block checks (unique `meta_data.id`, unique delimiter tag) and
 //! per-block required-field checks.
 //!
+//! FIX: every content-block delimiter in this file used to be written
+//! `---tag---` (trailing dashes, matching the shorthand in some doc
+//! comments elsewhere). That does not match what's actually specified
+//! (`others/raw_section_spec.md`): `ContentDelimiter ::= "---"
+//! [UniqueTag] LineTerminator` -- the tag is a bare identifier terminated
+//! by a real newline, with no trailing dashes, and that's exactly what
+//! the lexer's `scan_raw_content_block` implements (it scans the tag
+//! until `\n`/`\r`, then explicitly consumes that line terminator before
+//! the payload starts). Trailing dashes just become part of the
+//! extracted tag when the block happens to have a newline in the right
+//! place already, and when the whole block was written on one line (no
+//! newline at all before the closing brace), the tag-scan runs to the
+//! next real newline anywhere later in the source -- which is how a tag
+//! like "c" turned into "c--- data ---c--- }\n)" and the closer search
+//! then never found a match. Every source string below now puts the tag
+//! on its own line, bare, matching the spec.
+//!
 //! Run with:
 //!   cargo test --test raw_section_tests -- --nocapture
 
 use dixscript::Compiler::Core::Config::OperationalSettings;
 use dixscript::Compiler::Core::Tokenizer::{Tokenizer, TokenType};
+use dixscript::ErrorManager::ErrorManager;
 use dixscript::Runtime::DixLoader;
 
 // ==================== Lexer: section keyword + content block ====================
@@ -30,7 +48,7 @@ fn raw_section_keyword_is_recognized() {
 
 #[test]
 fn raw_content_block_produces_correct_byte_range() {
-    let source = "@RAW(\n  content -> {\n    ---tag001---\nhello world\n---tag001---\n  }\n)";
+    let source = "@RAW(\n  content -> {\n    ---tag001\nhello world\n---tag001\n  }\n)";
     let settings = OperationalSettings::default();
     let result = Tokenizer::new(source, &settings).tokenize();
 
@@ -53,7 +71,7 @@ fn raw_content_block_produces_correct_byte_range() {
 fn raw_content_block_rejects_mismatched_closing_tag() {
     // Opening delimiter says "foo", closing says "bar" -- must be an error,
     // not a silent scan past the wrong boundary.
-    let source = "@RAW(\n  content -> {\n    ---foo---\ndata\n---bar---\n  }\n)";
+    let source = "@RAW(\n  content -> {\n    ---foo\ndata\n---bar\n  }\n)";
     let settings = OperationalSettings::default();
     let result = Tokenizer::new(source, &settings).tokenize();
 
@@ -68,20 +86,33 @@ fn raw_content_block_rejects_mismatched_closing_tag() {
 
 #[test]
 fn raw_content_block_reports_unterminated_block() {
-    // No closing delimiter at all before EOF.
-    let source = "@RAW(\n  content -> {\n    ---onlytag---\nno closer here\n  }\n)";
+    // No closing delimiter at all before EOF. Lexer errors don't come back
+    // as a token in the stream (there's no TokenType::Error variant) --
+    // they get logged through the ErrorManager the Tokenizer was built
+    // with. Pass in our own isolated one (a clone of the same
+    // Arc<Mutex<...>>, so checking it after tokenize() sees whatever the
+    // tokenizer logged into it) instead of Tokenizer::new's default, which
+    // would silently go to the process-wide shared instance.
+    let source = "@RAW(\n  content -> {\n    ---onlytag\nno closer here\n  }\n)";
     let settings = OperationalSettings::default();
-    let result = Tokenizer::new(source, &settings).tokenize();
+    let error_manager = ErrorManager::new_isolated();
+    let result = Tokenizer::new_with_error_manager(source, &settings, error_manager.clone()).tokenize();
 
-    let has_error_token = result.tokens.iter().any(|t| matches!(t.token_type, TokenType::Error(_)));
-    assert!(has_error_token, "unterminated @RAW content block should surface as a lexer error");
+    assert!(
+        error_manager.has_errors(),
+        "unterminated @RAW content block should log a lexical error; tokens produced: {:?}",
+        result.tokens.iter().map(|t| &t.token_type).collect::<Vec<_>>()
+    );
 }
 
 #[test]
 fn raw_content_payload_may_contain_triple_dash_that_is_not_the_closer() {
     // "---" appearing in the payload but not followed by our own tag must
-    // not be mistaken for the closing delimiter.
-    let source = "@RAW(\n  content -> {\n    ---realtag---\nsome ---not-a-delimiter--- text\n---realtag---\n  }\n)";
+    // not be mistaken for the closing delimiter. Note the embedded
+    // "---not-a-delimiter---" is deliberately left in the trailing-dash
+    // style -- it's payload content being tested for, not a real
+    // delimiter, so it's supposed to look delimiter-ish without being one.
+    let source = "@RAW(\n  content -> {\n    ---realtag\nsome ---not-a-delimiter--- text\n---realtag\n  }\n)";
     let settings = OperationalSettings::default();
     let result = Tokenizer::new(source, &settings).tokenize();
 
@@ -102,12 +133,16 @@ fn raw_section_allowed_by_default_advanced_mode() {
     // No @CONFIG at all -> defaults to "advanced", which unlocks every
     // feature including "raw". See operational_settings.rs / config_schema.rs.
     let loader = DixLoader::new();
-    let source = r#"
+    let source = "
 @RAW(
-  meta_data -> { id = "asset_one", format = "TXT" }
-  content -> { ---c1--- payload ---c1--- }
+  meta_data -> { id = \"asset_one\", format = \"TXT\" }
+  content -> {
+---c1
+payload
+---c1
+  }
 )
-"#;
+";
     let ast = loader
         .compile_to_resolved_ast_from_str(source, "raw-default-advanced")
         .expect("should compile with default (advanced) features");
@@ -117,16 +152,20 @@ fn raw_section_allowed_by_default_advanced_mode() {
 #[test]
 fn raw_section_allowed_with_explicit_feature() {
     let loader = DixLoader::new();
-    let source = r#"
+    let source = "
 @CONFIG(
-  version    -> "1.0.0"
-  features   -> "raw"
+  version    -> \"1.0.0\"
+  features   -> \"raw\"
 )
 @RAW(
-  meta_data -> { id = "asset_two", format = "TXT" }
-  content -> { ---c2--- payload ---c2--- }
+  meta_data -> { id = \"asset_two\", format = \"TXT\" }
+  content -> {
+---c2
+payload
+---c2
+  }
 )
-"#;
+";
     let ast = loader
         .compile_to_resolved_ast_from_str(source, "raw-explicit-feature")
         .expect("'raw' in the features list should allow @RAW to parse");
@@ -136,16 +175,20 @@ fn raw_section_allowed_with_explicit_feature() {
 #[test]
 fn raw_section_rejected_without_feature_enabled() {
     let loader = DixLoader::new();
-    let source = r#"
+    let source = "
 @CONFIG(
-  version    -> "1.0.0"
-  features   -> "data"
+  version    -> \"1.0.0\"
+  features   -> \"data\"
 )
 @RAW(
-  meta_data -> { id = "asset_three", format = "TXT" }
-  content -> { ---c3--- payload ---c3--- }
+  meta_data -> { id = \"asset_three\", format = \"TXT\" }
+  content -> {
+---c3
+payload
+---c3
+  }
 )
-"#;
+";
     let result = loader.compile_to_resolved_ast_from_str(source, "raw-not-enabled");
     assert!(
         result.is_err(),
@@ -158,17 +201,25 @@ fn raw_section_rejected_without_feature_enabled() {
 #[test]
 fn multiple_raw_blocks_with_distinct_ids_and_tags_all_parse() {
     let loader = DixLoader::new();
-    let source = r#"
+    let source = "
 @RAW(
-  meta_data -> { id = "atlas_a", format = "MPX" }
-  using -> { compression = "gzip", threads = 2 }
-  content -> { ---atag--- AAAA ---atag--- }
+  meta_data -> { id = \"atlas_a\", format = \"MPX\" }
+  using -> { compression = \"gzip\", threads = 2 }
+  content -> {
+---atag
+AAAA
+---atag
+  }
 )
 @RAW(
-  meta_data -> { id = "atlas_b", format = "MPX" }
-  content -> { ---btag--- BBBB ---btag--- }
+  meta_data -> { id = \"atlas_b\", format = \"MPX\" }
+  content -> {
+---btag
+BBBB
+---btag
+  }
 )
-"#;
+";
     let ast = loader
         .compile_to_resolved_ast_from_str(source, "raw-multi-block")
         .expect("two distinct @RAW blocks should both parse");
@@ -183,16 +234,24 @@ fn multiple_raw_blocks_with_distinct_ids_and_tags_all_parse() {
 #[test]
 fn duplicate_meta_data_id_across_blocks_is_rejected() {
     let loader = DixLoader::new();
-    let source = r#"
+    let source = "
 @RAW(
-  meta_data -> { id = "same_id", format = "TXT" }
-  content -> { ---one--- AAAA ---one--- }
+  meta_data -> { id = \"same_id\", format = \"TXT\" }
+  content -> {
+---one
+AAAA
+---one
+  }
 )
 @RAW(
-  meta_data -> { id = "same_id", format = "TXT" }
-  content -> { ---two--- BBBB ---two--- }
+  meta_data -> { id = \"same_id\", format = \"TXT\" }
+  content -> {
+---two
+BBBB
+---two
+  }
 )
-"#;
+";
     let result = loader.compile_to_resolved_ast_from_str(source, "raw-dup-id");
     let err = result.expect_err("duplicate meta_data.id across @RAW blocks must be rejected");
     assert!(err.contains("same_id"), "error should name the duplicated id, got: {err}");
@@ -201,16 +260,24 @@ fn duplicate_meta_data_id_across_blocks_is_rejected() {
 #[test]
 fn duplicate_content_tag_across_blocks_is_rejected() {
     let loader = DixLoader::new();
-    let source = r#"
+    let source = "
 @RAW(
-  meta_data -> { id = "id_one", format = "TXT" }
-  content -> { ---sametag--- AAAA ---sametag--- }
+  meta_data -> { id = \"id_one\", format = \"TXT\" }
+  content -> {
+---sametag
+AAAA
+---sametag
+  }
 )
 @RAW(
-  meta_data -> { id = "id_two", format = "TXT" }
-  content -> { ---sametag--- BBBB ---sametag--- }
+  meta_data -> { id = \"id_two\", format = \"TXT\" }
+  content -> {
+---sametag
+BBBB
+---sametag
+  }
 )
-"#;
+";
     let result = loader.compile_to_resolved_ast_from_str(source, "raw-dup-tag");
     let err = result.expect_err("duplicate delimiter tag across @RAW blocks must be rejected");
     assert!(err.contains("sametag"), "error should name the duplicated tag, got: {err}");
@@ -221,12 +288,16 @@ fn duplicate_content_tag_across_blocks_is_rejected() {
 #[test]
 fn missing_meta_data_id_is_rejected() {
     let loader = DixLoader::new();
-    let source = r#"
+    let source = "
 @RAW(
-  meta_data -> { format = "TXT" }
-  content -> { ---c--- data ---c--- }
+  meta_data -> { format = \"TXT\" }
+  content -> {
+---c
+data
+---c
+  }
 )
-"#;
+";
     let result = loader.compile_to_resolved_ast_from_str(source, "raw-missing-id");
     assert!(result.is_err(), "missing meta_data.id must be rejected");
 }
@@ -234,12 +305,16 @@ fn missing_meta_data_id_is_rejected() {
 #[test]
 fn missing_meta_data_format_is_rejected() {
     let loader = DixLoader::new();
-    let source = r#"
+    let source = "
 @RAW(
-  meta_data -> { id = "no_format" }
-  content -> { ---c--- data ---c--- }
+  meta_data -> { id = \"no_format\" }
+  content -> {
+---c
+data
+---c
+  }
 )
-"#;
+";
     let result = loader.compile_to_resolved_ast_from_str(source, "raw-missing-format");
     assert!(result.is_err(), "missing meta_data.format must be rejected");
 }
@@ -259,12 +334,16 @@ fn missing_content_block_is_rejected() {
 #[test]
 fn wrong_type_for_meta_data_size_is_rejected() {
     let loader = DixLoader::new();
-    let source = r#"
+    let source = "
 @RAW(
-  meta_data -> { id = "bad_size", format = "TXT", size = "not-a-number" }
-  content -> { ---c--- data ---c--- }
+  meta_data -> { id = \"bad_size\", format = \"TXT\", size = \"not-a-number\" }
+  content -> {
+---c
+data
+---c
+  }
 )
-"#;
+";
     let result = loader.compile_to_resolved_ast_from_str(source, "raw-bad-size-type");
     assert!(result.is_err(), "meta_data.size should be required to be numeric");
 }

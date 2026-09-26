@@ -5,7 +5,6 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
-using System.Text.Json;
 
 namespace MidManStudio.Mdix.Core
 {
@@ -445,27 +444,21 @@ namespace MidManStudio.Mdix.Core
                     var jsonResult = db.GetJson(parentPath);
                     if (jsonResult.IsFailure) continue;
 
-                    JsonElement cloned;
-                    using (var doc = JsonDocument.Parse(jsonResult.SuccessResult))
+                    var el = MdixJson.Parse(jsonResult.SuccessResult);
+                    bool found = true;
+
+                    for (int i = parentLen; i < segments.Length; i++)
                     {
-                        var el    = doc.RootElement;
-                        bool found = true;
-
-                        for (int i = parentLen; i < segments.Length; i++)
+                        if (el.ValueKind != MdixJsonValueKind.Object ||
+                            !el.TryGetProperty(segments[i], out el))
                         {
-                            if (el.ValueKind != JsonValueKind.Object ||
-                                !el.TryGetProperty(segments[i], out el))
-                            {
-                                found = false;
-                                break;
-                            }
+                            found = false;
+                            break;
                         }
-
-                        if (!found) continue;
-                        cloned = el.Clone();
                     }
 
-                    return ParseJsonElementAsType(cloned, targetType);
+                    if (!found) continue;
+                    return ParseJsonElementAsType(el, targetType);
                 }
 
                 return (false, null);
@@ -477,7 +470,7 @@ namespace MidManStudio.Mdix.Core
         }
 
         private static (bool success, object? value) ParseJsonElementAsType(
-            JsonElement el, Type targetType)
+            MdixJsonElement el, Type targetType)
         {
             try
             {
@@ -492,12 +485,12 @@ namespace MidManStudio.Mdix.Core
                 // in case a future/alternate JSON shape emits the field name instead.
                 if (targetType.IsEnum)
                 {
-                    if (el.ValueKind == JsonValueKind.Number)
+                    if (el.ValueKind == MdixJsonValueKind.Number)
                     {
                         try { return (true, Enum.ToObject(targetType, el.GetInt32())); }
                         catch { return (false, null); }
                     }
-                    if (el.ValueKind == JsonValueKind.String)
+                    if (el.ValueKind == MdixJsonValueKind.String)
                     {
                         var name = el.GetString();
                         if (name != null &&
@@ -509,7 +502,7 @@ namespace MidManStudio.Mdix.Core
 
                 if (targetType == typeof(string))
                 {
-                    var s = el.ValueKind == JsonValueKind.String
+                    var s = el.ValueKind == MdixJsonValueKind.String
                         ? el.GetString()
                         : el.GetRawText();
                     return (s != null, (object?)s);
@@ -524,7 +517,7 @@ namespace MidManStudio.Mdix.Core
                 if (targetType == typeof(bool))    return (true, (object)el.GetBoolean());
                 if (targetType == typeof(DateTime))
                 {
-                    var raw = el.ValueKind == JsonValueKind.String ? el.GetString() : el.GetRawText();
+                    var raw = el.ValueKind == MdixJsonValueKind.String ? el.GetString() : el.GetRawText();
                     if (raw != null && DateTime.TryParse(
                             raw,
                             System.Globalization.CultureInfo.InvariantCulture,

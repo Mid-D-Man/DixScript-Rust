@@ -23,8 +23,16 @@ use std::time::Duration;
 
 fn generate_raw_block(id_suffix: usize, payload_bytes: usize) -> String {
     let payload: String = (0..payload_bytes).map(|i| (b'a' + (i % 26) as u8) as char).collect();
+    // Delimiter is "---tag" + a real newline (ContentDelimiter ::= "---"
+    // [UniqueTag] LineTerminator, per others/raw_section_spec.md) -- no
+    // trailing dashes on the tag, and the payload starts on its own line.
+    // An earlier version of this generator wrote "---tag_N--- {payload}
+    // ---tag_N---" all on one line, which the lexer's tag-scan (reads
+    // until the next newline) turned into an enormous wrong "tag" -- the
+    // whole rest of the line, payload included -- so the closer search
+    // then never matched anything and ran to end of input every call.
     format!(
-        "@RAW(\n  meta_data -> {{ id = \"asset_{id_suffix}\", format = \"BIN\", size = {payload_bytes} }}\n  using -> {{ compression = \"none\" }}\n  content -> {{ ---tag_{id_suffix}--- {payload} ---tag_{id_suffix}--- }}\n)\n"
+        "@RAW(\n  meta_data -> {{ id = \"asset_{id_suffix}\", format = \"BIN\", size = {payload_bytes} }}\n  using -> {{ compression = \"none\" }}\n  content -> {{\n---tag_{id_suffix}\n{payload}\n---tag_{id_suffix}\n  }}\n)\n"
     )
 }
 

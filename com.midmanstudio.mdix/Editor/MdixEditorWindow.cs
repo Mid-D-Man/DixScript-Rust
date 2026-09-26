@@ -147,7 +147,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                     color                   = new StyleColor(new Color(0.91f, 0.93f, 0.96f)),
                     unityFontStyleAndWeight = new StyleEnum<FontStyle>(FontStyle.Normal),
                     fontSize                = new StyleLength(12),
-                    whiteSpace              = new StyleEnum<WhiteSpace>(WhiteSpace.Pre),
+                    whiteSpace              = new StyleEnum<WhiteSpace>(WhiteSpace.NoWrap),
                     paddingTop              = new StyleLength(12),
                     paddingLeft             = new StyleLength(12),
                 },

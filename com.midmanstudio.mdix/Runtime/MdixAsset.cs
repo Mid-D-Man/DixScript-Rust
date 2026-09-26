@@ -64,7 +64,7 @@ namespace MidManStudio.Mdix.Unity
         }
 
         // Called by MdixImporter — not public API.
-        internal void SetData(string rawSource, string projectRelativePath)
+        public void SetData(string rawSource, string projectRelativePath)
         {
             _rawSource            = rawSource            ?? string.Empty;
             _projectRelativePath  = projectRelativePath  ?? string.Empty;

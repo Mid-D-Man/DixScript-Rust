@@ -89,7 +89,7 @@ namespace MidManStudio.Mdix.Unity
             CancellationToken ct = default)
         {
             return await MdixKeyUtilities
-                .LoadEncryptedWithCloudKeyAsync(encPath, keyUrl, null, ct)
+                .LoadEncryptedWithCloudKeyAsync(encPath, keyUrl, "", ct)
                 .ConfigureAwait(false);
         }
 

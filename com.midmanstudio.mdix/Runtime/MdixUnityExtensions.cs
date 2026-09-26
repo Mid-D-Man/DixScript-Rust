@@ -79,7 +79,7 @@ namespace MidManStudio.Mdix.Unity
             while (!task.IsCompleted) yield return null;
             result = task.Result;
 #endif
-            onComplete(result!.Value);
+            onComplete(result);
         }
 
         // ── Async with main-thread callback ───────────────────────────────────

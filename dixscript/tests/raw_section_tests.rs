@@ -30,6 +30,7 @@
 
 use dixscript::Compiler::Core::Config::OperationalSettings;
 use dixscript::Compiler::Core::Tokenizer::{Tokenizer, TokenType};
+use dixscript::ErrorManager::ErrorManager;
 use dixscript::Runtime::DixLoader;
 
 // ==================== Lexer: section keyword + content block ====================
@@ -85,13 +86,23 @@ fn raw_content_block_rejects_mismatched_closing_tag() {
 
 #[test]
 fn raw_content_block_reports_unterminated_block() {
-    // No closing delimiter at all before EOF.
+    // No closing delimiter at all before EOF. Lexer errors don't come back
+    // as a token in the stream (there's no TokenType::Error variant) --
+    // they get logged through the ErrorManager the Tokenizer was built
+    // with. Pass in our own isolated one (a clone of the same
+    // Arc<Mutex<...>>, so checking it after tokenize() sees whatever the
+    // tokenizer logged into it) instead of Tokenizer::new's default, which
+    // would silently go to the process-wide shared instance.
     let source = "@RAW(\n  content -> {\n    ---onlytag\nno closer here\n  }\n)";
     let settings = OperationalSettings::default();
-    let result = Tokenizer::new(source, &settings).tokenize();
+    let error_manager = ErrorManager::new_isolated();
+    let result = Tokenizer::new_with_error_manager(source, &settings, error_manager.clone()).tokenize();
 
-    let has_error_token = result.tokens.iter().any(|t| matches!(t.token_type, TokenType::Error(_)));
-    assert!(has_error_token, "unterminated @RAW content block should surface as a lexer error");
+    assert!(
+        error_manager.has_errors(),
+        "unterminated @RAW content block should log a lexical error; tokens produced: {:?}",
+        result.tokens.iter().map(|t| &t.token_type).collect::<Vec<_>>()
+    );
 }
 
 #[test]

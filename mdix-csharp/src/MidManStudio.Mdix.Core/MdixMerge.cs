@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.Json;
 using MidManStudio.DixScript.Native;
 using NativeMergeStrategy = MidManStudio.DixScript.Native.MdixMergeStrategy;
 using NativeArrayStrategy = MidManStudio.DixScript.Native.ArrayMergeStrategy;
@@ -341,13 +340,13 @@ namespace MidManStudio.Mdix.Core
             var json = Marshal.PtrToStringUTF8((IntPtr)jsonPtr);
             if (string.IsNullOrEmpty(json)) return conflicts;
 
-            using var doc = JsonDocument.Parse(json);
-            foreach (var el in doc.RootElement.EnumerateArray())
+            var root = MdixJson.Parse(json);
+            foreach (var el in root.EnumerateArray())
             {
                 var path = el.GetProperty("path").GetString() ?? string.Empty;
                 var winningSource = el.GetProperty("winningSource").GetInt32();
                 string? winningLabel = el.TryGetProperty("winningLabel", out var labelEl)
-                    && labelEl.ValueKind != JsonValueKind.Null
+                    && labelEl.ValueKind != MdixJsonValueKind.Null
                         ? labelEl.GetString()
                         : null;
                 conflicts.Add(new MdixMergeConflict(path, winningSource, winningLabel));

@@ -56,7 +56,6 @@
   -->
 
   <ItemGroup>
-    <PackageReference Include="System.Text.Json" Version="6.0.10" />
     <!-- FIX: was missing — see PublishRepositoryUrl/EmbedUntrackedSources above.
          PrivateAssets="All" keeps this a build-time-only dependency; it is not
          carried transitively to consumers of this package. -->

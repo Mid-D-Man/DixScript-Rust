@@ -16,7 +16,7 @@ namespace MidManStudio.Mdix.Unity.Editor
     /// Templates (new file creation).
     /// Open via Window → MDIX Studio, or by double-clicking a .mdix asset.
     /// </summary>
-    public sealed class MdixEditorWindow : EditorWindow
+    public sealed partial class MdixEditorWindow : EditorWindow
     {
         // ── Constants ─────────────────────────────────────────────────────────
 
@@ -158,9 +158,13 @@ namespace MidManStudio.Mdix.Unity.Editor
                 _sourceText = evt.newValue;
                 _isDirty    = true;
                 UpdateStatusBar(parsed: false, entryCount: 0, flatCount: 0, tableCount: 0);
+
+                NotifyLspTextChanged(evt.newValue, evt.previousValue);
             });
 
             _panelEditor?.Add(_codeField);
+
+            InitializeLspIntegration();
         }
 
         // ── Tab management ────────────────────────────────────────────────────
@@ -214,6 +218,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             EditorPrefs.SetString(PrefKeyLastPath, _currentPath);
 
             Compile();
+            NotifyLspDocumentOpened();
         }
 
         // ── Compile / parse ───────────────────────────────────────────────────
@@ -677,6 +682,8 @@ namespace MidManStudio.Mdix.Unity.Editor
                     SaveSource();
                 }
             }
+
+            ShutdownLspIntegration();
         }
     }
 }

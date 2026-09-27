@@ -18,6 +18,25 @@ namespace MidManStudio.Mdix.Unity.Editor
     ///   → User picks a [MdixBakeable] ScriptableObject subclass
     ///   → Wizard deserializes the mdix data into that type
     ///   → Saves result as a .asset file alongside the .mdix file
+    ///
+    /// IMPORTANT — why baked assets can look empty/uneditable in the Inspector:
+    /// deserialization and the copy step below both work over C# *properties*
+    /// (MdixDatabase.Deserialize&lt;T&gt; targets POCO properties, and this
+    /// wizard mirrors them via reflection). Unity's own serializer only ever
+    /// serializes *fields* — public fields, or private fields marked
+    /// [SerializeField] — it never serializes auto-properties. So a
+    /// [MdixBakeable] class written as plain `public string Name { get; set; }`
+    /// bakes correctly in memory, but the moment Unity's default Inspector
+    /// (or a domain reload) touches the asset, those values are invisible —
+    /// there is nothing for SerializedObject to walk.
+    ///
+    /// The fix belongs on the [MdixBakeable] class itself: back every bakeable
+    /// property with [field: SerializeField], e.g.
+    ///     [field: SerializeField] public string Name { get; set; }
+    /// which Unity has supported since 2020.1 and which this wizard's existing
+    /// reflection-based copy already works with unmodified. TryBake() now
+    /// checks for this after baking and surfaces a warning naming exactly
+    /// which properties won't show up, instead of failing silently.
     /// </summary>
     public sealed class MdixBakeWizard : EditorWindow
     {
@@ -367,6 +386,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             // Deserialize into the target type via reflection — the serializer
             // handles all the property mapping exactly as it would for a plain POCO.
             object? instance;
+            List<string> copiedPropertyNames = new();
             try
             {
                 instance = ScriptableObject.CreateInstance(typeInfo.Type);
@@ -419,6 +439,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                     try
                     {
                         prop.SetValue(instance, prop.GetValue(deserialized));
+                        copiedPropertyNames.Add(prop.Name);
                     }
                     catch { /* property may not be serializable — skip */ }
                 }
@@ -452,11 +473,81 @@ namespace MidManStudio.Mdix.Unity.Editor
             EditorUtility.FocusProjectWindow();
             Selection.activeObject = AssetDatabase.LoadAssetAtPath<ScriptableObject>(outputPath);
 
-            _statusMessage = $"Generated: {outputPath}";
-            _statusIsError = false;
+            // ── Post-bake serialization check ────────────────────────────────
+            // The data above is copied via reflection onto C# properties, which
+            // is invisible to Unity's own field-based serializer unless each
+            // property is backed by [field: SerializeField]. Catching this here,
+            // right after a successful bake, is far more useful than the user
+            // discovering an empty Inspector later with no idea why.
+            var unserialized = FindUnserializedProperties(typeInfo.Type, copiedPropertyNames);
 
-            // Auto-close after a short delay so the user sees the success message.
-            EditorApplication.delayCall += Close;
+            if (unserialized.Count > 0)
+            {
+                _statusMessage =
+                    $"Generated: {outputPath}\n\n" +
+                    $"⚠ These properties won't show up (or survive a reload) in the Inspector " +
+                    $"because they aren't backed by [field: SerializeField]:\n" +
+                    string.Join(", ", unserialized) +
+                    "\n\nAdd [field: SerializeField] to each on " + typeInfo.Type.Name + " to fix.";
+                _statusIsError = true;
+                // Deliberately not auto-closing — the user needs to actually see this.
+            }
+            else
+            {
+                _statusMessage = $"Generated: {outputPath}";
+                _statusIsError = false;
+
+                // Auto-close after a short delay so the user sees the success message.
+                EditorApplication.delayCall += Close;
+            }
+        }
+
+        /// <summary>
+        /// Returns the names of properties (from <paramref name="copiedPropertyNames"/>,
+        /// i.e. ones the bake step actually populated) that Unity's serializer will
+        /// silently drop: no compiler-generated backing field carrying
+        /// [SerializeField] (the [field: SerializeField] pattern), and no manually
+        /// declared [SerializeField] field matching the usual `_camelCase` /
+        /// exact-name backing-field conventions.
+        /// </summary>
+        private static List<string> FindUnserializedProperties(
+            Type type, List<string> copiedPropertyNames)
+        {
+            var offenders = new List<string>();
+
+            foreach (var propName in copiedPropertyNames)
+            {
+                // [field: SerializeField] compiles to a backing field named
+                // "<PropName>k__BackingField" carrying the SerializeField attribute.
+                var autoBackingField = type.GetField(
+                    $"<{propName}>k__BackingField",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+
+                var isAutoFieldSerialized =
+                    autoBackingField != null &&
+                    autoBackingField.GetCustomAttribute<SerializeField>() != null;
+
+                if (isAutoFieldSerialized) continue;
+
+                // Manually-written property over an explicit [SerializeField] field —
+                // check both the `_camelCase` and exact-name conventions.
+                var camelName = char.ToLowerInvariant(propName[0]) + propName.Substring(1);
+
+                var manualField =
+                    type.GetField("_" + camelName, BindingFlags.NonPublic | BindingFlags.Instance) ??
+                    type.GetField(camelName,        BindingFlags.NonPublic | BindingFlags.Instance) ??
+                    type.GetField(propName,         BindingFlags.NonPublic | BindingFlags.Instance) ??
+                    type.GetField(propName,         BindingFlags.Public    | BindingFlags.Instance);
+
+                var isManualFieldSerialized =
+                    manualField != null &&
+                    (manualField.IsPublic || manualField.GetCustomAttribute<SerializeField>() != null);
+
+                if (!isManualFieldSerialized)
+                    offenders.Add(propName);
+            }
+
+            return offenders;
         }
 
         // ── Data types ────────────────────────────────────────────────────────

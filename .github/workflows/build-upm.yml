@@ -12,6 +12,7 @@ on:
     paths:
       - 'mdix-ffi/**'
       - 'mdix-csharp/**'
+      - 'mdix-lsp/**'
 
 permissions:
   contents: write
@@ -105,6 +106,17 @@ jobs:
       - name: Build FFI — Windows x64
         run: cargo build -p mdix-ffi --release --target x86_64-pc-windows-gnu
 
+      # mdix-lsp is an Editor-only tool binary bundled into the Unity package
+      # (MdixLspClient spawns it as a subprocess — never linked into the
+      # player), not a native plugin like mdix-ffi above. It needs no Android
+      # build for that reason. Reuses the exact same toolchain + targets
+      # already set up for FFI in this job.
+      - name: Build mdix-lsp — Linux x64
+        run: cargo build -p mdix-lsp --release --target x86_64-unknown-linux-gnu
+
+      - name: Build mdix-lsp — Windows x64
+        run: cargo build -p mdix-lsp --release --target x86_64-pc-windows-gnu
+
       # BUGFIX: this used to build only arm64-v8a, via a hand-rolled
       # linker + CC_/CXX_/AR_ env var setup that would have needed
       # tripling (with three different versioned clang paths) to cover
@@ -192,6 +204,28 @@ jobs:
           path: ffi-ubuntu/
           retention-days: 1
 
+      - name: Collect ubuntu mdix-lsp artifacts
+        run: |
+          mkdir -p lsp-ubuntu/linux-x64
+          mkdir -p lsp-ubuntu/win32-x64
+
+          cp target/x86_64-unknown-linux-gnu/release/mdix-lsp \
+             lsp-ubuntu/linux-x64/mdix-lsp
+          cp target/x86_64-pc-windows-gnu/release/mdix-lsp.exe \
+             lsp-ubuntu/win32-x64/mdix-lsp.exe
+
+          chmod +x lsp-ubuntu/linux-x64/mdix-lsp
+
+          echo "Built files:"
+          find lsp-ubuntu -type f -exec ls -lh {} \;
+
+      - name: Upload ubuntu mdix-lsp artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsp-ubuntu-${{ github.run_number }}
+          path: lsp-ubuntu/
+          retention-days: 1
+
   # ── 3. Build FFI — macOS universal + iOS static ───────────────────────────
   build-ffi-macos:
     runs-on: macos-latest
@@ -225,6 +259,16 @@ jobs:
 
       - name: Build FFI — macOS arm64 (Apple Silicon)
         run: cargo build -p mdix-ffi --release --target aarch64-apple-darwin
+
+      # mdix-lsp ships as two separate per-arch binaries here rather than a
+      # lipo'd universal one — MdixLspClient.PlatformDir() picks the exact
+      # arch folder at runtime (Environment architecture check), so there's
+      # no need for a fat binary the way the FFI dylib below needs one.
+      - name: Build mdix-lsp — macOS x64
+        run: cargo build -p mdix-lsp --release --target x86_64-apple-darwin
+
+      - name: Build mdix-lsp — macOS arm64 (Apple Silicon)
+        run: cargo build -p mdix-lsp --release --target aarch64-apple-darwin
 
       - name: Lipo — macOS universal dylib
         run: |
@@ -279,6 +323,26 @@ jobs:
         with:
           name: ffi-macos-${{ github.run_number }}
           path: ffi-macos/
+          retention-days: 1
+
+      - name: Collect macOS mdix-lsp artifacts
+        run: |
+          mkdir -p lsp-macos/darwin-x64
+          mkdir -p lsp-macos/darwin-arm64
+
+          cp target/x86_64-apple-darwin/release/mdix-lsp  lsp-macos/darwin-x64/mdix-lsp
+          cp target/aarch64-apple-darwin/release/mdix-lsp lsp-macos/darwin-arm64/mdix-lsp
+
+          chmod +x lsp-macos/darwin-x64/mdix-lsp lsp-macos/darwin-arm64/mdix-lsp
+
+          echo "Built files:"
+          find lsp-macos -type f -exec ls -lh {} \;
+
+      - name: Upload macOS mdix-lsp artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsp-macos-${{ github.run_number }}
+          path: lsp-macos/
           retention-days: 1
 
   # ── 4. Build Core.dll + generate MdixNative.cs ───────────────────────────
@@ -370,6 +434,18 @@ jobs:
         with:
           name: core-dll-${{ github.run_number }}
           path: core-dll/
+
+      - name: Download ubuntu mdix-lsp binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: lsp-ubuntu-${{ github.run_number }}
+          path: lsp-ubuntu/
+
+      - name: Download macOS mdix-lsp binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: lsp-macos-${{ github.run_number }}
+          path: lsp-macos/
 
       - name: Assemble package + generate/validate .meta
         run: |
@@ -604,9 +680,33 @@ jobs:
             echo "generated $meta"
           }
 
+          # Opaque Editor-tool executable (mdix-lsp) — MdixLspClient launches
+          # this as a subprocess via System.Diagnostics.Process; it is never
+          # loaded into the Unity process the way a PluginImporter asset is,
+          # so DefaultImporter (Unity's plain "unknown/binary file" importer)
+          # is the correct one here, not write_desktop_meta above.
+          write_editor_tool_meta() {
+            local f="$1" meta="${1}.meta"
+            fail_on_corruption "$meta"
+            already_has_meta "$meta" && return 0
+            [ -f "$f" ] || return 0
+            local guid; guid=$(gen_guid)
+            cat > "$meta" <<EOF
+          fileFormatVersion: 2
+          guid: $guid
+          DefaultImporter:
+            externalObjects: {}
+            userData:
+            assetBundleName:
+            assetBundleVariant:
+          EOF
+            echo "generated $meta"
+          }
+
           # Existing .meta corruption check runs even for files we don't
           # regenerate below.
           find "$PKG/Runtime/Plugins" -name "*.meta" 2>/dev/null | while read -r f; do fail_on_corruption "$f"; done
+          find "$PKG/Editor/Bin" -name "*.meta" 2>/dev/null | while read -r f; do fail_on_corruption "$f"; done
 
           # ── Core DLL ───────────────────────────────────────────────────────
           copy_if core-dll/MidManStudio.Mdix.Core.dll "$PKG/Runtime/Plugins/MidManStudio.Mdix.Core.dll"
@@ -635,6 +735,27 @@ jobs:
           # ── Native — iOS static ────────────────────────────────────────────
           copy_if ffi-macos/ios-arm64/libmdix_ffi.a "$PKG/Runtime/Plugins/iOS/libmdix_ffi.a"
           write_ios_meta "$PKG/Runtime/Plugins/iOS/libmdix_ffi.a"
+
+          # ── mdix-lsp — Editor-only tool binaries ───────────────────────────
+          # Paths match MdixLspClient.ResolveServerPath()'s bundled-binary
+          # tier exactly: Packages/com.midmanstudio.mdix/Editor/Bin/<platform>/mdix-lsp[.exe]
+          copy_if lsp-ubuntu/linux-x64/mdix-lsp      "$PKG/Editor/Bin/linux-x64/mdix-lsp"
+          copy_if lsp-ubuntu/win32-x64/mdix-lsp.exe  "$PKG/Editor/Bin/win32-x64/mdix-lsp.exe"
+          copy_if lsp-macos/darwin-x64/mdix-lsp      "$PKG/Editor/Bin/darwin-x64/mdix-lsp"
+          copy_if lsp-macos/darwin-arm64/mdix-lsp    "$PKG/Editor/Bin/darwin-arm64/mdix-lsp"
+
+          # Belt-and-suspenders: restore +x here too in case the executable
+          # bit didn't survive the upload-artifact/download-artifact round
+          # trip (it should — v4 preserves POSIX permissions — but this is
+          # a one-line guard against silently shipping a non-runnable binary).
+          chmod +x "$PKG/Editor/Bin/linux-x64/mdix-lsp"    2>/dev/null || true
+          chmod +x "$PKG/Editor/Bin/darwin-x64/mdix-lsp"   2>/dev/null || true
+          chmod +x "$PKG/Editor/Bin/darwin-arm64/mdix-lsp" 2>/dev/null || true
+
+          write_editor_tool_meta "$PKG/Editor/Bin/linux-x64/mdix-lsp"
+          write_editor_tool_meta "$PKG/Editor/Bin/win32-x64/mdix-lsp.exe"
+          write_editor_tool_meta "$PKG/Editor/Bin/darwin-x64/mdix-lsp"
+          write_editor_tool_meta "$PKG/Editor/Bin/darwin-arm64/mdix-lsp"
 
           [ "$CORRUPT" = "1" ] && { echo "❌ One or more existing .meta files are corrupted — see above. Fix by hand before this can pass."; exit 1; }
 
@@ -670,6 +791,10 @@ jobs:
             "Editor/UI/MdixEditorWindow.uxml"
             "Editor/UI/MdixEditorWindow.uss"
             "Editor/MidManStudio.Mdix.Editor.asmdef"
+            "Editor/Bin/linux-x64/mdix-lsp"
+            "Editor/Bin/win32-x64/mdix-lsp.exe"
+            "Editor/Bin/darwin-x64/mdix-lsp"
+            "Editor/Bin/darwin-arm64/mdix-lsp"
             "package.json"
           )
 
@@ -777,6 +902,10 @@ jobs:
           git config user.name  "DixScript CI"
           git config user.email "ci@dixscript.dev"
 
+          chmod +x com.midmanstudio.mdix/Editor/Bin/linux-x64/mdix-lsp    2>/dev/null || true
+          chmod +x com.midmanstudio.mdix/Editor/Bin/darwin-x64/mdix-lsp   2>/dev/null || true
+          chmod +x com.midmanstudio.mdix/Editor/Bin/darwin-arm64/mdix-lsp 2>/dev/null || true
+
           git add com.midmanstudio.mdix/
 
           if git diff --staged --quiet; then
@@ -833,6 +962,10 @@ jobs:
             -delete
 
           cp -r upm-staging/. "$WORK/"
+
+          chmod +x "$WORK/Editor/Bin/linux-x64/mdix-lsp"    2>/dev/null || true
+          chmod +x "$WORK/Editor/Bin/darwin-x64/mdix-lsp"   2>/dev/null || true
+          chmod +x "$WORK/Editor/Bin/darwin-arm64/mdix-lsp" 2>/dev/null || true
 
           cd "$WORK"
           git add -A

@@ -10,6 +10,7 @@ pub mod random_object;
 pub mod enum_object;
 pub mod guid_object;
 pub mod ip_address_object;
+pub mod schema_object;
 
 // Re-export the trait and base
 pub use static_object_base::{IStaticObject, StaticObjectBase};
@@ -23,3 +24,4 @@ pub use random_object::RandomObject;
 pub use enum_object::EnumObject;
 pub use guid_object::GuidObject;
 pub use ip_address_object::IpAddressObject;
+pub use schema_object::SchemaObject;

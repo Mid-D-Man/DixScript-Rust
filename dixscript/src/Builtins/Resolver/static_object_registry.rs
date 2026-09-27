@@ -5,7 +5,7 @@
 use crate::Builtins::Core::{DixValue, IBuiltinMethod, DixType};
 use crate::Builtins::Static::{
     IStaticObject, ArrayObject, DateTimeObject, DixObject,
-    EnumObject, GuidObject, IpAddressObject, MathObject, RandomObject,
+    EnumObject, GuidObject, IpAddressObject, MathObject, RandomObject, SchemaObject,
 };
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
@@ -41,6 +41,7 @@ impl StaticObjectRegistry {
         objects.insert("Enum".to_string(), Box::new(EnumObject::new()));
         objects.insert("Guid".to_string(), Box::new(GuidObject::new()));
         objects.insert("IpAddress".to_string(), Box::new(IpAddressObject::new()));
+        objects.insert("Schema".to_string(), Box::new(SchemaObject::new()));
     }
 
     /// Get the global registry instance

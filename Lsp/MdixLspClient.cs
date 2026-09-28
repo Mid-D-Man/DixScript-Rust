@@ -65,8 +65,10 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
         ///   1. EditorPrefs user override (mirrors dixscript.server.path)
         ///   2. MDIX_LSP_PATH env var (same var name as the VSCode extension,
         ///      so one env var covers both editors in a dev setup)
-        ///   3. A binary bundled inside this package, if one's ever shipped:
-        ///      Editor/Bin/{platform}/mdix-lsp[.exe]
+        ///   3. The binary build-upm.yml bundles into this package at
+        ///      Editor/Bin/{platform}/mdix-lsp[.exe], resolved via
+        ///      PackageInfo — see BundledBinaryPath() below for why a raw
+        ///      "Packages/..." filesystem guess doesn't work here.
         ///   4. System PATH (`where`/`which`)
         /// Returns null if nothing is found — caller is responsible for
         /// surfacing that to the user (see MdixLspClient.Start's return value).
@@ -88,14 +90,60 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
             var platformDir = PlatformDir();
             if (platformDir != null)
             {
-                var bundled = Path.Combine(
-                    "Packages/com.midmanstudio.mdix/Editor/Bin", platformDir, exeName);
-                var fullBundled = Path.GetFullPath(bundled);
-                if (File.Exists(fullBundled))
-                    return fullBundled;
+                var bundled = BundledBinaryPath(platformDir, exeName);
+                if (bundled != null)
+                    return bundled;
             }
 
             return Which(exeName);
+        }
+
+        /// <summary>
+        /// Resolves Editor/Bin/{platformDir}/{exeName} to a real filesystem
+        /// path using the package's actual on-disk location.
+        ///
+        /// "Packages/com.midmanstudio.mdix/..." is only a literal filesystem
+        /// path for an embedded package (physically under
+        /// &lt;ProjectRoot&gt;/Packages/) or a local `file:` package. For a
+        /// git-URL or registry install — i.e. the actual point of shipping
+        /// this as a package rather than dropping source into every
+        /// consumer's Assets folder — Unity caches the real content under
+        /// &lt;ProjectRoot&gt;/Library/PackageCache/com.midmanstudio.mdix@&lt;hash&gt;/
+        /// instead. "Packages/&lt;name&gt;/..." still works as a virtual path
+        /// through AssetDatabase/PackageManager APIs, but a raw
+        /// System.IO.Path.GetFullPath("Packages/...") call (which resolves
+        /// against the process's working directory, i.e. the project root)
+        /// bypasses that virtualization entirely and simply won't find
+        /// anything there for those install methods — the earlier version of
+        /// this method had exactly that bug.
+        ///
+        /// PackageInfo.FindForAssetPath + .resolvedPath is Unity's own
+        /// supported way to get the real physical root for a package
+        /// regardless of how it was installed (confirmed against the 2022.3
+        /// scripting reference — resolvedPath is documented as exactly this:
+        /// "the local path of the package on disk").
+        /// </summary>
+        private static string? BundledBinaryPath(string platformDir, string exeName)
+        {
+            var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssetPath(
+                "Packages/com.midmanstudio.mdix/package.json");
+
+            if (packageInfo != null)
+            {
+                var resolved = Path.Combine(
+                    packageInfo.resolvedPath, "Editor", "Bin", platformDir, exeName);
+                if (File.Exists(resolved))
+                    return resolved;
+            }
+
+            // Last-resort fallback for the (normally unreachable) case where
+            // PackageInfo can't find the package via the asset database yet
+            // — e.g. mid-import. Only ever correct for embedded/local
+            // installs, same caveat as before, kept only as a safety net
+            // rather than the primary path.
+            var rawGuess = Path.GetFullPath(Path.Combine(
+                "Packages/com.midmanstudio.mdix/Editor/Bin", platformDir, exeName));
+            return File.Exists(rawGuess) ? rawGuess : null;
         }
 
         public static void SetServerPathOverride(string path) =>

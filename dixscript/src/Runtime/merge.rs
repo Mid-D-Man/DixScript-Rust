@@ -287,6 +287,7 @@ impl MdixMerger {
             // mirroring merge_data, is the right shape for it, but that's
             // real new work, not attempted here). Known, disclosed gap.
             raw: Vec::new(),
+            schema: None,
         }
     }
 

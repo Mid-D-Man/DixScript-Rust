@@ -119,6 +119,99 @@ with block count (10 / 100 / 1,000 blocks in one file).
 **Tests:** `tests/raw_section_tests.rs` — duplicate id, duplicate tag,
 missing id/format/content, wrong type for `size`.
 
+### `Builtins/Static/schema_object.rs`
+
+**What it does:** The `Schema` builtin static object — one method per field
+type (`Schema.Int`, `Schema.String`, `Schema.Bool`, `Schema.Enum`, ...), each
+returning a canonical descriptor Object (`type` / `required` / whichever
+constraint keys were supplied).
+
+**Decisions:**
+- Method names are **capitalised**. The lowercase spellings (`int`,
+  `string`, `bool`, `enum`, ...) are all lexer keywords, and
+  `identifier_pattern_analyzer.rs` only accepts a plain `Identifier` after
+  `.`, so `Schema.int(...)` could never be written in source. The
+  descriptor's own `"type"` value stays lowercase — that is the DataType
+  name, not a method name.
+- A constraint that wasn't supplied is omitted from the Object entirely
+  rather than stored as null, so `.get(key)` cleanly means "no constraint".
+- The builtin is the single source of truth for which methods exist and
+  which arguments each accepts; the analyzer calls it rather than
+  re-implementing argument rules.
+
+### `Compiler/AST/schema.rs`
+
+**What it does:** `SchemaBlock` and `SchemaField` — the AST shape for
+`@SCHEMA(...)`.
+
+**Decisions:**
+- `DixScript.schema` is `Option<SchemaBlock>` — a singleton like
+  `@SECURITY`, not a `Vec` like `@RAW`: one schema describes one file's one
+  `@DATA` section, so there is nothing to keep independent.
+- A `SchemaField` stores the descriptor **as written** (`method` + literal
+  `arguments`), not an evaluated result. Evaluation is the analyzer's job,
+  by calling the `Schema` builtin. Same parse/semantic split every other
+  section uses.
+- `path` is the same `TablePath` `@DATA` uses for dotted addressing.
+
+### `Compiler/Core/SectionParsers/schema_section_parser.rs`
+
+**What it does:** Parses one `@SCHEMA(...)` into a `SchemaBlock`. Grammar:
+`path = Schema.<Type>(literal, ...)`, commas between fields optional.
+
+**Decisions:**
+- Its own mini-parser rather than wrapping `DataSectionParser`. The
+  original plan was to reuse `@DATA`'s value grammar, but `@DATA`'s parser
+  has no static-builtin-call arm (`IdentifierPatternType::StaticMethodCall`
+  is only handled inside QuickFuncs), so it cannot parse `Schema.Int(...)`.
+  The descriptor is narrow enough — a fixed call with literal arguments —
+  that no expression grammar is needed.
+- A lowercase type name is caught and reported with the capitalised
+  spelling as a hint, since it is the one mistake people will make.
+- `first_error()` exists so `GeneralParser` can fail loudly. A section
+  parser returning `None` becomes an **absent section**, not a compile
+  error — harmless for most sections, but an absent `@SCHEMA` means *no
+  validation at all*, so a typo would silently switch checking off for the
+  whole file. Under Halt, `GeneralParser` now turns a malformed `@SCHEMA`
+  into an error instead.
+
+**Tests:** `tests/schema_section_tests.rs` — flat/dotted paths, optional
+commas, keyword-named path segments, negative bounds, lowercase type name,
+malformed section, non-literal argument.
+
+### `Compiler/Core/SectionAnalyzers/schema_section_analyzer.rs`
+
+**What it does:** Validates `@SCHEMA` descriptors, then checks `@DATA`
+against them: presence, type, numeric `min`/`max`, string
+`minLength`/`maxLength`, array `minItems`/`maxItems`, enum name.
+
+**Decisions:**
+- Runs **twice**. From the semantic phase (`analyze_phase7b_schema`) against
+  the `@DATA` AST as parsed — plain literals are fully checked, so
+  `mdix validate` and the LSP see real schema errors, while values not
+  knowable yet (QuickFunc calls, references, expressions) classify as
+  deferred and are skipped rather than failed. Then from `DixLoader`
+  (Stage 9) against the resolved AST, where computed values are concrete —
+  the only place a schema can constrain a QuickFunc-produced value.
+- Numeric compatibility widens, never narrows: `Int` takes an integer,
+  `Long` an integer or long, `Float`/`Double` any numeric. A bare `1.5` is
+  a double, so rejecting it for `Schema.Float` would force an `f` suffix on
+  every value for no benefit.
+- An explicit `<type>` annotation on the `@DATA` property takes precedence
+  over the literal's own kind, since it is what the runtime stores.
+- `is_success` is derived from the error list in a wrapper around the
+  checks, not at the end of them — the Halt strategy returns early from
+  inside the checks, and `SectionAnalysisResult::new` defaults it to false.
+- Error ids `SCH001`–`SCH007`; warning `SCHEMA_WARN001` (empty schema).
+
+**Not done:** no nested-object shape validation (`Schema.Object` checks
+presence and kind only), no wildcard paths, no runtime validation of data
+supplied after compilation — compile-time only.
+
+**Tests:** `tests/schema_section_tests.rs` — missing/optional fields, wrong
+type, numeric/string/array bounds, table and group-array paths, enums, the
+post-resolution stage, feature gating.
+
 ### `Runtime/loader.rs`
 
 **What it does:** Runtime-layer, but the actual pipeline entry point —
@@ -134,6 +227,10 @@ parse, and semantic analysis in sequence.
   `fs::read` instead of `fs::read_to_string` and hand bytes to the new
   core directly — needed so a file with a genuinely binary `@RAW` payload
   can still load at all.
+- Stage 9 (after numeric-array homogenization) runs
+  `SchemaSectionAnalyzer::validate_resolved` against the resolved `@DATA`,
+  so a schema can constrain values a QuickFunc computed. A file whose plain
+  literals already failed never reaches it, so nothing is reported twice.
 
 ### `Compiler/Core/general_parser.rs`
 
@@ -150,6 +247,12 @@ token stream, parses it, and assigns the result onto the `DixScript` AST.
   overwriting the others.
 - `has_raw_enabled` follows the same `operational_settings.is_feature_enabled("raw")`
   pattern as every other gated section.
+- `@SCHEMA` is a singleton, so `ParsedSection::Schema` uses a plain
+  overwrite in `assign_section_to_script` (unlike `Raw`, which appends).
+  Its dispatch arm also refuses a malformed section under Halt — see
+  `schema_section_parser.rs`'s `first_error`.
+- `is_section_keyword_token` now lists `SectionRaw` and `SectionSchema`
+  (see Fixes and Problems).
 
 ### `Compiler/Core/general_semantics_analyzer.rs`
 
@@ -159,6 +262,9 @@ token stream, parses it, and assigns the result onto the `DixScript` AST.
 - `analyze_phase6b_raw` mirrors `analyze_phase6_independent` (`@DLM`)
   exactly — runs unconditionally after it, does not feed into or depend
   on any other phase.
+- `analyze_phase7b_schema` runs straight after `@DATA`'s own phase,
+  because `@SCHEMA` constrains `@DATA` and needs it analysed first. It only
+  sees the unresolved AST; the post-resolution half lives in `DixLoader`.
 
 ### `Compiler/VersionControl/version_constraints.rs` and `version_manager.rs`
 
@@ -218,3 +324,43 @@ wiring the feature gate through, not part of any pre-existing plan.
   gap) and mask real bugs behind an already-tolerated resolution error.
   Real CI is the only actual gate — every batch's verification note already
   said this, and this is the concrete case that shows why.
+
+### `@SCHEMA` wiring, and the nick-nacks found while doing it
+- `general_parser.rs`'s `is_section_keyword_token` listed neither
+  `SectionRaw` nor (naturally) `SectionSchema`. That function decides where
+  an unclosed section ends, so an `@RAW` following an unclosed section would
+  have been swallowed as part of it. Both added.
+- `config_token_splitter.rs`'s stop-scanning list for an unclosed `@CONFIG`
+  was missing `SectionRaw`; added alongside `SectionSchema`.
+- The lexer's `scan_raw_content_block` doc comment, `token.rs`'s
+  `RawContent` doc comment, `raw.rs`'s `RawContent` doc comment, and
+  `raw_section_analyzer.rs`'s `RAW003` suggestion all showed the wrong
+  `---tag---` (trailing dashes) form — the very shorthand that misled the
+  original `@RAW` tests and benchmark generator. Corrected to the real
+  `---tag`-newline form from `others/raw_section_spec.md`.
+- `config_schema.rs`'s `validate_features` allowlist did not contain `"raw"`
+  (or `"schema"`), so `features -> "raw"` failed validation and was silently
+  replaced by the default (`advanced`, which unlocks everything) — meaning
+  `raw_section_allowed_with_explicit_feature` passed vacuously and never
+  exercised the explicit-feature path. Both are now in the list. **Behaviour
+  change to watch in CI:** that raw test now genuinely runs with
+  `features = raw` only.
+- `version_constraints.rs`'s `ValidFeatureControls` constraint list was
+  missing `"raw"`; added with `"schema"`.
+- Adding `DixScript.schema` touched the same 20 struct-literal construction
+  sites `DixScript.raw` did (`schema: None`), found by grepping for
+  `raw: Vec::new()` rather than waiting for CI. `DixScript::with_sections`
+  gained a `schema` parameter (it has no callers).
+- `SectionId::Schema` was appended after `Raw`, so no existing variant's
+  numeric value moves.
+
+### Open items
+- `mdix-lsp/src/features/goto_definition.rs`'s `section_keyword_len` is an
+  exhaustive `match` on `SectionId` with no wildcard and no `Raw` arm. It
+  compiles today only because `mdix-lsp` depends on the published crates.io
+  `dixscript` 1.0.0, which predates `Raw`. When that dependency moves to a
+  release containing `Raw` and `Schema`, it will stop compiling. Not touched
+  here: adding the arms now would break the current build.
+- `mdix merge` does not merge `@SCHEMA` (same gap as `@RAW`).
+- Editor support for `@SCHEMA` (VS Code grammar, LSP hover/semantic tokens)
+  is not done.

@@ -123,7 +123,7 @@ impl ConfigSchema {
         if lower == "basic" || lower == "advanced" {
             return Ok(());
         }
-        const VALID: &[&str] = &["quickfuncs", "enums", "dlm", "data", "security", "imports"];
+        const VALID: &[&str] = &["quickfuncs", "enums", "dlm", "data", "security", "imports", "raw", "schema"];
         for feature in value.split(',').map(|s| s.trim()) {
             let feature_lower = feature.to_lowercase();
             if !VALID.contains(&feature_lower.as_str()) {

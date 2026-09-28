@@ -56,6 +56,9 @@ enum ParsedSection {
     /// `@RAW` blocks in one file each land correctly instead of the last
     /// one clobbering the others.
     Raw(Option<RawBlock>),
+    /// `@SCHEMA` is a singleton (`Option<SchemaBlock>` on the AST root), so —
+    /// unlike `Raw` — a plain overwrite in `assign_section_to_script` is right.
+    Schema(Option<SchemaBlock>),
 }
 
 pub struct GeneralParser<'a> {
@@ -71,6 +74,7 @@ pub struct GeneralParser<'a> {
     has_dlm_enabled:        bool,
     has_quickfuncs_enabled: bool,
     has_raw_enabled:        bool,
+    has_schema_enabled:     bool,
     is_advanced_mode:       bool,
     /// See module-level doc comment.
     propagate_error_manager: bool,
@@ -151,6 +155,7 @@ impl<'a> GeneralParser<'a> {
         let has_dlm_enabled        = operational_settings.is_feature_enabled("dlm");
         let has_imports_enabled    = operational_settings.is_feature_enabled("imports");
         let has_raw_enabled        = operational_settings.is_feature_enabled("raw");
+        let has_schema_enabled     = operational_settings.is_feature_enabled("schema");
 
         let t_filter  = Instant::now();
         let filtered  = CommentFilter::filter(tokens)?;
@@ -177,6 +182,7 @@ impl<'a> GeneralParser<'a> {
             has_dlm_enabled,
             has_quickfuncs_enabled,
             has_raw_enabled,
+            has_schema_enabled,
             is_advanced_mode,
             propagate_error_manager,
         })
@@ -280,6 +286,7 @@ impl<'a> GeneralParser<'a> {
             TokenType::SectionData       => { self.advance(); "DATA"       }
             TokenType::SectionSecurity   => { self.advance(); "SECURITY"   }
             TokenType::SectionRaw        => { self.advance(); "RAW"        }
+            TokenType::SectionSchema     => { self.advance(); "SCHEMA"     }
             other => return Err(ParseException::new(format!(
                 "Expected section keyword, found: {}", other
             ))),
@@ -411,6 +418,21 @@ impl<'a> GeneralParser<'a> {
             "DATA"       => Ok(ParsedSection::Data(make_section_parser!(DataSectionParser).parse_section())),
             "SECURITY"   => Ok(ParsedSection::Security(make_section_parser!(SecuritySectionParser).parse_section())),
             "RAW"        => Ok(ParsedSection::Raw(make_section_parser!(RawSectionParser).parse_section())),
+            "SCHEMA"     => {
+                let mut schema_parser = make_section_parser!(SchemaSectionParser);
+                let block = schema_parser.parse_section();
+                // A malformed @SCHEMA must not silently vanish: an absent
+                // schema means NO validation, so a typo would quietly switch
+                // checking off for the whole file. Under Halt, refuse.
+                match schema_parser.first_error() {
+                    Some(msg) if self.operational_settings.error_handling_strategy
+                        == ErrorHandlingStrategy::Halt =>
+                    {
+                        Err(ParseException::new(format!("@SCHEMA is malformed: {}", msg)))
+                    }
+                    _ => Ok(ParsedSection::Schema(block)),
+                }
+            }
             _ => Err(ParseException::new(format!("Unknown section: @{}", section.name))),
         };
 
@@ -445,6 +467,7 @@ impl<'a> GeneralParser<'a> {
             ParsedSection::Security(r)   => script.security        = r,
             // Append, not overwrite — see the ParsedSection::Raw doc comment.
             ParsedSection::Raw(r)        => { if let Some(block) = r { script.raw.push(block); } }
+            ParsedSection::Schema(r)     => script.schema          = r,
         }
     }
 
@@ -470,6 +493,7 @@ impl<'a> GeneralParser<'a> {
             "ENUMS"             => self.has_enums_enabled,
             "DATA" | "SECURITY" => true,
             "RAW"               => self.has_raw_enabled,
+            "SCHEMA"            => self.has_schema_enabled,
             _                   => false,
         }
     }
@@ -523,6 +547,8 @@ impl<'a> GeneralParser<'a> {
                 | TokenType::SectionQuickFuncs
                 | TokenType::SectionData
                 | TokenType::SectionSecurity
+                | TokenType::SectionRaw
+                | TokenType::SectionSchema
         )
     }
     #[inline] fn skip_non_meaningful_tokens(&mut self) {}

@@ -93,7 +93,7 @@ impl std::fmt::Display for RawField {
     }
 }
 
-/// The `content -> { ---tag--- … ---tag--- }` block. `start`/`end` are byte
+/// The `content -> { … }` block (payload between two bare `---tag` lines). `start`/`end` are byte
 /// offsets into the source buffer the lexer scanned — never copied here,
 /// never validated as UTF-8. Resolving them into actual bytes needs that
 /// same buffer still alive, which is Runtime-layer plumbing, not something

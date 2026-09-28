@@ -14,6 +14,8 @@
 //! - DataSectionAnalyzer - COMPLETE (v1.0.0)
 //! - QuickFuncsSectionAnalyzer - COMPLETE (v1.0.0)
 //! - ImportsSectionAnalyzer - COMPLETE (v1.0.0)
+//! - RawSectionAnalyzer - COMPLETE (v1.0.0)
+//! - SchemaSectionAnalyzer - COMPLETE (v1.0.0)
 
 use crate::Compiler::AST::Position;
 use crate::Compiler::Core::SectionEnhancers::{
@@ -28,6 +30,7 @@ pub mod data_section_analyzer;
 pub mod quickfuncs_section_analyzer;
 pub mod imports_section_analyzer;
 pub mod raw_section_analyzer;
+pub mod schema_section_analyzer;
 
 // Re-exports for convenience
 pub use enums_section_analyzer::EnumsSectionAnalyzer;
@@ -37,6 +40,7 @@ pub use data_section_analyzer::DataSectionAnalyzer;
 pub use quickfuncs_section_analyzer::QuickFuncsSectionAnalyzer;
 pub use imports_section_analyzer::ImportsSectionAnalyzer;
 pub use raw_section_analyzer::RawSectionAnalyzer;
+pub use schema_section_analyzer::SchemaSectionAnalyzer;
 
 // ==================== SHARED RESULT TYPES ====================
 

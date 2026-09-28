@@ -204,6 +204,8 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             return self.finalize_result();
         }
 
+        self.analyze_phase7b_schema();
+
         self.analyze_phase8_generated();
 
         if self.debug_config.is_enabled {
@@ -484,6 +486,26 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.add_section_result("DATA", result);
         if !phase_ok && self.should_terminate() { self.analysis_result.is_success = false; return false; }
         true
+    }
+
+    /// `@SCHEMA` constrains `@DATA`, so it runs straight after `@DATA`'s own
+    /// analysis. Values that aren't knowable yet (QuickFunc calls,
+    /// references) are skipped here and re-checked by `DixLoader` once value
+    /// resolution has made them concrete — see
+    /// `schema_section_analyzer.rs`'s top doc comment.
+    fn analyze_phase7b_schema(&mut self) {
+        let schema = match &self.ast.schema {
+            Some(s) => s,
+            None    => return,
+        };
+
+        let em = self.make_error_manager();
+        let mut analyzer = SchemaSectionAnalyzer::new_with_error_manager(
+            self.operational_settings,
+            em,
+        );
+        let result = analyzer.analyze(schema, self.ast.data.as_ref(), &mut self.symbol_table);
+        self.add_section_result("SCHEMA", result);
     }
 
     fn analyze_phase8_generated(&mut self) {

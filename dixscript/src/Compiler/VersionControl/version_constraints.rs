@@ -112,7 +112,7 @@ impl VersionConstraints {
             .to_string();
 
         let supported_sections = &[
-            "CONFIG", "IMPORTS", "DLM", "ENUMS", "QUICKFUNCS", "DATA", "SECURITY", "RAW",
+            "CONFIG", "IMPORTS", "DLM", "ENUMS", "QUICKFUNCS", "DATA", "SECURITY", "RAW", "SCHEMA",
         ];
 
         if supported_sections.contains(&normalized_section.as_str()) {
@@ -171,7 +171,7 @@ impl VersionConstraints {
             return false;
         }
         let valid_sections: HashSet<&str> =
-            ["quickfuncs", "enums", "imports", "dlm", "data", "security", "raw"]
+            ["quickfuncs", "enums", "imports", "dlm", "data", "security", "raw", "schema"]
                 .iter()
                 .copied()
                 .collect();
@@ -518,7 +518,7 @@ impl VersionConstraints {
         );
         constraints.insert(
             "ValidFeatureControls".to_string(),
-            json!(["basic", "advanced", "quickfuncs", "enums", "imports", "dlm", "data", "security"]),
+            json!(["basic", "advanced", "quickfuncs", "enums", "imports", "dlm", "data", "security", "raw", "schema"]),
         );
         constraints
     }

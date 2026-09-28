@@ -13,6 +13,7 @@ use crate::Compiler::Core::Config::{ConfigSectionHandler, DebugMode, Operational
 use crate::Compiler::Core::{GeneralParser, GeneralSemanticAnalyzer, GeneralAstEnhancer};
 use crate::Compiler::Core::BinarySerialization::{BinaryPacker, BinaryUnpacker};
 use crate::Compiler::Core::ValueResolution::ValueResolver;
+use crate::Compiler::Core::SectionAnalyzers::SchemaSectionAnalyzer;
 use crate::Compiler::DLM::{DLMPipelineExecutor, DLMReverseExecutor, DLMPipelineResult};
 use crate::Compiler::DLM::KeyManagement::KeyFileManager;
 use crate::Compiler::DLM::Auditor::{IAuditor, DiyAuditor, EnhancedAuditor};
@@ -862,6 +863,30 @@ impl DixLoader {
         // resolution happened — a hand-written `[12.3, 4, 4.9]` literal gets
         // the same treatment.
         homogenize_data_section(&mut resolved_ast);
+
+        // Stage 9: @SCHEMA validation against the fully resolved @DATA.
+        //
+        // The semantic phase (Stage 5) already checked every plain literal,
+        // but it can't see values a QuickFunc computes — those were skipped
+        // there. Now that value resolution has made them concrete, this is
+        // the only place a schema can constrain them. A file whose literals
+        // already failed never reaches this point, so nothing is reported
+        // twice.
+        if let Some(schema) = resolved_ast.schema.as_ref() {
+            let mut schema_analyzer = SchemaSectionAnalyzer::new_with_error_manager(
+                &operational_settings,
+                self.error_manager.clone(),
+            );
+            let schema_result = schema_analyzer
+                .validate_resolved(schema, resolved_ast.data.as_ref());
+
+            if !schema_result.is_success {
+                let msgs: Vec<String> = schema_result.errors.iter()
+                    .map(|e| e.message.clone())
+                    .collect();
+                return Err(format!("Schema validation failed: {:?}", msgs));
+            }
+        }
 
         Ok(resolved_ast)
     }

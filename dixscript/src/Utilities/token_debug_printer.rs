@@ -204,6 +204,7 @@ impl TokenDebugPrinter {
             TokenType::SectionData       => "SectionData(@DATA)".to_string(),
             TokenType::SectionSecurity   => "SectionSecurity(@SECURITY)".to_string(),
             TokenType::SectionRaw        => "SectionRaw(@RAW)".to_string(),
+            TokenType::SectionSchema     => "SectionSchema(@SCHEMA)".to_string(),
             TokenType::RawContent { tag, start, end } =>
                 format!("RawContent(tag={}, bytes={}..{})", tag, start, end),
 

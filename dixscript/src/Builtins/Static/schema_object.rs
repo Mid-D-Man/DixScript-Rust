@@ -1,11 +1,19 @@
 // src/Builtins/Static/schema_object.rs
 //! Schema static object - builds @SCHEMA field descriptors
 //!
-//! One method per field type (Schema.string, Schema.int, Schema.bool, ...)
+//! One method per field type (Schema.String, Schema.Int, Schema.Bool, ...)
 //! rather than a single generic Schema.field(type, ...) -- each method's
 //! first argument is always `required`, followed by any type-specific
 //! constraints (min/max for numeric types, minLength/maxLength for string,
-//! minItems/maxItems for array, the enum name for Schema.enum).
+//! minItems/maxItems for array, the enum name for Schema.Enum).
+//!
+//! ## Why the method names are capitalised
+//! The lowercase spellings (`int`, `string`, `bool`, `enum`, ...) are all
+//! lexer keywords, and the dotted-pattern analyzer only accepts a plain
+//! `Identifier` after `.` -- so `Schema.int(...)` could never be written in
+//! `.mdix` source. `Schema.Int(...)` lexes as an ordinary identifier pair.
+//! The descriptor's own `"type"` value stays lowercase (`"int"`, `"string"`,
+//! ...) because that is the DataType name, not a method name.
 //!
 //! Every method returns a canonical descriptor: a plain Object with a
 //! "type" key (matching the field's DataType, as a string) and a
@@ -43,46 +51,46 @@ impl SchemaObject {
 
     fn initialize_methods(base: &mut StaticObjectBase) {
         // ---- scalar types with a numeric range (min/max) --------------------
-        // Schema.int(required, min?, max?)
+        // Schema.Int(required, min?, max?)
         base.register_method(Box::new(BuiltinMethod::new_variadic(
-            "int".to_string(),
+            "Int".to_string(),
             1,
             DixType::Object,
             |args| build_numeric_descriptor("int", args),
-            "Describes an int field: Schema.int(required, min?, max?)".to_string(),
+            "Describes an int field: Schema.Int(required, min?, max?)".to_string(),
         )));
 
-        // Schema.long(required, min?, max?)
+        // Schema.Long(required, min?, max?)
         base.register_method(Box::new(BuiltinMethod::new_variadic(
-            "long".to_string(),
+            "Long".to_string(),
             1,
             DixType::Object,
             |args| build_numeric_descriptor("long", args),
-            "Describes a long field: Schema.long(required, min?, max?)".to_string(),
+            "Describes a long field: Schema.Long(required, min?, max?)".to_string(),
         )));
 
-        // Schema.float(required, min?, max?)
+        // Schema.Float(required, min?, max?)
         base.register_method(Box::new(BuiltinMethod::new_variadic(
-            "float".to_string(),
+            "Float".to_string(),
             1,
             DixType::Object,
             |args| build_numeric_descriptor("float", args),
-            "Describes a float field: Schema.float(required, min?, max?)".to_string(),
+            "Describes a float field: Schema.Float(required, min?, max?)".to_string(),
         )));
 
-        // Schema.double(required, min?, max?)
+        // Schema.Double(required, min?, max?)
         base.register_method(Box::new(BuiltinMethod::new_variadic(
-            "double".to_string(),
+            "Double".to_string(),
             1,
             DixType::Object,
             |args| build_numeric_descriptor("double", args),
-            "Describes a double field: Schema.double(required, min?, max?)".to_string(),
+            "Describes a double field: Schema.Double(required, min?, max?)".to_string(),
         )));
 
         // ---- string, with optional length bounds -----------------------------
-        // Schema.string(required, minLength?, maxLength?)
+        // Schema.String(required, minLength?, maxLength?)
         base.register_method(Box::new(BuiltinMethod::new_variadic(
-            "string".to_string(),
+            "String".to_string(),
             1,
             DixType::Object,
             |args| {
@@ -92,26 +100,26 @@ impl SchemaObject {
                 insert_int_bound(&mut obj, args, 2, "maxLength")?;
                 Ok(DixValue::from_object(obj))
             },
-            "Describes a string field: Schema.string(required, minLength?, maxLength?)".to_string(),
+            "Describes a string field: Schema.String(required, minLength?, maxLength?)".to_string(),
         )));
 
         // ---- bool: no constraints beyond required ----------------------------
-        // Schema.bool(required)
+        // Schema.Bool(required)
         base.register_method(Box::new(BuiltinMethod::new(
-            "bool".to_string(),
+            "Bool".to_string(),
             1,
             DixType::Object,
             |args| {
                 let required = extract_required(args)?;
                 Ok(DixValue::from_object(base_descriptor("bool", required)))
             },
-            "Describes a bool field: Schema.bool(required)".to_string(),
+            "Describes a bool field: Schema.Bool(required)".to_string(),
         )));
 
         // ---- array, with optional item-count bounds --------------------------
-        // Schema.array(required, minItems?, maxItems?)
+        // Schema.Array(required, minItems?, maxItems?)
         base.register_method(Box::new(BuiltinMethod::new_variadic(
-            "array".to_string(),
+            "Array".to_string(),
             1,
             DixType::Object,
             |args| {
@@ -121,26 +129,26 @@ impl SchemaObject {
                 insert_int_bound(&mut obj, args, 2, "maxItems")?;
                 Ok(DixValue::from_object(obj))
             },
-            "Describes an array field: Schema.array(required, minItems?, maxItems?)".to_string(),
+            "Describes an array field: Schema.Array(required, minItems?, maxItems?)".to_string(),
         )));
 
         // ---- enum: the enum name is mandatory, not optional ------------------
-        // Schema.enum(required, enumName)
+        // Schema.Enum(required, enumName)
         base.register_method(Box::new(BuiltinMethod::new_with_validator(
-            "enum".to_string(),
+            "Enum".to_string(),
             2,
             DixType::Object,
             |args| {
                 let required = extract_required(args)?;
                 let enum_name = args[1].as_string();
                 if enum_name.is_empty() {
-                    return Err("Schema.enum: enumName must not be empty".to_string());
+                    return Err("Schema.Enum: enumName must not be empty".to_string());
                 }
                 let mut obj = base_descriptor("enum", required);
                 obj.insert("enumName".to_string(), DixValue::from_string(enum_name));
                 Ok(DixValue::from_object(obj))
             },
-            "Describes an enum field: Schema.enum(required, enumName)".to_string(),
+            "Describes an enum field: Schema.Enum(required, enumName)".to_string(),
             |args| args.len() == 2 && args[0].get_type() == DixType::Bool && args[1].get_type() == DixType::String,
         )));
 
@@ -154,80 +162,80 @@ impl SchemaObject {
         // name is a string literal baked into that one closure, not a
         // variable from an enclosing scope).
         base.register_method(Box::new(BuiltinMethod::new(
-            "object".to_string(),
+            "Object".to_string(),
             1,
             DixType::Object,
             |args| {
                 let required = extract_required(args)?;
                 Ok(DixValue::from_object(base_descriptor("object", required)))
             },
-            "Describes an object field: Schema.object(required)".to_string(),
+            "Describes an object field: Schema.Object(required)".to_string(),
         )));
 
         base.register_method(Box::new(BuiltinMethod::new(
-            "tuple".to_string(),
+            "Tuple".to_string(),
             1,
             DixType::Object,
             |args| {
                 let required = extract_required(args)?;
                 Ok(DixValue::from_object(base_descriptor("tuple", required)))
             },
-            "Describes a tuple field: Schema.tuple(required)".to_string(),
+            "Describes a tuple field: Schema.Tuple(required)".to_string(),
         )));
 
         base.register_method(Box::new(BuiltinMethod::new(
-            "date".to_string(),
+            "Date".to_string(),
             1,
             DixType::Object,
             |args| {
                 let required = extract_required(args)?;
                 Ok(DixValue::from_object(base_descriptor("date", required)))
             },
-            "Describes a date field: Schema.date(required)".to_string(),
+            "Describes a date field: Schema.Date(required)".to_string(),
         )));
 
         base.register_method(Box::new(BuiltinMethod::new(
-            "timestamp".to_string(),
+            "Timestamp".to_string(),
             1,
             DixType::Object,
             |args| {
                 let required = extract_required(args)?;
                 Ok(DixValue::from_object(base_descriptor("timestamp", required)))
             },
-            "Describes a timestamp field: Schema.timestamp(required)".to_string(),
+            "Describes a timestamp field: Schema.Timestamp(required)".to_string(),
         )));
 
         base.register_method(Box::new(BuiltinMethod::new(
-            "hex".to_string(),
+            "Hex".to_string(),
             1,
             DixType::Object,
             |args| {
                 let required = extract_required(args)?;
                 Ok(DixValue::from_object(base_descriptor("hex", required)))
             },
-            "Describes a hex field: Schema.hex(required)".to_string(),
+            "Describes a hex field: Schema.Hex(required)".to_string(),
         )));
 
         base.register_method(Box::new(BuiltinMethod::new(
-            "blob".to_string(),
+            "Blob".to_string(),
             1,
             DixType::Object,
             |args| {
                 let required = extract_required(args)?;
                 Ok(DixValue::from_object(base_descriptor("blob", required)))
             },
-            "Describes a blob field: Schema.blob(required)".to_string(),
+            "Describes a blob field: Schema.Blob(required)".to_string(),
         )));
 
         base.register_method(Box::new(BuiltinMethod::new(
-            "regex".to_string(),
+            "Regex".to_string(),
             1,
             DixType::Object,
             |args| {
                 let required = extract_required(args)?;
                 Ok(DixValue::from_object(base_descriptor("regex", required)))
             },
-            "Describes a regex field: Schema.regex(required)".to_string(),
+            "Describes a regex field: Schema.Regex(required)".to_string(),
         )));
     }
 }
@@ -250,7 +258,7 @@ fn extract_required(args: &[DixValue]) -> Result<bool, String> {
     Ok(args[0].as_bool())
 }
 
-/// Shared body for Schema.int/long/float/double -- same shape (required,
+/// Shared body for Schema.Int/long/float/double -- same shape (required,
 /// min?, max?), differing only in the "type" tag stored in the descriptor.
 fn build_numeric_descriptor(type_name: &str, args: &[DixValue]) -> Result<DixValue, String> {
     let required = extract_required(args)?;
@@ -324,16 +332,16 @@ mod tests {
     fn test_schema_object_creation() {
         let schema = SchemaObject::new();
         assert_eq!(schema.name(), "Schema");
-        assert!(schema.has_method("int"));
-        assert!(schema.has_method("string"));
-        assert!(schema.has_method("bool"));
-        assert!(schema.has_method("enum"));
+        assert!(schema.has_method("Int"));
+        assert!(schema.has_method("String"));
+        assert!(schema.has_method("Bool"));
+        assert!(schema.has_method("Enum"));
     }
 
     #[test]
     fn test_schema_int_no_bounds() {
         let schema = SchemaObject::new();
-        let result = schema.call_method("int", &[DixValue::from_bool(true)]).unwrap();
+        let result = schema.call_method("Int", &[DixValue::from_bool(true)]).unwrap();
         let obj = result.as_object();
         assert_eq!(obj.get("type").unwrap().as_string(), "int");
         assert!(obj.get("required").unwrap().as_bool());
@@ -345,8 +353,7 @@ mod tests {
     fn test_schema_int_with_bounds() {
         let schema = SchemaObject::new();
         let result = schema
-            .call_method(
-                "int",
+            .call_method("Int",
                 &[DixValue::from_bool(true), DixValue::from_int(1025), DixValue::from_int(65535)],
             )
             .unwrap();
@@ -359,8 +366,7 @@ mod tests {
     fn test_schema_string_length_bounds() {
         let schema = SchemaObject::new();
         let result = schema
-            .call_method(
-                "string",
+            .call_method("String",
                 &[DixValue::from_bool(false), DixValue::from_int(1), DixValue::from_int(50)],
             )
             .unwrap();
@@ -374,7 +380,7 @@ mod tests {
     #[test]
     fn test_schema_bool_rejects_non_bool_required() {
         let schema = SchemaObject::new();
-        let result = schema.call_method("bool", &[DixValue::from_int(1)]);
+        let result = schema.call_method("Bool", &[DixValue::from_int(1)]);
         assert!(result.is_err());
     }
 
@@ -382,7 +388,7 @@ mod tests {
     fn test_schema_enum_requires_name() {
         let schema = SchemaObject::new();
         let result = schema
-            .call_method("enum", &[DixValue::from_bool(true), DixValue::from_string("ElementGroup".to_string())])
+            .call_method("Enum", &[DixValue::from_bool(true), DixValue::from_string("ElementGroup".to_string())])
             .unwrap();
         let obj = result.as_object();
         assert_eq!(obj.get("type").unwrap().as_string(), "enum");
@@ -392,10 +398,13 @@ mod tests {
     #[test]
     fn test_schema_presence_only_types() {
         let schema = SchemaObject::new();
-        for name in ["object", "tuple", "date", "timestamp", "hex", "blob", "regex"] {
-            let result = schema.call_method(name, &[DixValue::from_bool(true)]).unwrap();
+        for (method, type_name) in [
+            ("Object", "object"), ("Tuple", "tuple"), ("Date", "date"), ("Timestamp", "timestamp"),
+            ("Hex", "hex"), ("Blob", "blob"), ("Regex", "regex"),
+        ] {
+            let result = schema.call_method(method, &[DixValue::from_bool(true)]).unwrap();
             let obj = result.as_object();
-            assert_eq!(obj.get("type").unwrap().as_string(), name);
+            assert_eq!(obj.get("type").unwrap().as_string(), type_name);
             assert!(obj.get("required").unwrap().as_bool());
         }
     }

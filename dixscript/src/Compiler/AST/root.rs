@@ -1,6 +1,6 @@
 // ============================================================================
 // NOTICE: Full documentation, design decisions, and fix history for this file
-// live in docs/dixscript/compiler.md, section "Compiler/AST/raw.rs"
+// live in docs/dixscript/compiler.md, section "Compiler/AST/raw.rs" and "Compiler/AST/schema.rs"
 // ============================================================================
 use super::config::ConfigSection;
 use super::imports::ImportsSection;
@@ -10,6 +10,7 @@ use super::quickfuncs::QuickFuncsSection;
 use super::data::DataSection;
 use super::security::SecuritySection;
 use super::raw::RawBlock;
+use super::schema::SchemaBlock;
 
 /// Main DixScript AST structure
 /// Represents a complete parsed .mdix file
@@ -28,6 +29,11 @@ pub struct DixScript {
     /// repeated `@DATA`/`@QUICKFUNCS`/`@ENUMS` blocks do. An empty file has
     /// an empty Vec, not None.
     pub raw: Vec<RawBlock>,
+    /// `Option`, a singleton like `@SECURITY` — one schema per file,
+    /// constraining that file's one `@DATA` section. Compile-time only:
+    /// nothing here is serialized to the binary format or carried into the
+    /// runtime `DixData`.
+    pub schema: Option<SchemaBlock>,
 }
 
 impl DixScript {
@@ -42,6 +48,7 @@ impl DixScript {
             data: None,
             security: None,
             raw: Vec::new(),
+            schema: None,
         }
     }
     
@@ -55,6 +62,7 @@ impl DixScript {
         data: Option<DataSection>,
         security: Option<SecuritySection>,
         raw: Vec<RawBlock>,
+        schema: Option<SchemaBlock>,
     ) -> Self {
         DixScript {
             config,
@@ -65,6 +73,7 @@ impl DixScript {
             data,
             security,
             raw,
+            schema,
         }
     }
 }
@@ -121,6 +130,12 @@ impl std::fmt::Display for DixScript {
         // @RAW blocks — zero or more, each printed as its own @RAW(...)
         for raw_block in &self.raw {
             writeln!(f, "{}", raw_block)?;
+            writeln!(f)?;
+        }
+
+        // @SCHEMA Section
+        if let Some(ref schema) = self.schema {
+            writeln!(f, "{}", schema)?;
             writeln!(f)?;
         }
         

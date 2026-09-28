@@ -307,6 +307,7 @@ impl DixConverter {
             data: Some(DataSection { entries: data_entries, position: Position::UNKNOWN }),
             // JSON/TOML have no concept of @RAW to convert from.
             raw: Vec::new(),
+            schema: None,
         })
     }
 
@@ -1339,6 +1340,7 @@ mod tests {
             config: None, imports: None, dlm: None,
             enums: None, quick_functions: None, security: None,
             raw: Vec::new(),
+            schema: None,
         }
     }
 

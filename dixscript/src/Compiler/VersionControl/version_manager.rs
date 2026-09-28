@@ -124,6 +124,7 @@ impl VersionManager {
             TokenType::SectionData => self.supports_feature("data_section"),
             TokenType::SectionSecurity => self.supports_feature("security_section"),
             TokenType::SectionRaw => self.supports_feature("raw_section"),
+            TokenType::SectionSchema => self.supports_feature("schema_section"),
             _ => true,
         }
     }
@@ -198,6 +199,10 @@ impl VersionManager {
             unsupported.push("RAW section".to_string());
         }
 
+        if script.schema.is_some() && !self.supports_feature("schema_section") {
+            unsupported.push("SCHEMA section".to_string());
+        }
+
         unsupported
     }
 
@@ -237,6 +242,7 @@ impl VersionManager {
         features.insert("data_section".to_string());
         features.insert("security_section".to_string());
         features.insert("raw_section".to_string());
+        features.insert("schema_section".to_string());
 
         // CONFIG features
         features.insert("feature_control".to_string());

@@ -16,6 +16,7 @@ pub enum SectionId {
     Data,
     Security,
     Raw,
+    Schema,
 }
 
 impl SectionId {
@@ -31,6 +32,7 @@ impl SectionId {
             SectionId::Data       => "DATA",
             SectionId::Security   => "SECURITY",
             SectionId::Raw        => "RAW",
+            SectionId::Schema     => "SCHEMA",
         }
     }
 
@@ -56,6 +58,7 @@ impl SectionId {
             "DATA"       => SectionId::Data,
             "SECURITY"   => SectionId::Security,
             "RAW"        => SectionId::Raw,
+            "SCHEMA"     => SectionId::Schema,
             _            => SectionId::None,
         }
     }
@@ -135,9 +138,12 @@ pub enum TokenType {
     SectionData,
     SectionSecurity,
     SectionRaw,
+    SectionSchema,
 
     // ── @RAW content block ───────────────────────────────────────────────────
-    /// Emitted by `scan_raw_content_block` for `content -> { ---tag--- … ---tag--- }`.
+    /// Emitted by `scan_raw_content_block` for a `content -> { … }` block whose payload
+    /// sits between two `---tag` delimiter lines (a bare tag terminated by a real newline —
+    /// no trailing dashes).
     /// `start`/`end` are byte offsets into the tokenizer's own `input` slice —
     /// the payload bytes themselves are never copied, decoded, or validated
     /// as UTF-8 here; this token only remembers where they are. `tag` is the
@@ -172,6 +178,7 @@ impl TokenType {
     #[inline] pub fn section_data()       -> Self { TokenType::SectionData }
     #[inline] pub fn section_security()   -> Self { TokenType::SectionSecurity }
     #[inline] pub fn section_raw()        -> Self { TokenType::SectionRaw }
+    #[inline] pub fn section_schema()     -> Self { TokenType::SectionSchema }
     #[inline] pub fn bool_true()          -> Self { TokenType::Bool(true) }
     #[inline] pub fn bool_false()         -> Self { TokenType::Bool(false) }
     #[inline] pub fn get_symbol(c: char)  -> Self { TokenType::Symbol(c) }
@@ -187,6 +194,7 @@ impl TokenType {
                 | TokenType::SectionData
                 | TokenType::SectionSecurity
                 | TokenType::SectionRaw
+                | TokenType::SectionSchema
         )
     }
 
@@ -200,6 +208,7 @@ impl TokenType {
             TokenType::SectionData       => Some("DATA"),
             TokenType::SectionSecurity   => Some("SECURITY"),
             TokenType::SectionRaw        => Some("RAW"),
+            TokenType::SectionSchema     => Some("SCHEMA"),
             TokenType::Keyword(k) if k.starts_with('@') => Some(&k[1..]),
             _ => None,
         }
@@ -259,6 +268,7 @@ impl fmt::Display for TokenType {
             TokenType::SectionSecurity         => write!(f, "SectionSecurity(@SECURITY)"),
             TokenType::SectionImports          => write!(f, "SectionImports(@IMPORTS)"),
             TokenType::SectionRaw              => write!(f, "SectionRaw(@RAW)"),
+            TokenType::SectionSchema           => write!(f, "SectionSchema(@SCHEMA)"),
             TokenType::RawContent { tag, start, end } =>
                 write!(f, "RawContent(tag={}, bytes={}..{})", tag, start, end),
             TokenType::Comment(c)              => write!(f, "Comment({})", c),

@@ -375,6 +375,7 @@ impl BinaryUnpacker {
             // not attempted here; revisit if/when @RAW needs to survive a
             // compact/binary round-trip.
             raw: Vec::new(),
+            schema: None,
         })
     }
 }

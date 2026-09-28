@@ -137,7 +137,7 @@ impl<'a> RawSectionAnalyzer<'a> {
                 self.add_error(
                     result, "RAW003", ERROR_MISSING_CONTENT,
                     "@RAW block is missing its required 'content' block",
-                    "Add content -> { ---<tag>--- <payload> ---<tag>--- }",
+                    "Add content -> { with ---<tag> on its own line, the payload, then ---<tag> on its own line, then }",
                     Some(block.position),
                 );
             }

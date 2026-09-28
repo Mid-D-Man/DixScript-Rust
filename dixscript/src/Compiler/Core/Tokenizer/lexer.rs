@@ -490,7 +490,8 @@ impl<'src> Tokenizer<'src> {
             return Ok(Some(self.scan_identifier_or_keyword(state)));
         }
 
-        // @RAW content block: `content -> { ---tag--- <bytes> ---tag--- }`.
+        // @RAW content block: `content -> {`, then `---tag` on its own line, the
+        // payload bytes, `---tag` on its own line, then `}` (bare tags — no trailing dashes).
         // Only triggered inside @RAW, and only right after `content ->` —
         // every other `{` (including `meta_data -> {` / `using -> {` in the
         // same section) falls through to scan_single_character as normal.
@@ -592,6 +593,7 @@ impl<'src> Tokenizer<'src> {
             "DATA"       => Some(TokenType::SectionData),
             "SECURITY"   => Some(TokenType::SectionSecurity),
             "RAW"        => Some(TokenType::SectionRaw),
+            "SCHEMA"     => Some(TokenType::SectionSchema),
             _ => None,
         };
 
@@ -606,7 +608,9 @@ impl<'src> Tokenizer<'src> {
         }
     }
 
-    /// Scans an `@RAW` `content -> { ---tag--- <bytes> ---tag--- }` block.
+    /// Scans an `@RAW` `content -> { … }` block: an opening `---tag` line, the payload
+    /// bytes, and a matching closing `---tag` line (bare tag terminated by a real newline —
+    /// no trailing dashes; see others/raw_section_spec.md `ContentDelimiter`).
     ///
     /// Positioned at the `{` when called (triggered by `scan_token` seeing
     /// `content ->` immediately before it, while `current_section ==

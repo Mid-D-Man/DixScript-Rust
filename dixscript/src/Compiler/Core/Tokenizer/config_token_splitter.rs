@@ -89,6 +89,8 @@ pub fn split_config_tokens(tokens: Vec<Token>) -> TokenSplitResult {
             | TokenType::SectionQuickFuncs
             | TokenType::SectionData
             | TokenType::SectionSecurity
+            | TokenType::SectionRaw
+            | TokenType::SectionSchema
             | TokenType::EndOfFile => break,
             _ => {}
         }

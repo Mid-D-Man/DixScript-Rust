@@ -94,6 +94,7 @@ impl DixDataBuilder {
             // No raw_builder exists yet — this programmatic builder can't
             // construct @RAW blocks. Known gap, not attempted here.
             raw:             Vec::new(),
+            schema:          None,
         })
     }
 

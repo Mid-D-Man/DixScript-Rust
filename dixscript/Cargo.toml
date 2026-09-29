@@ -41,15 +41,22 @@ bitflags   = "2.4"
 serde      = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml       = "0.8"
+# serde MUST STAY. Its one use in this crate's src/ is `#[derive(Serialize)]`
+# + `#[serde(untagged)]` on DixValue (Runtime/dix_value.rs), and that derive
+# is NOT dead: mdix-ffi (`mdix_get_json`), mdix-wasm (`getJson`), mdix-lua
+# (`get_json`), mdix-python and mdix-java all call
+# `serde_json::to_string(&DixValue)` through it. An earlier pass concluded
+# it was removable from grepping this crate's own src/ only -- wrong, the
+# consumers live in sibling workspace crates. See docs/dixscript/utilities.md.
 
 phf         = { version = "0.11", features = ["macros"] }
 memchr      = "2.7"
 base64      = "0.21"
 regex       = "1.10"
-itertools   = "0.13"
 lazy_static = "1.4"
-unicase     = "2.7"
 rustc-hash  = "2.0"
+# itertools, unicase: removed -- grepped for real call sites across src/
+# before cutting either; both were zero.
 
 sha2 = "0.10"
 
@@ -60,9 +67,16 @@ argon2           = "0.5"
 hex              = "0.4"
 
 # ── Cloud import deps ──────────────────────────────────────────────────────────
-# Both optional — activated via the `cloud-import` feature (on by default).
-# can opt out with  default-features = false  in their dependency declaration.
-
+# NEITHER of these two is actually optional today, despite the comment that
+# used to be here claiming both were gated behind `cloud-import`: neither has
+# `optional = true`, and neither is named under `[features]` -- so both
+# always compile in, in every build configuration, `--no-default-features`
+# included. Found while trying to drop `url` as a direct dependency in favor
+# of `reqwest::Url` (a re-export of the same type) -- that swap would have
+# been safe ONLY if this pair were properly gated the way the old comment
+# claimed, since `reqwest` genuinely IS `optional = true`. Left both as-is
+# rather than fix the gating and swap the type in the same pass; real
+# candidate for the DLM feature-gating sweep, not bundled in here.
 async-trait = "0.1"
 url         = "2.5"
 

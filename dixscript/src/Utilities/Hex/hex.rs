@@ -111,3 +111,45 @@ mod tests {
         assert!(decode("0g").is_err());
     }
 }
+
+
+/// Differential tests against the real `hex` 0.4 (called as `::hex`, the
+/// extern crate -- a local `hex` module exists). When `hex` is dropped from
+/// `[dependencies]` in the wiring pass, move it to `[dev-dependencies]` so
+/// these keep guarding this file.
+#[cfg(test)]
+mod differential_against_real_crate {
+    use super::*;
+    use crate::Utilities::test_rng::XorShift;
+
+    #[test]
+    fn encode_matches_real() {
+        let mut rng = XorShift::new(0x4E_58);
+        for _ in 0..20_000 {
+            let len = rng.below(80);
+            let data = rng.bytes(len);
+            assert_eq!(encode(&data), ::hex::encode(&data), "{:?}", data);
+        }
+    }
+
+    #[test]
+    fn decode_matches_real_on_valid_and_damaged_strings() {
+        let mut rng = XorShift::new(0xD3C0);
+        const POOL: &[u8] = b"0123456789abcdefABCDEF gG-\n";
+        let (mut ok, mut err) = (0usize, 0usize);
+        for _ in 0..100_000 {
+            let len = rng.below(20);
+            let s: String = (0..len).map(|_| *rng.pick(POOL) as char).collect();
+            let (mine, real) = (decode(&s), ::hex::decode(&s));
+            assert_eq!(mine.is_ok(), real.is_ok(), "accept/reject disagreement for {:?}", s);
+            match (mine, real) {
+                (Ok(a), Ok(b)) => {
+                    assert_eq!(a, b, "{:?}", s);
+                    ok += 1;
+                }
+                _ => err += 1,
+            }
+        }
+        assert!(ok > 1_000 && err > 1_000, "corpus too lopsided: ok={} err={}", ok, err);
+    }
+}

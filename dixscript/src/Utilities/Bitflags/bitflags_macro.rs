@@ -5,36 +5,44 @@
 //! Hand-rolled replacement for the `bitflags` crate's `bitflags!` macro.
 //!
 //! ## Why
-//! Exactly one call site in the whole crate:
+//! Exactly one invocation in the whole crate:
 //! `Compiler/Core/BinarySerialization/binary_format.rs`'s `SectionFlags`, an
-//! 8-bit set of section-presence flags. The real crate is a mature, general
-//! library (custom `Debug`/iteration/serde support, const-generic-friendly
-//! internals, ...); this replaces only the specific subset that call site
-//! actually uses, checked directly against every `SectionFlags::` and
-//! `.method()` call before writing this:
-//! - Associated consts (`SectionFlags::CONFIG`, `::NONE`, ...)
-//! - `.bits()`, `.contains()`, `.insert()`, `SectionFlags::from_bits_truncate()`
-//! - Combining flags with `|`
+//! 8-bit set of section-presence flags. Inside the crate only a handful of
+//! methods are ever called on it (`.bits()`, `.contains()`, `.insert()`,
+//! `from_bits_truncate()`, the associated consts, `|`).
 //!
-//! `.remove()`/`.is_empty()`/`|=` are included too even though nothing calls
-//! them today -- a flag set this small naturally wants them, and the user
-//! has flagged more feature-gating work (which tends to want exactly this
-//! kind of flag set) coming later.
+//! ## Why it covers more than the crate calls
+//! `SectionFlags` is a **public** type in a public module
+//! (`dixscript::Compiler::Core::BinarySerialization::binary_format`), it is
+//! used in public signatures (`BinaryHeader::add_section`, `has_section`, and
+//! the public field `BinaryHeader::flags`), and the real `bitflags` 2 macro
+//! generates a much larger public API than the crate itself uses. Anyone
+//! outside this repo could be calling `SectionFlags::empty()`, `!flags`,
+//! `flags & other`, `from_bits(..)` and so on, and nothing in this workspace
+//! can rule that out. So this macro reproduces bitflags 2's set-algebra API
+//! -- `empty`/`all`/`from_bits`/`from_bits_truncate`/`from_bits_retain`,
+//! `is_empty`/`is_all`/`contains`/`intersects`, `insert`/`remove`/`toggle`/
+//! `set`, `union`/`intersection`/`difference`/`symmetric_difference`/
+//! `complement`, and the operators `| & ^ - !` plus their `-Assign` forms --
+//! and every one of them is checked against the real crate over all 256 byte
+//! values (see the differential tests).
 //!
-//! ## What's deliberately NOT here
-//! No custom `Debug` (derive it, like the real invocation already does), no
-//! iteration over set bits, no serde support, no macro-level validation that
-//! flag values don't overlap. None of that is exercised by the one real
-//! caller, and the real crate's own docs don't promise flag values are
-//! disjoint either -- that's the macro user's responsibility either way.
+//! ## Known differences from the real crate (still)
+//! - **`Debug` output.** The invocation derives `Debug`, which here prints the
+//!   raw number (`SectionFlags(5)`); the real crate prints flag names
+//!   (`SectionFlags(CONFIG | DATA)`). Anything that formats a `SectionFlags`
+//!   with `{:?}` and compares the text would notice. Nothing in this
+//!   workspace does.
+//! - **No `iter()` / `iter_names()` / `from_name()`**, and no `Flags` trait
+//!   (nothing in this workspace uses them).
+//! - No serde support; no overlap checking between flag values -- the real
+//!   crate does not promise disjointness either.
 //!
-//! ## Not verified by compilation
-//! This sandbox's rustc is 1.75; `$vis:vis` and tuple-field access in a
-//! const context are both long-stable (well under 1.75), so that part isn't
-//! in question, but the macro itself was never actually expanded and
-//! type-checked here -- only read back by hand against the exact
-//! `SectionFlags` definition it needs to reproduce. Confirm with a real
-//! `cargo test` once wired in.
+//! ## Verification
+//! Expanded and tested in a scratch crate on rustc 1.75 next to the real
+//! `bitflags` 2.x, including differential tests over every one of the 256
+//! values (and every pair for the binary operations). The full crate was not
+//! compiled here.
 
 /// Usage (identical to the real crate's basic form):
 ///
@@ -112,6 +120,111 @@ macro_rules! bitflags {
             pub fn is_empty(&self) -> bool {
                 self.0 == 0
             }
+
+            /// The value with no flags set.
+            #[inline]
+            #[allow(dead_code)]
+            pub const fn empty() -> Self {
+                $name(0)
+            }
+
+            /// The value with every declared flag set.
+            #[inline]
+            #[allow(dead_code)]
+            pub const fn all() -> Self {
+                $name(Self::__ALL_BITS)
+            }
+
+            /// `Some` only if every set bit is a declared flag; `None` if any
+            /// unknown bit is present.
+            #[inline]
+            #[allow(dead_code)]
+            pub const fn from_bits(bits: $repr) -> ::std::option::Option<Self> {
+                if bits & !Self::__ALL_BITS == 0 {
+                    ::std::option::Option::Some($name(bits))
+                } else {
+                    ::std::option::Option::None
+                }
+            }
+
+            /// Keeps every bit, including undeclared ones.
+            #[inline]
+            #[allow(dead_code)]
+            pub const fn from_bits_retain(bits: $repr) -> Self {
+                $name(bits)
+            }
+
+            /// Whether every declared flag is set.
+            #[inline]
+            #[allow(dead_code)]
+            pub fn is_all(&self) -> bool {
+                self.0 & Self::__ALL_BITS == Self::__ALL_BITS
+            }
+
+            /// Whether at least one bit of `other` is also set in `self`.
+            #[inline]
+            #[allow(dead_code)]
+            pub fn intersects(&self, other: Self) -> bool {
+                self.0 & other.0 != 0
+            }
+
+            /// Flips every bit `other` has.
+            #[inline]
+            #[allow(dead_code)]
+            pub fn toggle(&mut self, other: Self) {
+                self.0 ^= other.0;
+            }
+
+            /// Sets or clears every bit `other` has, depending on `value`.
+            #[inline]
+            #[allow(dead_code)]
+            pub fn set(&mut self, other: Self, value: bool) {
+                if value {
+                    self.0 |= other.0;
+                } else {
+                    self.0 &= !other.0;
+                }
+            }
+
+            /// Bits set in `self` or `other`.
+            #[inline]
+            #[allow(dead_code)]
+            #[must_use]
+            pub const fn union(self, other: Self) -> Self {
+                $name(self.0 | other.0)
+            }
+
+            /// Bits set in both.
+            #[inline]
+            #[allow(dead_code)]
+            #[must_use]
+            pub const fn intersection(self, other: Self) -> Self {
+                $name(self.0 & other.0)
+            }
+
+            /// Bits set in `self` but not in `other`.
+            #[inline]
+            #[allow(dead_code)]
+            #[must_use]
+            pub const fn difference(self, other: Self) -> Self {
+                $name(self.0 & !other.0)
+            }
+
+            /// Bits set in exactly one of the two.
+            #[inline]
+            #[allow(dead_code)]
+            #[must_use]
+            pub const fn symmetric_difference(self, other: Self) -> Self {
+                $name(self.0 ^ other.0)
+            }
+
+            /// Every declared flag NOT set in `self` (undeclared bits are dropped).
+            #[inline]
+            #[allow(dead_code)]
+            #[must_use]
+            pub const fn complement(self) -> Self {
+                $name(!self.0 & Self::__ALL_BITS)
+            }
         }
 
         impl ::std::ops::BitOr for $name {
@@ -126,6 +239,59 @@ macro_rules! bitflags {
             #[inline]
             fn bitor_assign(&mut self, rhs: $name) {
                 self.0 |= rhs.0;
+            }
+        }
+
+        impl ::std::ops::BitAnd for $name {
+            type Output = $name;
+            #[inline]
+            fn bitand(self, rhs: $name) -> $name {
+                self.intersection(rhs)
+            }
+        }
+
+        impl ::std::ops::BitAndAssign for $name {
+            #[inline]
+            fn bitand_assign(&mut self, rhs: $name) {
+                self.0 &= rhs.0;
+            }
+        }
+
+        impl ::std::ops::BitXor for $name {
+            type Output = $name;
+            #[inline]
+            fn bitxor(self, rhs: $name) -> $name {
+                self.symmetric_difference(rhs)
+            }
+        }
+
+        impl ::std::ops::BitXorAssign for $name {
+            #[inline]
+            fn bitxor_assign(&mut self, rhs: $name) {
+                self.0 ^= rhs.0;
+            }
+        }
+
+        impl ::std::ops::Sub for $name {
+            type Output = $name;
+            #[inline]
+            fn sub(self, rhs: $name) -> $name {
+                self.difference(rhs)
+            }
+        }
+
+        impl ::std::ops::SubAssign for $name {
+            #[inline]
+            fn sub_assign(&mut self, rhs: $name) {
+                self.0 &= !rhs.0;
+            }
+        }
+
+        impl ::std::ops::Not for $name {
+            type Output = $name;
+            #[inline]
+            fn not(self) -> $name {
+                self.complement()
             }
         }
     };
@@ -194,5 +360,179 @@ mod tests {
         assert!(combined.contains(TestFlags::A));
         assert!(combined.contains(TestFlags::C));
         assert!(!combined.contains(TestFlags::B));
+    }
+}
+
+
+/// Differential test against the real `bitflags` 2.x, using the exact flag set
+/// `SectionFlags` declares in `binary_format.rs` (including the gap at 0x20 and
+/// the reserved high bits), over every one of the 256 possible byte values.
+/// `SectionFlags::from_bits_truncate` is what the binary unpacker feeds an
+/// untrusted header byte through, so this is the behavior that must not drift.
+///
+/// The real macro is called as `::bitflags::bitflags!` (the extern crate; a
+/// same-named local macro exists). When `bitflags` is dropped from
+/// `[dependencies]` in the wiring pass, move it to `[dev-dependencies]` so this
+/// keeps guarding the macro.
+#[cfg(test)]
+mod differential_against_real_crate {
+    mod mine {
+        use super::super::bitflags;
+        bitflags! {
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            pub struct Flags: u8 {
+                const NONE       = 0x00;
+                const CONFIG     = 0x01;
+                const ENUMS      = 0x02;
+                const DATA       = 0x04;
+                const SECURITY   = 0x08;
+                const IMPORTS    = 0x10;
+                const RESERVED_6 = 0x40;
+                const RESERVED_7 = 0x80;
+            }
+        }
+    }
+
+    mod real {
+        ::bitflags::bitflags! {
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            pub struct Flags: u8 {
+                const NONE       = 0x00;
+                const CONFIG     = 0x01;
+                const ENUMS      = 0x02;
+                const DATA       = 0x04;
+                const SECURITY   = 0x08;
+                const IMPORTS    = 0x10;
+                const RESERVED_6 = 0x40;
+                const RESERVED_7 = 0x80;
+            }
+        }
+    }
+
+    #[test]
+    fn from_bits_truncate_and_bits_agree_for_every_byte() {
+        for b in 0..=255u8 {
+            assert_eq!(
+                mine::Flags::from_bits_truncate(b).bits(),
+                real::Flags::from_bits_truncate(b).bits(),
+                "byte {:#04x}",
+                b
+            );
+        }
+    }
+
+    #[test]
+    fn contains_agrees_for_every_pair_of_bytes() {
+        for a in 0..=255u8 {
+            for b in 0..=255u8 {
+                assert_eq!(
+                    mine::Flags::from_bits_truncate(a).contains(mine::Flags::from_bits_truncate(b)),
+                    real::Flags::from_bits_truncate(a).contains(real::Flags::from_bits_truncate(b)),
+                    "a={:#04x} b={:#04x}",
+                    a,
+                    b
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn insert_agrees_with_the_real_crate() {
+        for a in 0..=255u8 {
+            for b in 0..=255u8 {
+                let mut m = mine::Flags::from_bits_truncate(a);
+                m.insert(mine::Flags::from_bits_truncate(b));
+                let mut r = real::Flags::from_bits_truncate(a);
+                r.insert(real::Flags::from_bits_truncate(b));
+                assert_eq!(m.bits(), r.bits(), "a={:#04x} b={:#04x}", a, b);
+            }
+        }
+    }
+
+    #[test]
+    fn empty_all_from_bits_and_predicates_agree_for_every_byte() {
+        assert_eq!(mine::Flags::empty().bits(), real::Flags::empty().bits());
+        assert_eq!(mine::Flags::all().bits(), real::Flags::all().bits());
+        for b in 0..=255u8 {
+            assert_eq!(
+                mine::Flags::from_bits(b).map(|f| f.bits()),
+                real::Flags::from_bits(b).map(|f| f.bits()),
+                "from_bits {:#04x}",
+                b
+            );
+            assert_eq!(
+                mine::Flags::from_bits_retain(b).bits(),
+                real::Flags::from_bits_retain(b).bits(),
+                "from_bits_retain {:#04x}",
+                b
+            );
+            let (m, r) = (mine::Flags::from_bits_truncate(b), real::Flags::from_bits_truncate(b));
+            assert_eq!(m.is_empty(), r.is_empty(), "is_empty {:#04x}", b);
+            assert_eq!(m.is_all(), r.is_all(), "is_all {:#04x}", b);
+            assert_eq!(m.complement().bits(), r.complement().bits(), "complement {:#04x}", b);
+            assert_eq!((!m).bits(), (!r).bits(), "! {:#04x}", b);
+        }
+    }
+
+    #[test]
+    fn set_algebra_agrees_for_every_pair_of_bytes() {
+        for a in 0..=255u8 {
+            for b in 0..=255u8 {
+                let (ma, mb) = (mine::Flags::from_bits_truncate(a), mine::Flags::from_bits_truncate(b));
+                let (ra, rb) = (real::Flags::from_bits_truncate(a), real::Flags::from_bits_truncate(b));
+                let ctx = format!("a={:#04x} b={:#04x}", a, b);
+
+                assert_eq!(ma.intersects(mb), ra.intersects(rb), "intersects {}", ctx);
+                assert_eq!(ma.union(mb).bits(), ra.union(rb).bits(), "union {}", ctx);
+                assert_eq!(ma.intersection(mb).bits(), ra.intersection(rb).bits(), "intersection {}", ctx);
+                assert_eq!(ma.difference(mb).bits(), ra.difference(rb).bits(), "difference {}", ctx);
+                assert_eq!(
+                    ma.symmetric_difference(mb).bits(),
+                    ra.symmetric_difference(rb).bits(),
+                    "symmetric_difference {}",
+                    ctx
+                );
+                assert_eq!((ma | mb).bits(), (ra | rb).bits(), "| {}", ctx);
+                assert_eq!((ma & mb).bits(), (ra & rb).bits(), "& {}", ctx);
+                assert_eq!((ma ^ mb).bits(), (ra ^ rb).bits(), "^ {}", ctx);
+                assert_eq!((ma - mb).bits(), (ra - rb).bits(), "- {}", ctx);
+
+                let (mut m, mut r) = (ma, ra);
+                m.toggle(mb);
+                r.toggle(rb);
+                assert_eq!(m.bits(), r.bits(), "toggle {}", ctx);
+
+                for value in [true, false] {
+                    let (mut m, mut r) = (ma, ra);
+                    m.set(mb, value);
+                    r.set(rb, value);
+                    assert_eq!(m.bits(), r.bits(), "set({}) {}", value, ctx);
+                }
+
+                let (mut m, mut r) = (ma, ra);
+                m.remove(mb);
+                r.remove(rb);
+                assert_eq!(m.bits(), r.bits(), "remove {}", ctx);
+
+                let (mut m, mut r) = (ma, ra);
+                m |= mb; r |= rb;
+                m &= mb; r &= rb;
+                m ^= mb; r ^= rb;
+                m -= mb; r -= rb;
+                assert_eq!(m.bits(), r.bits(), "assign-ops chain {}", ctx);
+            }
+        }
+    }
+
+    #[test]
+    fn named_constants_carry_the_same_bits() {
+        assert_eq!(mine::Flags::NONE.bits(), real::Flags::NONE.bits());
+        assert_eq!(mine::Flags::CONFIG.bits(), real::Flags::CONFIG.bits());
+        assert_eq!(mine::Flags::ENUMS.bits(), real::Flags::ENUMS.bits());
+        assert_eq!(mine::Flags::DATA.bits(), real::Flags::DATA.bits());
+        assert_eq!(mine::Flags::SECURITY.bits(), real::Flags::SECURITY.bits());
+        assert_eq!(mine::Flags::IMPORTS.bits(), real::Flags::IMPORTS.bits());
+        assert_eq!(mine::Flags::RESERVED_6.bits(), real::Flags::RESERVED_6.bits());
+        assert_eq!(mine::Flags::RESERVED_7.bits(), real::Flags::RESERVED_7.bits());
     }
 }

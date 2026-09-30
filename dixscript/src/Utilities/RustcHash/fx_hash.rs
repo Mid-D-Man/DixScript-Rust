@@ -2,46 +2,49 @@
 // NOTICE: Full documentation, design decisions, and fix history for this file
 // live in docs/dixscript/utilities.md, section "Utilities/RustcHash/fx_hash.rs"
 // ============================================================================
-//! Hand-rolled replacement for the `rustc-hash` crate.
+//! The classic FxHash, copied from `Mid-D-Man/mid-engine`. **Not** the default
+//! export of `Utilities::RustcHash` -- see below for why.
 //!
 //! ## Provenance
-//! Copied, not reinvented: this is the same `FxHasher` already hand-rolled
-//! in this repo's sibling project, `Mid-D-Man/mid-engine`'s
-//! `crates/mid-collections/src/fx_hash.rs` (that copy's own doc comment
-//! traces it back to rustc's own internal hasher, itself ported from
-//! Firefox). Copied here nearly verbatim -- only the top doc comment
-//! changed, since mid-collections' version explains itself in terms of
-//! `SpatialHash` cell keys, which don't exist in this crate. The algorithm,
-//! the seed constant, and every method are unchanged.
+//! Copied, not reinvented: this is the `FxHasher` already hand-rolled in this
+//! repo's sibling project, `mid-engine`'s
+//! `crates/mid-collections/src/fx_hash.rs` (that copy's own doc comment traces
+//! it back to rustc's original internal hasher, itself ported from Firefox).
+//! Copied nearly verbatim -- only the top doc comment changed, since
+//! mid-collections' version explains itself in terms of `SpatialHash` cell
+//! keys, which don't exist in this crate. The algorithm, the seed constant and
+//! every method are unchanged. `FxHashMap`/`FxHashSet` aliases were added.
 //!
-//! ## Why it's safe to swap in
-//! Not cryptographic and not DoS-hardened the way std's default SipHasher
-//! is -- deliberately, same reasoning as rustc's own internal maps and as
-//! mid-collections': every `FxHashMap`/`FxHashSet` in this crate keys on
-//! values this compiler computes for itself while parsing/analyzing a
-//! `.mdix` file it already fully controls (symbol names, section ids,
-//! table paths, ...), not attacker-supplied keys arriving over a network.
-//! There's no adversarial-input threat model here to defend against, so
-//! SipHash's HashDoS resistance is pure overhead this crate doesn't need.
+//! ## It is NOT a drop-in for `rustc-hash` 2.x
+//! This crate's `Cargo.lock` resolves `rustc-hash` 2.1.1, which replaced this
+//! algorithm. Comparing the two directly (release build, 100k entries):
+//! - **Different hash values**, so a `HashMap`/`HashSet` built with this hasher
+//!   iterates in a different order than one built with `rustc-hash` 2.1.1.
+//! - **About a third slower on string keys** (6.5 ms vs 4.9 ms), which is
+//!   ~100 of this crate's ~125 `FxHashMap`/`FxHashSet` sites.
+//! - **About 44x slower on integer keys with a power-of-two stride** (77 ms vs
+//!   1.75 ms at stride 4096): this algorithm's low bits are weak, and hash
+//!   tables pick their bucket from the low bits. That is the weakness the 2.x
+//!   rewrite was made to fix. (This crate has only three `i32`-keyed maps, so
+//!   it is unlikely to bite here; it is real for anyone reusing this file.)
 //!
-//! ## What the crate actually calls
-//! Grepped every call site before writing this: only `FxHashMap::default()`,
-//! `FxHashMap::with_capacity_and_hasher(cap, hasher)`, and the `FxHashSet`
-//! equivalents (178 sites total, 13 files) -- both are inherent
-//! `HashMap`/`HashSet` methods that fall out for free once the type alias
-//! and `BuildHasherDefault<FxHasher>: Default` line up, so no wrapper
-//! functions beyond the aliases themselves are needed. `rustc-hash`'s own
-//! public surface is reproduced exactly (`FxHasher`, `FxBuildHasher`,
-//! `FxHashMap`, `FxHashSet`) so the eventual call-site sweep is a pure
-//! import-path change, nothing else.
+//! So `RustcHash/mod.rs` exports `rustc_hash_v2.rs` -- a port of the 2.1.1
+//! algorithm -- as the default. This file stays available as
+//! `Utilities::RustcHash::classic` (it is the copy you asked for, and it is
+//! tested), for anything that wants the classic behavior on purpose.
 //!
-//! ## Not verified by compilation
-//! `Hasher`/`BuildHasherDefault` are both long-stable, well under this
-//! sandbox's rustc 1.75 ceiling, so unlike `LazyStatic` there's no toolchain
-//! gap here -- but this file was still only parse-checked standalone, not
-//! exercised through a real `HashMap`/`HashSet` in this sandbox. The unit
-//! tests below do exercise it end-to-end and should be run for real once
-//! wired in.
+//! ## Why the classic algorithm is still fine for what it is
+//! Not cryptographic and not DoS-hardened, deliberately, same reasoning as
+//! rustc's own maps: keys are values this compiler computes for itself while
+//! parsing a file it already controls (symbol names, section ids, table
+//! paths), not attacker-supplied input over a network.
+//!
+//! ## Verification
+//! Unit-tested end to end through a real `HashMap`/`HashSet` in a scratch
+//! crate. There is no differential test against `rustc-hash` here because the
+//! two are different algorithms by design; the benchmark numbers above were
+//! taken in that scratch crate on one machine and are indicative, not a
+//! guarantee for other hardware.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};

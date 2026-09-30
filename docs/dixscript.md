@@ -20,8 +20,9 @@ as not yet documented rather than assumed undocumented-on-purpose.
   version/feature gating, and the `@RAW` section added in v1.0.1
 - [Utilities](dixscript/utilities.md) — the dependency-reduction pass:
   what was audited and why each crate was kept, removed or hand-rolled, plus
-  the hand-rolled replacements themselves (`Utilities/Hex`, `Bitflags`,
-  `LazyStatic`, `RustcHash`), built but not yet wired in
+  the hand-rolled replacements themselves (`Utilities/AsyncTrait`, `Base64`,
+  `Bitflags`, `Hex`, `Hostname`, `LazyStatic`, `RustcHash`, `Uuid`), built and
+  tested against the real crates but not yet wired in
 - Benchmarks comparing DixScript against JSON/TOML live in
   `dixscript/benches/format_comparison_benchmark.rs` (synthetic small/
   medium/large fixtures) and `dixscript/benches/chemistry_db_comparison_benchmark.rs`

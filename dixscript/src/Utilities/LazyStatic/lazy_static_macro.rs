@@ -10,9 +10,9 @@
 //! `LazyLock` already does everything `lazy_static` exists to do -- a
 //! `static` whose initializer runs once, on first access, thread-safely.
 //! `lazy_static` predates it. This file only exists so the 18 existing
-//! `lazy_static! { static ref NAME: Type = expr; }` blocks (6 files) keep
-//! their exact current syntax: the eventual call-site sweep changes one
-//! `use` line per file, not 18 declarations.
+//! `static ref NAME: Type = expr;` items (in 6 `lazy_static!` blocks, one per
+//! file) keep their exact current syntax: the eventual call-site sweep changes
+//! one `use` line per file, not 18 declarations.
 //!
 //! ## What the crate actually uses
 //! Checked before writing: only the macro itself -- no

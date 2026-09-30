@@ -656,7 +656,7 @@ namespace MidManStudio.Mdix.Unity.Editor
 
         private void OnCodeFieldKeyDown(KeyDownEvent evt)
         {
-            if ((evt.ctrlKey || evt.commandKey) && evt.keyCode == UnityEngine.Event_KeyCode.Space)
+            if ((evt.ctrlKey || evt.commandKey) && evt.keyCode == UnityEngine.KeyCode.Space)
             {
                 RequestCompletionAtCursor();
                 evt.StopPropagation();
@@ -668,7 +668,7 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             switch (evt.keyCode)
             {
-                case UnityEngine.Event_KeyCode.DownArrow:
+                case UnityEngine.KeyCode.DownArrow:
                     _completionSelectedIndex =
                         Math.Min(_completionSelectedIndex + 1, _completionItems.Count - 1);
                     RenderCompletionList();
@@ -676,20 +676,20 @@ namespace MidManStudio.Mdix.Unity.Editor
                     evt.PreventDefault();
                     break;
 
-                case UnityEngine.Event_KeyCode.UpArrow:
+                case UnityEngine.KeyCode.UpArrow:
                     _completionSelectedIndex = Math.Max(_completionSelectedIndex - 1, 0);
                     RenderCompletionList();
                     evt.StopPropagation();
                     evt.PreventDefault();
                     break;
 
-                case UnityEngine.Event_KeyCode.Return:
+                case UnityEngine.KeyCode.Return:
                     AcceptCompletionItem(_completionSelectedIndex);
                     evt.StopPropagation();
                     evt.PreventDefault();
                     break;
 
-                case UnityEngine.Event_KeyCode.Escape:
+                case UnityEngine.KeyCode.Escape:
                     HideCompletionPopup();
                     evt.StopPropagation();
                     evt.PreventDefault();

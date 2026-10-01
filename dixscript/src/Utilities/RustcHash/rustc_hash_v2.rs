@@ -34,8 +34,11 @@
 //!
 //! ## 32-bit targets
 //! Both pointer widths are ported (`wasm32` is 32-bit and is a target of this
-//! crate). Upstream's 32-bit vectors are included but could only be exercised
-//! by running the tests on such a target, which was not possible here.
+//! crate, and this module is compiled for it even though nothing calls it yet).
+//! The 32-bit branches were forced on, one at a time, in an isolated copy and
+//! type-checked with the real compiler, so they compile. Upstream's 32-bit
+//! known-answer vectors are included but could only be *run* on a 32-bit target,
+//! which was not possible here: their behavior there is unverified.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};

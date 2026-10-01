@@ -1,6 +1,6 @@
 use super::dix_type::DixType;
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
+use crate::Utilities::Base64::Engine as _;
+use crate::Utilities::Base64::general_purpose::STANDARD;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::cmp::Ordering;

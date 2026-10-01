@@ -36,7 +36,7 @@ const MAX_STUCK_COUNT: usize = 3;
 // comment for why this file needed one at all.
 const MAX_CONTAINER_NESTING_DEPTH: usize = 64;
 
-lazy_static::lazy_static! {
+crate::Utilities::LazyStatic::lazy_static! {
     static ref OPERATOR_PRECEDENCE: HashMap<&'static str, (i32, bool)> = {
         let mut m = HashMap::new();
         m.insert("**",  (13, true));

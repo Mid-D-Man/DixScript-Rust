@@ -22,6 +22,24 @@
 //! per block). Visibility and the no-trailing-semicolon last-item form are
 //! supported anyway, for parity with the real macro's grammar.
 //!
+//! ## `#[allow(dead_code)]` on every generated static
+//! The real macro wraps each static in a hidden type carrying
+//! `#[allow(dead_code)]`, so an unused `static ref` never warned. A bare
+//! `LazyLock` static does warn, so omitting this would have made the swap *add*
+//! warnings -- and it did, exposing two dead statics in
+//! `quickfuncs_section_parser.rs` (`INTERP_METHOD_CALL_RE`, `INTERP_PROPERTY_RE`)
+//! that the old macro had been hiding. The attribute keeps the swap behavior-
+//! preserving; the two dead statics are recorded in docs/dixscript/utilities.md
+//! as a cleanup candidate instead of being deleted here.
+//!
+//! ## The recursive step is path-based on purpose
+//! A block with several items expands one item at a time by calling the macro
+//! again. That inner call is written `$crate::Utilities::LazyStatic::lazy_static!`
+//! rather than the bare `lazy_static!`, because a bare name only resolves where
+//! the caller has imported the macro. One call site invokes it by full path with
+//! no import (`quickfuncs_section_parser.rs`), and even a single-item block
+//! makes a final empty recursive call.
+//!
 //! ## One real behavioral difference
 //! `lazy_static!` generates a distinct hidden struct per static that derefs
 //! to the inner type; `LazyLock<T>` is a single std type doing the same via
@@ -29,14 +47,13 @@
 //! both of which work identically through either. Anything that named the
 //! generated type itself would break -- nothing does.
 //!
-//! ## NOT VERIFIED BY COMPILATION IN THIS SANDBOX
-//! The sandbox's rustc is 1.75, where `std::sync::LazyLock` is still
-//! unstable (E0658, `lazy_cell`) -- confirmed by trying it directly. So this
-//! file cannot be compiled here as written. The macro's grammar was instead
-//! checked by expanding it against a stand-in `LazyLock` built on
-//! `std::sync::OnceLock` (stable since 1.70) in a scratch crate; see
-//! docs/dixscript/utilities.md for exactly what that did and didn't prove.
-//! Real confirmation is CI on the project's actual 1.85 toolchain.
+//! ## Verification
+//! Wired into all six `lazy_static!` sites and compiled and tested as part of
+//! the real crate on Rust 1.85.1 (the crate's declared `rust-version`) against
+//! the genuine `std::sync::LazyLock`: this file's four tests pass, as does the
+//! rest of the suite. (An earlier version of this note said it could not be
+//! compiled at all; that was true only of the sandbox's default rustc 1.75,
+//! where `LazyLock` is unstable.)
 
 /// Usage (identical to the real crate's form):
 ///
@@ -57,14 +74,16 @@ macro_rules! lazy_static {
 
     ($(#[$attr:meta])* $vis:vis static ref $name:ident : $ty:ty = $init:expr; $($rest:tt)*) => {
         $(#[$attr])*
+        #[allow(dead_code)]
         $vis static $name: ::std::sync::LazyLock<$ty> =
             ::std::sync::LazyLock::new(|| $init);
-        lazy_static! { $($rest)* }
+        $crate::Utilities::LazyStatic::lazy_static! { $($rest)* }
     };
 
     // Last item with no trailing semicolon, which the real macro also accepts.
     ($(#[$attr:meta])* $vis:vis static ref $name:ident : $ty:ty = $init:expr) => {
         $(#[$attr])*
+        #[allow(dead_code)]
         $vis static $name: ::std::sync::LazyLock<$ty> =
             ::std::sync::LazyLock::new(|| $init);
     };

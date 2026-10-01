@@ -39,10 +39,11 @@
 //!   crate does not promise disjointness either.
 //!
 //! ## Verification
-//! Expanded and tested in a scratch crate on rustc 1.75 next to the real
-//! `bitflags` 2.x, including differential tests over every one of the 256
-//! values (and every pair for the binary operations). The full crate was not
-//! compiled here.
+//! Differential tests against the real `bitflags` 2.x over every one of the 256
+//! values (and every pair for the binary operations), run inside the real crate
+//! on Rust 1.85.1. The macro is not yet used by `SectionFlags` itself -- that
+//! swap is held back pending a decision on public API (see
+//! docs/dixscript/utilities.md).
 
 /// Usage (identical to the real crate's basic form):
 ///

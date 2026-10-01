@@ -223,7 +223,7 @@ impl BlobEncoding {
     pub fn validate(&self, data: &str) -> bool {
         match self {
             BlobEncoding::Base64 => {
-                use base64::{Engine as _, engine::general_purpose};
+                use crate::Utilities::Base64::{Engine as _, general_purpose};
                 general_purpose::STANDARD.decode(data).is_ok()
             }
             BlobEncoding::Hex => {

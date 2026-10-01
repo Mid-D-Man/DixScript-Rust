@@ -22,20 +22,21 @@ crate it replaces. Counts are from a scripted scan of `dixscript/src`.
 | `itertools` | 0 call sites anywhere | — | **Removed** |
 | `unicase` | 0 call sites anywhere | — | **Removed** |
 | `serde` | `#[derive(Serialize)]` on `DixValue`; 5 sibling binding crates serialize `&DixValue` through it | yes | **Kept** — first judged removable, wrongly |
-| `hex` | 2 call sites (`hex::encode(sha256)`) | no | Built, not wired in |
-| `lazy_static` | 18 `static ref` items in 6 blocks / 6 files | no | Built, not wired in |
-| `bitflags` | 1 invocation (`SectionFlags`) | **yes** | Built, not wired in |
-| `rustc-hash` | 188 mentions of `FxHashMap`/`FxHashSet`, 13 files | **yes (11 items)** | Built (port of 2.1.1), not wired in |
-| `base64` | 35 calls, 11 files, `general_purpose::STANDARD` only | no | Built, not wired in |
-| `uuid` | 13 call sites, 4 files (`new_v4`, `parse_str`, `nil`, `from_bytes`) | no | Built, not wired in |
-| `hostname` | 1 call site, diagnostics only | no | Built (best-effort), not wired in |
-| `async-trait` | 2 attribute sites on the `CloudStorageProvider` trait | **yes** | Built as recipe, not wired in — see below |
+| `hex` | 2 call sites (`hex::encode(sha256)`) | no | **Wired in** |
+| `lazy_static` | 18 `static ref` items in 6 blocks / 6 files | no | **Wired in** |
+| `bitflags` | 1 invocation (`SectionFlags`) | **yes** | Built; **held back**, decision open |
+| `rustc-hash` | 188 mentions of `FxHashMap`/`FxHashSet`, 13 files | **yes (11 items)** | Built (port of 2.1.1); **held back**, decision open |
+| `base64` | 35 calls, 11 files, `general_purpose::STANDARD` only | no | **Wired in** |
+| `uuid` | 13 call sites, 4 files (`new_v4`, `parse_str`, `nil`, `from_bytes`) | no | **Wired in** |
+| `hostname` | 1 call site, diagnostics only | no | **Wired in** (best-effort, see its section) |
+| `async-trait` | 2 attribute sites on the `CloudStorageProvider` trait | **yes** | Built as a recipe; **held back**, decision open |
 | `url` | 1 call site | no | **Kept for now** — see Open items |
 
 "Public API?" means the crate's own types appear in a signature or field of
-something reachable from outside the crate. That column decides how risky the
-later wiring-in pass is: rows marked **yes** change what downstream users of the
-published crate see, and are called out under "Decisions the wiring pass needs".
+something reachable from outside the crate. That column decided how the wiring-in
+was staged: the five rows marked **no** are wired in; the three rows marked
+**yes** change what downstream users of the published crate see, so they were
+deliberately held back and are under "Decisions still open".
 
 Kept on purpose, with the reason, so nobody re-litigates it:
 
@@ -63,25 +64,29 @@ Kept on purpose, with the reason, so nobody re-litigates it:
   snake_case. This matches the rest of the crate (`Compiler/DLM/Auditor/`,
   `Compiler/Core/SectionParsers/`, `Builtins/Static/`).
 - **Visibility:** everything here is `pub(crate)` and deliberately *not*
-  re-exported through `Utilities/mod.rs`'s `pub use` list. See "Decisions the
-  wiring pass needs" for where that will have to change.
+  re-exported through `Utilities/mod.rs`'s `pub use` list. See "Decisions still
+  open" for where that will have to change for the three held-back modules.
 - **Drop-in surface:** each module reproduces the *call-site syntax* of the crate
   it replaces where it can (same macro grammar, type names, function names,
-  `Engine` trait and `general_purpose::STANDARD`), so the wiring-in pass is
-  mostly one `use` line per file. `AsyncTrait` is the exception: it is a recipe
-  applied by hand at three sites.
+  `Engine` trait and `general_purpose::STANDARD`), so wiring in was one `use`
+  line (or one inline path) per site. `AsyncTrait` is the exception: it is a
+  recipe applied by hand at three sites, and has not been applied.
 - **Differential tests, and the real crates as oracles.** Each module that
   replaces a crate with checkable behavior has tests that run the same inputs
   through both and require identical results. They call the real crate as
   `::name` (leading `::` forces the extern crate, since a same-named local
-  module exists). When a crate is dropped from `[dependencies]` in the wiring
-  pass, **move it to `[dev-dependencies]` instead of deleting it** — the tests
-  then keep guarding the replacement for good. `hostname` is a non-wasm target
-  dependency, so it goes under
-  `[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]`.
-- **`allow(dead_code, unused_imports, unused_macros)`** sits on the module lines
-  in `Utilities/mod.rs`. Temporary: nothing calls these yet. Remove it when they
-  are wired in.
+  module exists). When a crate is dropped from `[dependencies]`, **move it to
+  `[dev-dependencies]` instead of deleting it** — the tests then keep guarding
+  the replacement for good. That is what was done for `base64`, `hex`,
+  `hostname` and `uuid`, all under
+  `[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]` (`hostname` was
+  already a non-wasm dependency). `lazy_static` has no oracle test and was
+  removed outright.
+- **`allow(...)` on the module lines in `Utilities/mod.rs`.** The five wired
+  modules keep `allow(dead_code, unused_imports)` because each deliberately offers
+  a little more than the crate calls (`Hex::decode`, extra re-exports). The three
+  held-back modules keep the broader `allow(dead_code, unused_imports,
+  unused_macros)` because nothing calls them yet; remove it if they are wired in.
 
 ## Modules
 
@@ -138,15 +143,27 @@ A `lazy_static!` macro expanding to
   `&*NAME`, both fine either way.
 - Not public API: every static is private.
 
-**Verification gap (important):** the sandbox toolchain is rustc/cargo 1.75,
-where `LazyLock` is still unstable (E0658 `lazy_cell`, confirmed directly), so
-this file **cannot be compiled as written there**. Instead the macro was
-compiled and its four tests run against a stand-in `LazyLock` built on
-`std::sync::OnceLock`. That proves the macro grammar, recursion, attribute
-pass-through and run-exactly-once behavior. It does **not** prove the real
-`LazyLock::new(|| ..)` type-checks in `static` position (closure to `fn() -> T`
-coercion). That is `LazyLock`'s documented usage, so it is expected to hold,
-but CI on the real toolchain is the confirmation.
+**Two things the wiring-in taught.**
+- *The recursive step had to become path-based.* A block with several items
+  expands one at a time by calling the macro again, and that inner call was
+  written with the bare name, which only resolves where the caller has imported
+  the macro. `quickfuncs_section_parser.rs` invokes it by full path with no
+  import, and even a single-item block makes a final empty recursive call. The
+  inner call is now `$crate::Utilities::LazyStatic::lazy_static!`.
+- *The swap exposed two dead statics.* The real macro wraps each static in a
+  hidden type carrying `#[allow(dead_code)]`, so an unused `static ref` never
+  warned; a bare `LazyLock` static does. Wiring it in raised the crate's warning
+  count from 129 to 131 — `INTERP_METHOD_CALL_RE` and `INTERP_PROPERTY_RE` in
+  `quickfuncs_section_parser.rs` are never used and had been invisible. The macro
+  now adds `#[allow(dead_code)]` to every static it generates so the swap changes
+  no warnings (129 before, 129 after, same set). The two statics are a **cleanup
+  candidate**, not deleted here: they look like leftovers of the interpolation
+  code that already produces `parse_interpolated_expression is never used`.
+
+**Verified against the real `LazyLock`:** the earlier gap (sandbox rustc 1.75
+could not compile `LazyLock`) is closed. The macro's four tests and every wired
+static now run in the real crate on Rust 1.85.1, the crate's declared
+`rust-version`.
 
 ### `Utilities/RustcHash` — two hashers, one default
 
@@ -251,8 +268,8 @@ keep their shape. Replaces `base64` 0.21.7.
   the source rather than from expectation.
 - Not public API: `base64` types appear in no public signature.
 - The 17 `use base64::…` lines are five shapes (13 are
-  `use base64::{Engine as _, engine::general_purpose};`), so the wiring change is
-  small and mechanical.
+  `use base64::{Engine as _, engine::general_purpose};`), so wiring it in was a
+  mechanical swap of 17 `use` lines in 11 files.
 
 ### `Utilities/Uuid/uuid.rs`
 
@@ -339,21 +356,34 @@ replay identically on every machine. Not used by anything at runtime;
 
 ## Verification summary
 
+How it was verified: the sandbox's default toolchain is 1.75, but Ubuntu's
+archive also ships `rustc-1.85`/`cargo-1.85` (`apt-get install rustc-1.85
+cargo-1.85`, then `PATH=/usr/lib/rust-1.85/bin:$PATH`), which is exactly the
+crate's declared `rust-version`. That made it possible to compile and test the
+real crate rather than extracted copies. Earlier statements in this project that
+the crate could not be compiled here, and that `LazyLock` could not be tested,
+were true of 1.75 and are no longer true.
+
 | Item | Status |
 |---|---|
-| All eight modules | Compiled and tested in a scratch crate on rustc/cargo 1.75, next to the real `hex`, `bitflags`, `lazy_static`, `rustc-hash` 2.1.1, `base64` 0.21.7, `uuid` 1.19.0 and `hostname` 0.3.1 in the dependency list (to catch any ambiguity between a local module and a same-named extern crate — none occurred). The scratch `Utilities/mod.rs` was generated from the real one, so the registration itself is tested. **67 tests, 0 failures, 0 warnings on a plain build.** |
-| Differential vs the real crates | 20 of those 67 tests, covering `hex`, `bitflags`, `base64`, `uuid`, `hostname` (Linux) and `rustc-hash`. Roughly 1.3M base64 decodes, 300k uuid parses, 65k×operations bitflags pairs, and 300+300 map/set iteration-order comparisons. |
+| The real crate builds | `cargo check -p dixscript --lib` on Rust 1.85.1: **0 errors**, before and after wiring. |
+| The full test suite | `cargo test -p dixscript`: **652 passed, 0 failed** (490 library tests plus every integration suite and the doc tests), identical per-suite counts before and after wiring, so nothing was lost. This includes `schema_section_tests` (42) and `raw_section_tests` (16). |
+| `@SCHEMA` | The 42 `@SCHEMA` integration tests had never been run against the real compiler (only parse-checked, then run in extracted form). They pass on first real execution. |
+| Warnings | 129 before wiring, 129 after, identical set (see `LazyStatic` for the two that appeared and were suppressed). |
+| Other targets | `cargo check -p dixscript --all-targets` (tests, benches, examples) and `--lib --no-default-features` both succeed. |
+| Sibling crates | `mdix-lua` and `mdix-java` — the only two that depend on the local path — both compile against the wired crate. `mdix-lsp`, `mdix-wasm`, `mdix-ffi`, `mdix-python` and `mdix-cli` resolve the *published* `dixscript` 1.0.0 deliberately (their manifests say so), so they were not rebuilt. |
+| Differential tests | 20 tests comparing each replacement with the exact locked crate it replaces (`hex`, `bitflags`, `base64`, `uuid`, `hostname` on Linux, `rustc-hash`). Roughly 1.3M base64 decodes, 300k uuid parses, every byte and byte pair for bitflags, and 300+300 map/set iteration-order comparisons. They now run inside the real crate with the oracles as dev-dependencies. |
 | Do the tests have teeth? | Deliberate bugs were injected and caught: 3 in base64, 2 in uuid, 2 in the `rustc-hash` port, 2 in the bitflags set algebra. |
-| Re-exports resolve to local code | Checked at compile time in batch 1 (`decode` typed `Result<_, String>`, etc.); the modules were re-registered from the real `mod.rs` for the final run. |
-| `LazyStatic` | Verified only against an `OnceLock` stand-in — see above. |
-| Names don't collide | No existing type, module or glob import in `src/` shares a name with the new modules; the `Hex`/`Base64` names that exist are enum variants that are never glob-imported. |
-| The `dixscript` crate as a whole | **Not compiled.** The locked graph pulls in `base64ct` 1.8.3, which needs `edition2024`; cargo 1.75 can't parse it. CI is the real check. |
-| `wasm32` | Not exercised. The `Uuid` randomness path and the `RustcHash` 32-bit constants are both reasoned from the existing configuration, not run. |
+| Names don't collide | No existing type, module or glob import in `src/` shares a name with the new modules. |
+| Cargo.lock | Against `HEAD`, regenerating drops three direct edges from the local `dixscript` entry (`itertools`, `lazy_static`, `unicase`) and adds `bumpalo`; no package leaves the graph, because other crates still use those three. `bumpalo` was already missing from `HEAD`'s lock before this work, i.e. the lock was out of sync independently. A `--locked` build refuses — and **already refused on pristine `HEAD`, before any of this work** (checked), so the lockfile needs a Sync Cargo.lock run regardless. The consolidated archive applied over pristine `HEAD` builds and passes all 652 tests on a normal (unlocked) build. |
+| Inactive `cfg` branches | The 32-bit constants in `rustc_hash_v2.rs` and the Windows, unix and wasm variants of `hostname::get()` were forced on, one at a time, in an isolated copy and type-checked with the real compiler: all compile. That proves they compile, not that they behave correctly on a real 32-bit or wasm target. |
+| `wasm32` | **Still not built or run.** No `wasm32` standard library is packaged for this toolchain. Your CI's `cargo build -p dixscript --target wasm32-unknown-unknown` is the real check. What it exercises that nothing here did: `Uuid::new_v4` through `getrandom` 0.2 with its `js` feature (already enabled for wasm and already relied on by the DLM encryptors), and the 32-bit hasher at runtime. |
 
-## Decisions the wiring pass needs
+## Decisions still open
 
-Nothing is wired in. Before it is, three of the replacements touch **public API of
-the published crate**; the rest are internal-only swaps.
+The five internal-only replacements are wired in. Three of the replacements touch
+**public API of the published crate**, and are built, tested and held back until
+you decide:
 
 1. **`rustc-hash` — 11 public items expose `FxHashMap<String, …>`**, all reachable
    from outside (`dixscript::Compiler::Core::ValueResolution::{ExecutionContext,
@@ -384,19 +414,18 @@ the published crate**; the rest are internal-only swaps.
    outside `HttpCloudProvider`, which says nothing about other crates. Wait for a
    version bump, or skip this one.
 
-Internal-only, safe to wire in when ready: `hex`, `lazy_static`, `base64`, `uuid`,
-`hostname` (the last with the documented behavior gap).
+**Wired in:** `hex`, `lazy_static`, `base64`, `uuid`, `hostname` — 23 files (11
+for base64, 6 for lazy_static, 4 for uuid, 2 for hex, 1 for hostname, plus
+`Cargo.toml` and `Utilities/mod.rs`). `hostname` carries the documented behavior
+gap versus the real crate; the other four are checked equivalent.
 
-Also for that pass:
-- Move the replaced crates to `[dev-dependencies]` rather than deleting them
-  (see Conventions), so the differential tests keep running.
-- Regenerate `Cargo.lock` (see below).
-- Remove the temporary `allow(...)` lines.
+If any of the three held-back modules is wired in later: move its crate to
+`[dev-dependencies]` rather than deleting it, and drop its `allow(...)` line.
 
 ## Open items and deferred plan
 
 **Explicitly deferred (per the plan for this pass):**
-- **The wiring-in sweep**, subject to the decisions above.
+- **Wiring in the three held-back modules** (`rustc-hash`, `bitflags`, `async-trait`), subject to the decisions above.
 - **Feature-gate the DLM modules properly, plus "a few more things"** as the
   reduction continues. Candidates already found:
   - `flate2` is **not** feature-gated, unlike its siblings `bzip2` and
@@ -414,10 +443,14 @@ Also for that pass:
     investigated** — because `DixValue` still derives `Serialize`, it is not
     known whether those flags are load-bearing. (`uuid`'s go away if `uuid` is
     replaced.)
-- **Regenerate `Cargo.lock`.** Removing `itertools` and `unicase` leaves stale
-  entries (both are depended on by `dixscript` only, apart from `criterion`'s own
-  separate `itertools` 0.10). A plain `cargo build` prunes them; a `--locked`
-  build will refuse. Run the manual `a-sync-cargo-lock.yml` workflow.
+- **Regenerate `Cargo.lock`.** See the table above for the exact delta. A plain
+  `cargo build` rewrites it; a `--locked` build refuses. Run the manual
+  `a-sync-cargo-lock.yml` workflow (needed regardless of this work, since `HEAD`'s lock is already stale). It is not shipped in the replacements archive:
+  a root-level `Cargo.lock` has no directory in its path, so the resolver would
+  match it by basename and could confuse it with another crate's lockfile.
+- **Cleanup candidate:** `INTERP_METHOD_CALL_RE` and `INTERP_PROPERTY_RE` in
+  `quickfuncs_section_parser.rs` are unused (see `LazyStatic`).
+- **`wasm32`:** not built here; see the verification table.
 
 **Docs hygiene, unrelated to dependencies:** `docs/RUST_AND_CRATE_GUIDELINES.md`
 describes the `mid-engine` workspace (`mid-math`, `mid-ecs`, ...), not this one.
@@ -425,7 +458,24 @@ It looks like a template that was never adapted for this repo. Not touched.
 
 ## Fixes and Problems
 
+### The wiring-in sweep (23 files)
+Rewrote call sites for `lazy_static` (6 files), `hex` (2), `base64` (11 files, 17
+`use` lines in five shapes), `uuid` (4) and `hostname` (1); moved `base64`, `hex`,
+`hostname` and `uuid` to dev-dependencies as oracles and removed `lazy_static`
+outright. Each scripted replacement asserted its exact match count, and a final
+scan confirmed no reference to the five crates remains in `src/` outside the
+replacement modules.
+- A first draft of the sync step dropped the last file in the list (a shell loop
+  reading a newline-terminated list from a file written without a trailing
+  newline); caught by comparing every changed file with its copy before trusting
+  the result.
+- The macro's bare-name recursion and the `dead_code` masking were both found by
+  compiling for real, not by review — see `LazyStatic`.
+
 ### `Cargo.toml`
+- Moved `base64`, `hex`, `hostname` and `uuid` to dev-dependencies and removed
+  `lazy_static` (see above). `uuid`'s `v4`, `serde` and `js` features went with
+  the runtime dependency.
 - Removed `itertools` and `unicase`: zero call sites anywhere in the repo
   (`src/`, `tests/`, `benches/`, `examples/`, and every other workspace crate).
 - **`serde` — removal attempted, then reversed. Two wrong conclusions in a row.**

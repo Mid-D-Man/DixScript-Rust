@@ -8,8 +8,8 @@ use crate::Compiler::Core::OperationalSettings;
 use crate::ErrorManager::{ErrorManager, DebugConfig};
 use crate::Utilities::Keywords;
 use rustc_hash::{FxHashMap, FxHashSet};
-use base64::{Engine as _, engine::general_purpose};
-use lazy_static::lazy_static;
+use crate::Utilities::Base64::{Engine as _, general_purpose};
+use crate::Utilities::LazyStatic::lazy_static;
 use regex::Regex;
 
 use super::{SectionAnalysisResult, SemanticErrorInfo, SemanticWarningInfo};

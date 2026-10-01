@@ -21,8 +21,9 @@ as not yet documented rather than assumed undocumented-on-purpose.
 - [Utilities](dixscript/utilities.md) — the dependency-reduction pass:
   what was audited and why each crate was kept, removed or hand-rolled, plus
   the hand-rolled replacements themselves (`Utilities/AsyncTrait`, `Base64`,
-  `Bitflags`, `Hex`, `Hostname`, `LazyStatic`, `RustcHash`, `Uuid`), built and
-  tested against the real crates but not yet wired in
+  `Bitflags`, `Hex`, `Hostname`, `LazyStatic`, `RustcHash`, `Uuid`), tested
+  against the real crates; five are wired in, three are held back pending a
+  public-API decision
 - Benchmarks comparing DixScript against JSON/TOML live in
   `dixscript/benches/format_comparison_benchmark.rs` (synthetic small/
   medium/large fixtures) and `dixscript/benches/chemistry_db_comparison_benchmark.rs`

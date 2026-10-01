@@ -71,7 +71,7 @@ impl IEncryptor for Aes128Encryptor {
     }
 
     fn initialize(&mut self, config: HashMap<String, String>) {
-        use base64::{Engine as _, engine::general_purpose};
+        use crate::Utilities::Base64::{Engine as _, general_purpose};
 
         if let Some(key_data) = config.get("key_data") {
             // Keyfile mode: load raw key material.
@@ -314,7 +314,7 @@ impl IEncryptor for Aes128Encryptor {
     }
 
     fn get_metadata(&self) -> HashMap<String, String> {
-        use base64::{Engine as _, engine::general_purpose};
+        use crate::Utilities::Base64::{Engine as _, general_purpose};
 
         let mut metadata = HashMap::new();
         metadata.insert("algorithm".to_string(),      "aes128-gcm".to_string());

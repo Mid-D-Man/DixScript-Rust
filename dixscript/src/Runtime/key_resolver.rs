@@ -2,7 +2,7 @@
 use crate::Compiler::DLM::KeyManagement::{KeyFileManager, KeyFileData, EncryptionKeyData};
 use crate::ErrorManager::{ErrorManager, DlmErrorType, ErrorSeverity};
 use crate::Runtime::load_options::DixLoadOptions;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use crate::Utilities::Base64::{Engine as _, general_purpose::STANDARD as BASE64};
 use argon2::{Argon2, Algorithm, Version, Params};
 use std::path::{Path, PathBuf};
 

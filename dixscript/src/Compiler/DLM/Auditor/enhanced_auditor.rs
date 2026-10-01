@@ -10,8 +10,8 @@ use super::auditor_utilities::AuditorPathUtils;
 use crate::Compiler::AST::DixScript;
 use crate::Compiler::Core::BinarySerialization::{BinaryPacker, BinaryUnpacker};
 use crate::Compiler::DLM::dlm_module_base::DLMModuleBase;
-use base64::{engine::general_purpose, Engine as _};
-use lazy_static::lazy_static;
+use crate::Utilities::Base64::{general_purpose, Engine as _};
+use crate::Utilities::LazyStatic::lazy_static;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -68,7 +68,7 @@ impl EnhancedAuditor {
     fn calculate_checksum(&self, data: &[u8]) -> String {
         let mut hasher = Sha256::new();
         hasher.update(data);
-        format!("sha256:{}", hex::encode(hasher.finalize()))
+        format!("sha256:{}", crate::Utilities::Hex::encode(hasher.finalize()))
     }
 
     // ── Previous audit loading ────────────────────────────────────────────────

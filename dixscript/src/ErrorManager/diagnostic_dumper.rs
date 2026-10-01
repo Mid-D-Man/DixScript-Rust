@@ -66,7 +66,7 @@ impl DiagnosticDumper {
     fn get_machine_name() -> String {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            hostname::get()
+            crate::Utilities::Hostname::get()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string()

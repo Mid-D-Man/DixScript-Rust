@@ -3,7 +3,7 @@
 //! Provides methods for working with binary data stored as base64
 
 use crate::Builtins::Core::{DixValue, DixType, IBuiltinMethod, BuiltinMethod};
-use base64::{Engine as _, engine::general_purpose};
+use crate::Utilities::Base64::{Engine as _, general_purpose};
 use std::collections::HashMap;
 
 // ── Magic-byte MIME detection ─────────────────────────────────────────────────

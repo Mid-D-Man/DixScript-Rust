@@ -211,7 +211,7 @@ impl Argon2KDF {
     /// Return all KDF parameters as a metadata map for writing to `.mdix.key`.
     /// The reverse pipeline reads these back via `from_params_with_salt`.
     pub fn get_metadata(&self) -> HashMap<String, String> {
-        use base64::{Engine as _, engine::general_purpose};
+        use crate::Utilities::Base64::{Engine as _, general_purpose};
 
         let mut m = HashMap::new();
         m.insert("kdf_algorithm".to_string(),   "argon2id".to_string());
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_metadata_round_trip() {
-        use base64::{Engine as _, engine::general_purpose};
+        use crate::Utilities::Base64::{Engine as _, general_purpose};
 
         let kdf      = Argon2KDF::new(&make_security(65536, 3, 4));
         let metadata = kdf.get_metadata();

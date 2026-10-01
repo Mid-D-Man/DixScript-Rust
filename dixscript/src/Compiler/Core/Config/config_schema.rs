@@ -6,7 +6,7 @@ use crate::Compiler::AST::{ConfigSection, ConfigEntry, ConfigValue};
 use crate::Compiler::AST::data_types::{ErrorHandlingStrategy, CompatibilityMode, DebugMode};
 use std::collections::HashMap;
 use super::OperationalSettings;
-use lazy_static::lazy_static;
+use crate::Utilities::LazyStatic::lazy_static;
 
 lazy_static! {
     static ref VERSION_REGEX: regex::Regex =

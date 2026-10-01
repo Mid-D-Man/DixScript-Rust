@@ -40,11 +40,10 @@
 //! paths), not attacker-supplied input over a network.
 //!
 //! ## Verification
-//! Unit-tested end to end through a real `HashMap`/`HashSet` in a scratch
-//! crate. There is no differential test against `rustc-hash` here because the
-//! two are different algorithms by design; the benchmark numbers above were
-//! taken in that scratch crate on one machine and are indicative, not a
-//! guarantee for other hardware.
+//! Unit-tested end to end through a real `HashMap`/`HashSet`. There is no
+//! differential test against `rustc-hash` here because the two are different
+//! algorithms by design; the benchmark numbers above were taken in a scratch
+//! crate on one machine and are indicative, not a guarantee for other hardware.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};

@@ -463,7 +463,7 @@ impl DixLoader {
         }
 
         let temp_dir  = std::env::temp_dir();
-        let id        = uuid::Uuid::new_v4();
+        let id        = crate::Utilities::Uuid::Uuid::new_v4();
         let temp_enc  = temp_dir.join(format!("dix_enc_{}.mdix.enc", id));
         let temp_key  = temp_dir.join(format!("dix_key_{}.mdix.key", id));
 
@@ -1033,7 +1033,7 @@ impl DixLoader {
     fn parse_key_file_content(&self, key_content: &str) -> Result<LoaderKeyMetadata, String> {
         let temp_dir      = std::env::temp_dir();
         let temp_key_file = temp_dir.join(format!(
-            "temp_mdixkey_{}.mdix.key", uuid::Uuid::new_v4()
+            "temp_mdixkey_{}.mdix.key", crate::Utilities::Uuid::Uuid::new_v4()
         ));
 
         fs::write(&temp_key_file, key_content)
@@ -1093,7 +1093,7 @@ impl DixLoader {
             KeyFileSource::DirectContent | KeyFileSource::Url => {
                 let temp_dir      = std::env::temp_dir();
                 let temp_key_path = temp_dir.join(format!(
-                    "temp_key_{}.mdix.key", uuid::Uuid::new_v4()
+                    "temp_key_{}.mdix.key", crate::Utilities::Uuid::Uuid::new_v4()
                 ));
                 fs::write(&temp_key_path, &resolved_key.content)
                     .map_err(|e| format!("Failed to write temp key file: {}", e))?;

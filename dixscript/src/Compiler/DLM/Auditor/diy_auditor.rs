@@ -42,7 +42,7 @@ impl DiyAuditor {
     fn calculate_checksum(&self, data: &[u8]) -> String {
         let mut hasher = Sha256::new();
         hasher.update(data);
-        format!("sha256:{}", hex::encode(hasher.finalize()))
+        format!("sha256:{}", crate::Utilities::Hex::encode(hasher.finalize()))
     }
 }
 

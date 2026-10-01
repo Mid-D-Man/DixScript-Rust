@@ -4,7 +4,7 @@
 
 use crate::Builtins::Core::{BuiltinMethod, DixType, DixValue, IBuiltinMethod};
 use crate::Builtins::Static::{IStaticObject, StaticObjectBase};
-use uuid::Uuid;
+use crate::Utilities::Uuid::Uuid;
 
 /// Guid static object implementation
 pub struct GuidObject {

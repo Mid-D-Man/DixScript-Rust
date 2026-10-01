@@ -51,7 +51,7 @@ impl IEncryptor for XorEncryptor {
     fn initialize(&mut self, config: HashMap<String, String>) {
         self.base.log_warning("⚠️ XOR cipher provides LOW security - use only for testing!");
 
-        use base64::{Engine as _, engine::general_purpose};
+        use crate::Utilities::Base64::{Engine as _, general_purpose};
 
         // Load key from metadata or generate new one
         if let Some(key_data) = config.get("key_data") {
@@ -142,7 +142,7 @@ impl IEncryptor for XorEncryptor {
     }
 
     fn get_metadata(&self) -> HashMap<String, String> {
-        use base64::{Engine as _, engine::general_purpose};
+        use crate::Utilities::Base64::{Engine as _, general_purpose};
 
         let mut metadata = HashMap::new();
         metadata.insert("algorithm".to_string(), "xor".to_string());

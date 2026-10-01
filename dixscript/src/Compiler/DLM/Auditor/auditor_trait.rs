@@ -54,7 +54,7 @@ pub struct AuditEntry {
 impl AuditEntry {
     pub fn new() -> Self {
         AuditEntry {
-            compilation_id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
+            compilation_id: crate::Utilities::Uuid::Uuid::new_v4().to_string()[..8].to_string(),
             timestamp: chrono::Utc::now(),
             source_checksum: String::new(),
             previous_checksum: None,

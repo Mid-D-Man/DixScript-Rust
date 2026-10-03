@@ -1,18 +1,20 @@
-// .mdix/replacements/replacements.mdix
+// Brought to u by MidManStudio
+// FILE: .mdix/replacements/replacements.mdix
+//
+// MDIX Studio: syntax highlighting, snippet-aware completion, real LSP status,
+// Inspector buttons re-enabled. Manifest MUST stay named exactly replacements.mdix.
+//
+// replacements.tar.gz layout (relative to target_root):
+//   MdixEditorWindow.cs, MdixEditorWindow.Lsp.cs, MdixImporter.cs  (flat, existing -> overwritten)
+//   Lsp/*.cs, Highlight/*.cs                                       (nested -> exact paths)
+// Same layout works for a manual extract INTO com.midmanstudio.mdix/Editor/.
+
 @CONFIG(
   version    -> "1.0.0"
-  
+  features   -> "data"
   debug_mode -> "off"
 )
 
-@QUICKFUNCS(
-  ~target<object>(name, path) { return { name = name, path = path } }
-)
-
 @DATA(
-  target_root = "."
-
-  /*overrides::
-    target("README.md", "README.md")
-    target("CONTRIBUTING.md", "CONTRIBUTING.md")*/
+  target_root = "com.midmanstudio.mdix/Editor"
 )

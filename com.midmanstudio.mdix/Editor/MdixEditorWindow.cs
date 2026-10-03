@@ -162,6 +162,12 @@ namespace MidManStudio.Mdix.Unity.Editor
                 NotifyLspTextChanged(evt.newValue, evt.previousValue);
             });
 
+            // OnEnable can run LoadAsset() before CreateGUI() builds this field, which would
+            // leave it blank while _sourceText holds the file — and the next keystroke would
+            // then overwrite _sourceText with just what was typed.
+            if (!string.IsNullOrEmpty(_sourceText))
+                _codeField.SetValueWithoutNotify(_sourceText);
+
             _panelEditor?.Add(_codeField);
 
             InitializeLspIntegration();
@@ -212,8 +218,9 @@ namespace MidManStudio.Mdix.Unity.Editor
             if (_fileLabel != null)
                 _fileLabel.text = Path.GetFileName(_currentPath);
 
+            // Without notify: loading a file is not an edit (it used to flag the file dirty).
             if (_codeField != null)
-                _codeField.value = _sourceText;
+                _codeField.SetValueWithoutNotify(_sourceText);
 
             EditorPrefs.SetString(PrefKeyLastPath, _currentPath);
 

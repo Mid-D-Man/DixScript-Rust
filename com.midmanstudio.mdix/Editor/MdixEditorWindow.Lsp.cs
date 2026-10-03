@@ -5,178 +5,341 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using MidManStudio.Mdix.Unity.Editor.Highlight;
 using MidManStudio.Mdix.Unity.Editor.Lsp;
 
 namespace MidManStudio.Mdix.Unity.Editor
 {
+    /// <summary>Editor-wide MDIX Studio preferences (EditorPrefs-backed).</summary>
+    internal static class MdixStudioPrefs
+    {
+        private const string KeyHighlight = "MdixStudio_SyntaxHighlighting";
+        private const string KeyVerbose   = "MdixStudio_LspVerboseLog";
+
+        public static bool SyntaxHighlighting
+        {
+            get => EditorPrefs.GetBool(KeyHighlight, true);
+            set => EditorPrefs.SetBool(KeyHighlight, value);
+        }
+
+        /// <summary>Echo mdix-lsp's routine INFO/DEBUG log lines to the Unity console.</summary>
+        public static bool VerboseServerLog
+        {
+            get => EditorPrefs.GetBool(KeyVerbose, false);
+            set => EditorPrefs.SetBool(KeyVerbose, value);
+        }
+    }
+
     /// <summary>
-    /// LSP-backed features for MDIX Studio's Editor tab: real diagnostics,
-    /// completion, and hover, wired to the real mdix-lsp binary via
-    /// MdixLspClient. Kept in its own file (MdixEditorWindow is now
-    /// `partial`) rather than woven through the existing 683-line file, so
-    /// the existing Explorer/Templates/save logic is untouched.
+    /// Language-server features and syntax colouring for MDIX Studio's Editor
+    /// tab. Lives in its own file (MdixEditorWindow is `partial`) so the
+    /// Explorer / Templates / save logic in MdixEditorWindow.cs stays untouched.
     ///
-    /// Hookup into the rest of the class is five small, additive call-outs
-    /// from the real file (see the accompanying patch notes) — nothing here
-    /// replaces existing behavior.
+    /// Hooked into the main file at four small points: InitializeLspIntegration
+    /// (end of BindElements), NotifyLspTextChanged (the code field's change
+    /// callback), NotifyLspDocumentOpened (end of LoadAsset) and
+    /// ShutdownLspIntegration (OnDisable).
     ///
-    /// Two things are flagged rather than asserted as fact, because Unity
-    /// Editor isn't available to actually run this against:
-    ///   1. TextField's cursorIndex / cursorPosition / SelectRange, accessed
-    ///      here through the ITextSelection interface confirmed to exist in
-    ///      the 2022.3 scripting reference (TextInputBaseField&lt;T&gt;
-    ///      implements it). The exact accessor path is the single highest-risk
-    ///      point in this file — SafeCursorIndex()/SafeCursorPosition() below
-    ///      wrap it in a try/catch specifically so a wrong guess here disables
-    ///      completion/hover gracefully instead of breaking the whole tab.
-    ///   2. Popup pixel placement (PositionPopupAtCursor) — built from
-    ///      VisualElement.worldBound plus the local cursor position, which is
-    ///      the standard technique, but exact offsets are the kind of thing
-    ///      you tune by eye once it's actually on screen.
-    /// Diagnostics (the Problems panel) don't depend on either of these —
-    /// that part has no positioning/hit-testing involved at all.
+    /// Behaviour worth knowing, each of which was a real bug in the first release:
+    ///  * Every document the window shows is opened with the server — an
+    ///    unsaved/scratch document gets a synthetic "untitled:" URI (mdix-lsp
+    ///    explicitly supports non-file URIs). Previously nothing was ever sent
+    ///    for a document without a path, so completion fell back to the generic
+    ///    section list and diagnostics never arrived.
+    ///  * Pending edits are flushed to the server before every completion or
+    ///    hover request, so the server answers for the text you see.
+    ///  * Completion items carrying snippet syntax are expanded (MdixSnippet),
+    ///    with Tab / Shift+Tab moving between the placeholders.
+    ///  * Keys are handled in the TRICKLE-DOWN phase. The text editor stops
+    ///    propagation of nearly every key it handles, so a normal (bubble-phase)
+    ///    listener on the field never saw arrows, Enter, Tab or Ctrl+Space.
+    ///    Escape is also swallowed: Unity's TextField otherwise reverts the whole
+    ///    text to its value at focus time.
+    ///  * The header reflects the real state instead of a hard-coded
+    ///    "not started".
+    ///
+    /// Unity Editor isn't available where this was written. The pure logic
+    /// (tokenizer, rich text, snippets, completion model, positions, markdown)
+    /// is unit-tested; the UI Toolkit glue is built only from members verified
+    /// against the real 2022.3 sources, but its on-screen behaviour needs a
+    /// first run in the Editor.
     /// </summary>
     public sealed partial class MdixEditorWindow
     {
-        // ── State ─────────────────────────────────────────────────────────────
+        // ── Language-server state ─────────────────────────────────────────────
+
+        private const string UntitledUri = "untitled:MDIX-Studio-Scratch.mdix";
+
+        private const double LspSyncDebounceSeconds     = 0.35;
+        private const double StartFailureBackoffSeconds = 15;
+        private const double CrashRestartBackoffSeconds = 3;
 
         private MdixLspClient? _lspClient;
-        private bool           _lspStarting;
-        private bool           _lspInitialized;
+        private bool   _lspStarting;
+        private bool   _lspInitialized;
+        private double _lspRetryAt;
+        private string? _lspOpenUri;
+
+        private string _lspStatus = "starting…";
+        private bool   _lspStatusIsError;
 
         private bool   _lspSyncPending;
+        private bool   _lspFlushInFlight;
         private double _lastEditTime;
-        private const double LspSyncDebounceSeconds = 0.5;
+        private double _nextFlushAllowed;
 
-        // Guards against the completion-trigger check re-firing when we
-        // programmatically set _codeField.value ourselves (e.g. on accepting
-        // a completion item), as opposed to the user actually typing.
-        private bool _suppressLspChangeSideEffects;
+        private int _diagnosticCount = -1; // -1: nothing received for this document yet
 
-        private static readonly HashSet<char> CompletionTriggerChars =
-            new() { '@', '.', '<', '~', '{', '(', '[' };
+        // ── Syntax highlighting ───────────────────────────────────────────────
 
-        // Problems panel
+        private MdixCodeOverlay? _overlay;
+        private readonly List<MdixMark> _marks = new List<MdixMark>();
+
+        // ── Problems panel ────────────────────────────────────────────────────
+
         private VisualElement? _problemsPanel;
         private ScrollView?    _problemsList;
         private Label?         _problemsHeader;
 
-        // Completion popup
-        private VisualElement?      _completionPopup;
-        private ScrollView?         _completionList;
-        private List<MdixJsonValue> _completionItems = new();
-        private int                 _completionSelectedIndex;
+        // ── Completion ────────────────────────────────────────────────────────
 
-        // Hover popup
+        private static readonly HashSet<char> CompletionTriggerChars =
+            new HashSet<char> { '@', '.', '<', '~', '{', '(', '[' };
+
+        private VisualElement? _completionPopup;
+        private ScrollView?    _completionList;
+        private readonly List<Label> _completionRows = new List<Label>();
+
+        private List<MdixCompletionEntry> _completionView = new List<MdixCompletionEntry>();
+        private bool   _completionVisible;
+        private int    _completionSelected;
+        private int    _completionAnchor = -1;
+        private string _completionRequestText = string.Empty;
+        private int    _completionRequestId;
+
+        // The text editor delivers Enter/Tab as a key event AND (on some platforms) a
+        // separate character event. After consuming one we must swallow the other.
+        private double _swallowCharUntil;
+
+        // ── Snippet tab stops ─────────────────────────────────────────────────
+
+        private sealed class LiveStop
+        {
+            public int Start;
+            public int Length;
+        }
+
+        private List<LiveStop>? _snippetStops;
+        private int _snippetCurrent;
+
+        // ── Hover ─────────────────────────────────────────────────────────────
+
+        private const double HoverIdleSeconds = 0.7;
+
         private VisualElement? _hoverPopup;
         private Label?         _hoverLabel;
-        private bool           _hoverPopupVisible;
-        private bool           _hoverRequestInFlight;
-        private int            _lastHoverCursorIndex = -1;
-        private double         _cursorIdleSince;
-        private const double   HoverIdleSeconds = 0.6;
+        private bool   _hoverVisible;
+        private bool   _hoverInFlight;
+        private int    _lastCaret = -1;
+        private int    _hoverDoneCaret = -2;
+        private double _caretIdleSince;
 
-        // ── Wiring (called from the five small hookup points in MdixEditorWindow.cs) ──
+        // ═════════════════════════════════════════════════════════════════════
+        //  Hooks called from MdixEditorWindow.cs
+        // ═════════════════════════════════════════════════════════════════════
 
-        /// <summary>Call once from BindElements(), after _codeField is created and added.</summary>
+        /// <summary>Call once from BindElements(), after _codeField is created, populated and added.</summary>
         private void InitializeLspIntegration()
         {
+            if (_codeField == null) return;
+
             BuildProblemsPanel();
             BuildCompletionPopup();
             BuildHoverPopup();
 
-            _codeField?.RegisterCallback<KeyDownEvent>(OnCodeFieldKeyDown);
+            // TrickleDown: see the class remarks — a bubble-phase handler never fires for these keys.
+            _codeField.RegisterCallback<KeyDownEvent>(OnCodeFieldKeyDown, TrickleDown.TrickleDown);
+            _codeField.RegisterCallback<FocusOutEvent>(_ => HideAllPopups());
+
+            _overlay = new MdixCodeOverlay(_codeField);
+            ApplyHighlightPreference();
+
             EditorApplication.update += OnLspEditorUpdate;
+
+            // Start the server now rather than on the first keystroke, so the header is
+            // truthful from the moment the window opens and the first request is fast.
+            _ = EnsureDocumentOpenAsync();
         }
 
-        /// <summary>Call from the end of OnDisable().</summary>
+        /// <summary>Call from OnDisable().</summary>
         private void ShutdownLspIntegration()
         {
             EditorApplication.update -= OnLspEditorUpdate;
 
-            if (_lspClient != null)
-            {
-                if (!string.IsNullOrEmpty(_currentPath))
-                    _lspClient.DidClose(GetDocumentUri());
+            HideAllPopups();
+            EndSnippet();
 
-                // Fire-and-forget: the window is closing, we don't need to
-                // block on a clean shutdown handshake completing.
-                _ = _lspClient.ShutdownAsync();
-                _lspClient = null;
-                _lspInitialized = false;
+            _overlay?.Detach();
+            _overlay = null;
+
+            var client  = _lspClient;
+            var openUri = _lspOpenUri;
+
+            _lspClient      = null;
+            _lspInitialized = false;
+            _lspOpenUri     = null;
+
+            if (client == null) return;
+
+            client.DiagnosticsReceived -= OnLspDiagnostics;
+            client.ServerMessage       -= OnLspServerMessage;
+            client.ProcessExited       -= OnLspProcessExited;
+
+            try
+            {
+                if (openUri != null) client.DidClose(openUri);
             }
+            catch
+            {
+                // The process may already be gone; we're about to kill it regardless.
+            }
+
+            client.Stop();
         }
 
-        /// <summary>Call from the tail of the existing _codeField value-changed callback.</summary>
+        /// <summary>Call from the tail of the code field's value-changed callback (user edits).</summary>
         private void NotifyLspTextChanged(string newValue, string previousValue)
         {
-            _lspSyncPending = true;
-            _lastEditTime   = EditorApplication.timeSinceStartup;
-
-            if (_suppressLspChangeSideEffects) return;
-
+            AfterTextEdited();
+            AdjustSnippetForEdit(newValue, previousValue);
             MaybeTriggerCompletion(newValue, previousValue);
         }
 
-        /// <summary>Call from LoadAsset(), after _currentPath/_sourceText are set.</summary>
-        private async void NotifyLspDocumentOpened()
+        /// <summary>Call from LoadAsset(), after _currentPath / _sourceText are set and the field is populated.</summary>
+        private void NotifyLspDocumentOpened()
         {
-            if (string.IsNullOrEmpty(_currentPath)) return;
+            HideAllPopups();
+            EndSnippet();
 
-            if (!await EnsureLspClientReadyAsync())
-                return;
+            _marks.Clear();
+            _diagnosticCount = -1;
+            ClearProblemsList();
+            RefreshProblemsHeader();
 
-            _lspClient!.DidOpen(GetDocumentUri(), _sourceText);
+            _overlay?.Refresh();
+
+            // The same asset can be (re)loaded with different text; make sure the
+            // server hears about it even if its URI didn't change.
+            _lspSyncPending = true;
+            _lastEditTime   = EditorApplication.timeSinceStartup;
+
+            _ = EnsureDocumentOpenAsync();
         }
 
-        // ── Client lifecycle ──────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
+        //  Server lifecycle
+        // ═════════════════════════════════════════════════════════════════════
+
+        private static string ProjectRootPath() => Directory.GetParent(Application.dataPath)!.FullName;
+
+        private string CurrentDocUri =>
+            string.IsNullOrEmpty(_currentPath) ? UntitledUri : FileUri(_currentPath);
+
+        private static string FileUri(string projectRelativePath)
+        {
+            var full = Path.GetFullPath(Path.Combine(ProjectRootPath(), projectRelativePath));
+            return new Uri(full).AbsoluteUri;
+        }
+
+        private static string NormalizeUri(string? uri)
+        {
+            if (string.IsNullOrEmpty(uri)) return string.Empty;
+            return Uri.TryCreate(uri, UriKind.Absolute, out var parsed) ? parsed.AbsoluteUri : uri!;
+        }
+
+        private MdixLspClient CreateLspClient()
+        {
+            var client = new MdixLspClient();
+            client.DiagnosticsReceived += OnLspDiagnostics;
+            client.ServerMessage       += OnLspServerMessage;
+            client.ProcessExited       += OnLspProcessExited;
+            return client;
+        }
+
+        private void SetLspStatus(string status, bool error)
+        {
+            _lspStatus        = status;
+            _lspStatusIsError = error;
+            RefreshProblemsHeader();
+        }
+
+        private void FailLspStart(string message, double backoffSeconds)
+        {
+            _lspInitialized = false;
+            _lspOpenUri     = null;
+            _lspRetryAt     = EditorApplication.timeSinceStartup + backoffSeconds;
+            SetLspStatus(message, error: true);
+        }
 
         private async Task<bool> EnsureLspClientReadyAsync()
         {
-            if (_lspInitialized) return true;
+            if (_lspInitialized && _lspClient != null && _lspClient.IsRunning)
+                return true;
+
             if (_lspStarting)
             {
-                // Another call is already bringing the client up — poll briefly
-                // rather than starting a second process.
-                for (var i = 0; i < 50 && _lspStarting; i++)
+                // Someone else is bringing it up; wait for that rather than spawning a second process.
+                for (var i = 0; i < 100 && _lspStarting; i++)
                     await Task.Delay(100);
                 return _lspInitialized;
             }
 
+            if (EditorApplication.timeSinceStartup < _lspRetryAt)
+                return false;
+
             _lspStarting = true;
+            SetLspStatus("starting…", error: false);
+
             try
             {
-                _lspClient ??= new MdixLspClient();
+                var client = _lspClient ??= CreateLspClient();
 
-                if (!_lspClient.IsRunning)
+                if (!client.IsRunning)
                 {
-                    if (!_lspClient.Start())
+                    _lspOpenUri = null; // a fresh process knows no documents
+
+                    if (!client.Start())
                     {
-                        SetProblemsHeader(
-                            "mdix-lsp not found — diagnostics/completion/hover disabled. " +
-                            "Build it with `cargo build -p mdix-lsp --release`, or set its path.",
-                            error: true);
+                        FailLspStart(
+                            "not found — build it with `cargo build -p mdix-lsp --release`, then use " +
+                            "MidManStudio > MDIX Language Server > Set Server Path (or put it on PATH).",
+                            StartFailureBackoffSeconds);
                         return false;
                     }
-
-                    _lspClient.DiagnosticsReceived += OnLspDiagnostics;
-                    _lspClient.ServerMessage       += msg => Debug.Log($"[mdix-lsp] {msg}");
-                    _lspClient.ProcessExited       += code =>
-                    {
-                        _lspInitialized = false;
-                        SetProblemsHeader($"mdix-lsp exited (code {code}).", error: true);
-                    };
                 }
 
-                var projectRoot = Directory.GetParent(Application.dataPath)!.FullName;
-                var rootUri     = new Uri(projectRoot).AbsoluteUri;
+                var rootUri = new Uri(ProjectRootPath()).AbsoluteUri;
+                var ok      = await client.InitializeAsync(rootUri);
 
-                _lspInitialized = await _lspClient.InitializeAsync(rootUri);
+                // The window may have closed (or restarted the server) while we were waiting.
+                if (!ReferenceEquals(_lspClient, client)) return false;
 
-                if (!_lspInitialized)
-                    SetProblemsHeader("mdix-lsp failed to initialize.", error: true);
+                if (!ok)
+                {
+                    client.Stop();
+                    FailLspStart("failed to initialize.", StartFailureBackoffSeconds);
+                    return false;
+                }
 
-                return _lspInitialized;
+                _lspInitialized = true;
+                SetLspStatus("ready", error: false);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+                FailLspStart("error: " + ex.Message, StartFailureBackoffSeconds);
+                return false;
             }
             finally
             {
@@ -184,85 +347,244 @@ namespace MidManStudio.Mdix.Unity.Editor
             }
         }
 
-        private void OnLspEditorUpdate()
+        private void OnLspProcessExited(int exitCode)
         {
-            if (_lspClient == null || !_lspInitialized) return;
+            var client = _lspClient;
+            if (client == null) return;
 
-            if (_lspSyncPending &&
-                EditorApplication.timeSinceStartup - _lastEditTime >= LspSyncDebounceSeconds)
+            client.Stop(); // release handles; also unhooks its main-thread pump
+
+            _lspInitialized = false;
+            _lspOpenUri     = null;
+            _lspRetryAt     = EditorApplication.timeSinceStartup + CrashRestartBackoffSeconds;
+
+            SetLspStatus($"stopped (exit code {exitCode}); it restarts on your next edit.", error: true);
+        }
+
+        private void OnLspServerMessage(string line)
+        {
+            if (string.IsNullOrEmpty(line)) return;
+
+            // mdix-lsp logs routine INFO lines to stderr; only surface real problems unless asked.
+            if (line.IndexOf(" ERROR ", StringComparison.Ordinal) >= 0)
+                Debug.LogError("[mdix-lsp] " + line);
+            else if (line.IndexOf(" WARN ", StringComparison.Ordinal) >= 0)
+                Debug.LogWarning("[mdix-lsp] " + line);
+            else if (MdixStudioPrefs.VerboseServerLog)
+                Debug.Log("[mdix-lsp] " + line);
+        }
+
+        /// <summary>Opens the current document with the server (starting it if needed). Idempotent.</summary>
+        private async Task<bool> EnsureDocumentOpenAsync()
+        {
+            try
+            {
+                if (!await EnsureLspClientReadyAsync()) return false;
+
+                var client = _lspClient;
+                if (client == null) return false;
+
+                var uri = CurrentDocUri;
+                if (_lspOpenUri == uri) return true;
+
+                if (_lspOpenUri != null) client.DidClose(_lspOpenUri);
+
+                client.DidOpen(uri, _sourceText);
+                _lspOpenUri     = uri;
+                _lspSyncPending = false; // didOpen carried the current text
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+                return false;
+            }
+        }
+
+        /// <summary>Makes sure the server has the document AND its latest text.</summary>
+        private async Task<bool> FlushLspSyncAsync()
+        {
+            if (!await EnsureDocumentOpenAsync()) return false;
+
+            var client = _lspClient;
+            if (client == null) return false;
+
+            if (_lspSyncPending)
             {
                 _lspSyncPending = false;
-                if (!string.IsNullOrEmpty(_currentPath))
-                    _lspClient.DidChange(GetDocumentUri(), _sourceText);
+                client.DidChange(CurrentDocUri, _sourceText);
             }
 
-            UpdateHoverIdleCheck();
+            return true;
         }
 
-        // ── Document URI / offset<->position helpers ─────────────────────────
-
-        private string GetDocumentUri()
+        private async void RunDebouncedFlush()
         {
-            var projectRoot = Directory.GetParent(Application.dataPath)!.FullName;
-            var fullPath    = Path.GetFullPath(Path.Combine(projectRoot, _currentPath));
-            return new Uri(fullPath).AbsoluteUri;
-        }
-
-        private static (int line, int character) OffsetToPosition(string text, int offset)
-        {
-            var line      = 0;
-            var lineStart = 0;
-            var end       = Math.Min(offset, text.Length);
-
-            for (var i = 0; i < end; i++)
+            _lspFlushInFlight = true;
+            try
             {
-                if (text[i] == '\n')
-                {
-                    line++;
-                    lineStart = i + 1;
-                }
+                if (!await FlushLspSyncAsync())
+                    _nextFlushAllowed = EditorApplication.timeSinceStartup + 1.0; // server unavailable: don't spin
             }
-
-            return (line, end - lineStart);
-        }
-
-        private static int PositionToOffset(string text, int line, int character)
-        {
-            var currentLine = 0;
-            var i           = 0;
-
-            while (currentLine < line && i < text.Length)
+            finally
             {
-                if (text[i] == '\n') currentLine++;
-                i++;
+                _lspFlushInFlight = false;
+            }
+        }
+
+        internal void RestartLanguageServer()
+        {
+            var client = _lspClient;
+            _lspClient      = null;
+            _lspInitialized = false;
+            _lspOpenUri     = null;
+            _lspRetryAt     = 0;
+
+            if (client != null)
+            {
+                client.DiagnosticsReceived -= OnLspDiagnostics;
+                client.ServerMessage       -= OnLspServerMessage;
+                client.ProcessExited       -= OnLspProcessExited;
+                client.Stop();
             }
 
-            return Math.Min(i + character, text.Length);
+            _diagnosticCount = -1;
+            _marks.Clear();
+            ClearProblemsList();
+            _overlay?.Refresh();
+            SetLspStatus("restarting…", error: false);
+
+            _lspSyncPending = true;
+            _ = EnsureDocumentOpenAsync();
         }
 
-        private static int FindWordStart(string text, int cursorIndex)
+        // ═════════════════════════════════════════════════════════════════════
+        //  Per-frame work
+        // ═════════════════════════════════════════════════════════════════════
+
+        private void OnLspEditorUpdate()
         {
-            var i = Math.Min(cursorIndex, text.Length);
-            while (i > 0 && (char.IsLetterOrDigit(text[i - 1]) || text[i - 1] == '_'))
-                i--;
-            return i;
+            var now = EditorApplication.timeSinceStartup;
+
+            if (_lspSyncPending && !_lspFlushInFlight && now >= _nextFlushAllowed &&
+                now - _lastEditTime >= LspSyncDebounceSeconds)
+            {
+                RunDebouncedFlush();
+            }
+
+            if (_activeTab != 1)
+            {
+                HideAllPopups();
+                return;
+            }
+
+            PollCompletionState();
+            UpdateHoverIdleCheck(now);
         }
 
-        // Wraps the one part of this file whose exact API shape isn't
-        // confirmed by actually running it — see the class doc comment.
-        private static int SafeCursorIndex(TextField field)
+        // ═════════════════════════════════════════════════════════════════════
+        //  Text / caret helpers
+        // ═════════════════════════════════════════════════════════════════════
+
+        private int SafeCaret()
         {
-            try { return field.cursorIndex; }
+            if (_codeField == null) return -1;
+            try { return _codeField.cursorIndex; }
             catch { return -1; }
         }
 
-        private static Vector2 SafeCursorPosition(TextField field)
+        /// <summary>Selects [anchor, caret) — pass equal values to just place the caret.</summary>
+        private void SetSelection(int caret, int anchor)
         {
-            try { return field.cursorPosition; }
-            catch { return default; }
+            if (_codeField == null) return;
+
+            _codeField.SelectRange(caret, anchor);
+
+            // Unity can re-apply its own selection while it processes the text change that
+            // just happened; set it once more on the next scheduler tick.
+            var field = _codeField;
+            field.schedule.Execute(() => field.SelectRange(caret, anchor));
         }
 
-        // ── Problems panel ────────────────────────────────────────────────────
+        /// <summary>
+        /// Bookkeeping shared by every edit, typed or programmatic: tell the server
+        /// there is new text, drop underlines (their offsets are now stale), and
+        /// repaint the colour layer immediately so a typed character never lags.
+        /// </summary>
+        private void AfterTextEdited()
+        {
+            _lspSyncPending = true;
+            _lastEditTime   = EditorApplication.timeSinceStartup;
+
+            HideHover();
+            if (_marks.Count > 0) _marks.Clear();
+
+            _overlay?.Refresh();
+        }
+
+        /// <summary>
+        /// Replaces [start, end) with <paramref name="insert"/> programmatically.
+        /// Uses SetValueWithoutNotify and does the change-callback's bookkeeping
+        /// itself: events sent from inside another event handler are queued by the
+        /// dispatcher and would arrive after any "suppress side effects" flag had
+        /// already been reset.
+        /// </summary>
+        private int ApplyProgrammaticEdit(int start, int end, string insert)
+        {
+            var text = _sourceText;
+            start = Mathf.Clamp(start, 0, text.Length);
+            end   = Mathf.Clamp(end, start, text.Length);
+
+            var updated = text.Substring(0, start) + insert + text.Substring(end);
+
+            _sourceText = updated;
+            _isDirty    = true;
+            _codeField!.SetValueWithoutNotify(updated);
+            UpdateStatusBar(parsed: false, entryCount: 0, flatCount: 0, tableCount: 0);
+
+            AfterTextEdited();
+            return start + insert.Length;
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        //  Syntax highlighting
+        // ═════════════════════════════════════════════════════════════════════
+
+        private string BuildRichText(string plain) =>
+            MdixRichText.Build(plain, MdixTokenizer.Tokenize(plain), _marks);
+
+        /// <summary>Attach or detach the colour layer according to the user's preference.</summary>
+        internal void ApplyHighlightPreference()
+        {
+            if (_overlay == null) return;
+
+            if (MdixStudioPrefs.SyntaxHighlighting)
+            {
+                if (!_overlay.IsAttached && !_overlay.Attach(BuildRichText))
+                {
+                    Debug.LogWarning(
+                        "[MDIX Studio] syntax highlighting is off: " + _overlay.FailureReason +
+                        ". Editing is unaffected.");
+                }
+            }
+            else if (_overlay.IsAttached)
+            {
+                _overlay.Detach();
+            }
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        //  Problems panel
+        // ═════════════════════════════════════════════════════════════════════
+
+        private struct Problem
+        {
+            public int    Severity;
+            public string Message;
+            public int    Line;
+            public int    Character;
+        }
 
         private void BuildProblemsPanel()
         {
@@ -279,8 +601,9 @@ namespace MidManStudio.Mdix.Unity.Editor
                 },
             };
 
-            _problemsHeader = new Label("mdix-lsp: not started")
+            _problemsHeader = new Label(string.Empty)
             {
+                enableRichText = false,
                 style =
                 {
                     paddingTop    = 4,
@@ -295,407 +618,821 @@ namespace MidManStudio.Mdix.Unity.Editor
             _problemsPanel.Add(_problemsHeader);
             _problemsPanel.Add(_problemsList);
             _panelEditor.Add(_problemsPanel);
+
+            RefreshProblemsHeader();
         }
 
-        private void SetProblemsHeader(string text, bool error)
+        private void RefreshProblemsHeader()
         {
             if (_problemsHeader == null) return;
-            _problemsHeader.text  = text;
-            _problemsHeader.style.color = error
-                ? new Color(0.92f, 0.45f, 0.45f)
-                : new Color(0.55f, 0.62f, 0.74f);
+
+            string text;
+            Color  colour;
+
+            if (!_lspInitialized)
+            {
+                text   = "mdix-lsp: " + _lspStatus;
+                colour = _lspStatusIsError ? new Color(0.92f, 0.45f, 0.45f) : new Color(0.55f, 0.62f, 0.74f);
+            }
+            else if (_diagnosticCount < 0)
+            {
+                text   = "mdix-lsp: ready";
+                colour = new Color(0.55f, 0.62f, 0.74f);
+            }
+            else if (_diagnosticCount == 0)
+            {
+                text   = "mdix-lsp: no problems";
+                colour = new Color(0.44f, 0.75f, 0.45f);
+            }
+            else
+            {
+                text   = "mdix-lsp: " + _diagnosticCount + (_diagnosticCount == 1 ? " problem" : " problems");
+                colour = new Color(0.92f, 0.45f, 0.45f);
+            }
+
+            _problemsHeader.text        = text;
+            _problemsHeader.style.color = colour;
         }
 
-        private void OnLspDiagnostics(string uri, MdixJsonValue diagnostics)
+        private void ClearProblemsList() => _problemsList?.Clear();
+
+        private void OnLspDiagnostics(string uri, MdixJsonValue diagnostics, int version)
         {
-            if (_problemsList == null || _problemsHeader == null) return;
+            // Diagnostics for a document we no longer have open (e.g. just switched assets).
+            if (_lspOpenUri == null || NormalizeUri(uri) != NormalizeUri(_lspOpenUri))
+                return;
 
-            _problemsList.Clear();
-            var count = diagnostics.Count;
+            var client = _lspClient;
+            var latest = client != null ? client.GetDocumentVersion(_lspOpenUri) : -1;
 
-            SetProblemsHeader(
-                count == 0 ? "mdix-lsp: 0 problems" : $"mdix-lsp: {count} problem(s)",
-                error: count > 0);
+            // The server stamps each result with the version it analysed. If that's older
+            // than what we've sent since, or we have unsent edits, the positions no longer
+            // match the text on screen — still list the problems, but don't underline.
+            var positionsTrustworthy = !_lspSyncPending && (version < 0 || latest < 0 || version >= latest);
 
-            foreach (var diag in diagnostics.AsArray())
+            var text     = _sourceText;
+            var problems = new List<Problem>();
+            var marks    = new List<MdixMark>();
+
+            foreach (var d in diagnostics.AsArray())
             {
-                var message  = diag.TryGet("message", out var m) ? m.AsString() : "(no message)";
-                var severity = diag.TryGet("severity", out var s) ? s.AsInt(1) : 1;
-                var range    = diag.TryGet("range", out var r) ? r : MdixJsonValue.Null;
-                var startLine = range.TryGet("start", out var start) && start.TryGet("line", out var l)
-                    ? l.AsInt() : 0;
+                var range = d.TryGet("range", out var r) ? r : MdixJsonValue.Null;
 
-                // DiagnosticSeverity: 1=Error, 2=Warning, 3=Information, 4=Hint.
-                var icon = severity switch
+                int startLine = 0, startChar = 0, endLine = 0, endChar = 0;
+                if (range.TryGet("start", out var a))
                 {
-                    1 => "✗",
-                    2 => "⚠",
-                    _ => "ℹ",
-                };
-
-                var color = severity switch
+                    startLine = a["line"].AsInt();
+                    startChar = a["character"].AsInt();
+                }
+                if (range.TryGet("end", out var b))
                 {
-                    1 => new Color(0.92f, 0.45f, 0.45f),
-                    2 => new Color(0.90f, 0.75f, 0.35f),
-                    _ => new Color(0.55f, 0.70f, 0.90f),
-                };
+                    endLine = b["line"].AsInt();
+                    endChar = b["character"].AsInt();
+                }
 
-                var row = new Label($"{icon}  Line {startLine + 1}: {message}")
+                var severity = d.TryGet("severity", out var sv) ? sv.AsInt(1) : 1;
+
+                problems.Add(new Problem
                 {
-                    style =
-                    {
-                        color       = color,
-                        paddingTop  = 2,
-                        paddingLeft = 8,
-                        paddingBottom = 2,
-                        whiteSpace  = WhiteSpace.Normal,
-                    },
-                };
+                    Severity  = severity,
+                    Message   = d.TryGet("message", out var m) ? m.AsString() : "(no message)",
+                    Line      = startLine,
+                    Character = startChar,
+                });
 
-                var capturedLine = startLine;
-                row.RegisterCallback<ClickEvent>(_ => JumpToLine(capturedLine));
+                if (!positionsTrustworthy || marks.Count >= 200) continue;
 
-                _problemsList.Add(row);
+                var from = MdixTextPositions.PositionToOffset(text, startLine, startChar);
+                var to   = MdixTextPositions.PositionToOffset(text, endLine, endChar);
+
+                if (to <= from)
+                {
+                    // A zero-width range would be invisible; widen it by one character.
+                    if (from < text.Length && text[from] != '\n') to = from + 1;
+                    else if (from > 0) { to = from; from--; }
+                }
+
+                if (to > from) marks.Add(new MdixMark(from, to - from, severity));
+            }
+
+            _diagnosticCount = problems.Count;
+            RefreshProblemsHeader();
+            RenderProblems(problems);
+
+            if (positionsTrustworthy)
+            {
+                _marks.Clear();
+                _marks.AddRange(marks);
+                _overlay?.Refresh();
             }
         }
 
-        private void JumpToLine(int line)
+        private void RenderProblems(List<Problem> problems)
         {
-            if (_codeField == null) return;
-            var offset = PositionToOffset(_sourceText, line, 0);
-            _codeField.SelectRange(offset, offset);
+            if (_problemsList == null) return;
+
+            _problemsList.Clear();
+
+            var shown = Math.Min(problems.Count, 100);
+            for (var i = 0; i < shown; i++)
+            {
+                var p = problems[i];
+
+                string icon;
+                Color  colour;
+                switch (p.Severity)
+                {
+                    case 1:  icon = "x"; colour = new Color(0.92f, 0.45f, 0.45f); break;
+                    case 2:  icon = "!"; colour = new Color(0.90f, 0.75f, 0.35f); break;
+                    default: icon = "i"; colour = new Color(0.55f, 0.70f, 0.90f); break;
+                }
+
+                var row = new Label($"[{icon}]  Line {p.Line + 1}: {p.Message}")
+                {
+                    enableRichText = false,
+                    style =
+                    {
+                        color         = colour,
+                        paddingTop    = 2,
+                        paddingLeft   = 8,
+                        paddingBottom = 2,
+                        whiteSpace    = WhiteSpace.Normal,
+                    },
+                };
+
+                var line      = p.Line;
+                var character = p.Character;
+                row.RegisterCallback<ClickEvent>(_ => JumpTo(line, character));
+
+                _problemsList.Add(row);
+            }
+
+            if (problems.Count > shown)
+            {
+                _problemsList.Add(new Label($"… and {problems.Count - shown} more")
+                {
+                    enableRichText = false,
+                    style = { paddingLeft = 8, color = new Color(0.55f, 0.62f, 0.74f) },
+                });
+            }
         }
 
-        // ── Completion ────────────────────────────────────────────────────────
-
-        private void BuildCompletionPopup()
+        private void JumpTo(int line, int character)
         {
-            _completionPopup = new VisualElement
+            if (_codeField == null) return;
+
+            var offset = MdixTextPositions.PositionToOffset(_sourceText, line, character);
+            _codeField.Focus();
+            SetSelection(offset, offset);
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        //  Popups (shared)
+        // ═════════════════════════════════════════════════════════════════════
+
+        private VisualElement CreatePopup(float minWidth, float maxWidth)
+        {
+            var popup = new VisualElement
             {
                 style =
                 {
                     position        = Position.Absolute,
                     display         = DisplayStyle.None,
-                    minWidth        = 220,
-                    maxHeight       = 220,
+                    minWidth        = minWidth,
+                    maxWidth        = maxWidth,
                     backgroundColor = new Color(0.078f, 0.094f, 0.137f),
                     borderTopWidth  = 1,
                     borderTopColor  = new Color(0.24f, 0.49f, 0.97f),
                 },
             };
 
-            _completionList = new ScrollView(ScrollViewMode.Vertical) { style = { maxHeight = 220 } };
-            _completionPopup.Add(_completionList);
+            // Pressing the mouse on a popup must not pull keyboard focus out of the code
+            // field: that would fire FocusOut and close the popup before the click lands.
+            popup.RegisterCallback<PointerDownEvent>(e => e.PreventDefault(), TrickleDown.TrickleDown);
+            popup.RegisterCallback<MouseDownEvent>(e => e.PreventDefault(), TrickleDown.TrickleDown);
 
-            rootVisualElement.Add(_completionPopup);
+            rootVisualElement.Add(popup);
+            return popup;
         }
 
-        private static readonly TimeSpan CompletionRequestTimeout = TimeSpan.FromSeconds(3);
+        /// <summary>Positions <paramref name="popup"/> just below the caret (above it if there's no room).</summary>
+        private bool PlacePopup(VisualElement popup, float estimatedHeight)
+        {
+            if (_overlay == null || !_overlay.TryGetCaretPosition(rootVisualElement, out var caret))
+                return false;
+
+            var bounds = rootVisualElement.layout;
+            var left   = Mathf.Max(4f, Mathf.Min(caret.x, bounds.width - 320f));
+            var top    = caret.y + 4f;
+
+            if (top + estimatedHeight > bounds.height - 4f)
+                top = Mathf.Max(4f, caret.y - 22f - estimatedHeight);
+
+            popup.style.left = left;
+            popup.style.top  = top;
+            return true;
+        }
+
+        private void HideAllPopups()
+        {
+            HideCompletion();
+            HideHover();
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        //  Completion
+        // ═════════════════════════════════════════════════════════════════════
+
+        private bool CompletionOpen => _completionVisible && _completionView.Count > 0;
+
+        private void BuildCompletionPopup()
+        {
+            _completionPopup = CreatePopup(minWidth: 260, maxWidth: 560);
+            _completionList  = new ScrollView(ScrollViewMode.Vertical) { style = { maxHeight = 200 } };
+            _completionPopup.Add(_completionList);
+        }
 
         private void MaybeTriggerCompletion(string newValue, string previousValue)
         {
-            if (newValue.Length <= previousValue.Length) { HideCompletionPopup(); return; }
-            if (_codeField == null) return;
+            var delta = newValue.Length - previousValue.Length;
+            var caret = SafeCaret();
 
-            var idx = SafeCursorIndex(_codeField);
-            if (idx <= 0 || idx > newValue.Length) return;
+            if (caret <= 0 || caret > newValue.Length)
+            {
+                HideCompletion();
+                return;
+            }
 
-            var typedChar = newValue[idx - 1];
-            var isIdentifierChar = char.IsLetterOrDigit(typedChar) || typedChar == '_';
+            if (delta < 0)
+            {
+                // Deleting: keep an open popup in step with the shorter word; never open a new one.
+                if (CompletionOpen) RequestCompletionAtCaret(triggerKind: 1, triggerChar: null);
+                return;
+            }
 
-            if (CompletionTriggerChars.Contains(typedChar) || isIdentifierChar)
-                RequestCompletionAtCursor();
+            // Anything but a single typed character (paste, auto-indent, programmatic edit) closes it.
+            if (delta != 1)
+            {
+                HideCompletion();
+                return;
+            }
+
+            var typed = newValue[caret - 1];
+            if (CompletionTriggerChars.Contains(typed))
+                RequestCompletionAtCaret(triggerKind: 2, triggerChar: typed.ToString());
+            else if (MdixTextPositions.IsWordChar(typed))
+                RequestCompletionAtCaret(triggerKind: 1, triggerChar: null);
             else
-                HideCompletionPopup();
+                HideCompletion();
         }
 
-        private async void RequestCompletionAtCursor()
+        private async void RequestCompletionAtCaret(int triggerKind, string? triggerChar)
         {
-            if (_codeField == null) return;
-            if (!await EnsureLspClientReadyAsync()) return;
+            try
+            {
+                if (_codeField == null) return;
 
-            var cursorIdx = SafeCursorIndex(_codeField);
-            if (cursorIdx < 0) return;
+                var requestId = ++_completionRequestId;
 
-            var (line, character) = OffsetToPosition(_sourceText, cursorIdx);
-            var result = await _lspClient!.RequestCompletionAsync(
-                GetDocumentUri(), line, character, CompletionRequestTimeout);
+                // The server must be looking at the text on screen, not at what it had 0.35s ago.
+                if (!await FlushLspSyncAsync()) return;
+                if (requestId != _completionRequestId) return; // superseded while flushing
 
-            if (result == null || result.IsNull) { HideCompletionPopup(); return; }
+                var text  = _sourceText;
+                var caret = SafeCaret();
+                var client = _lspClient;
+                if (caret < 0 || client == null) return;
+                caret = Math.Min(caret, text.Length);
 
-            // CompletionList { items: [...] } or a bare CompletionItem[] — handle both.
-            var items = result.TryGet("items", out var itemsVal) ? itemsVal : result;
-            ShowCompletionPopup(items);
+                var (line, character) = MdixTextPositions.OffsetToPosition(text, caret);
+
+                var result = await client.RequestCompletionAsync(
+                    CurrentDocUri, line, character, triggerKind, triggerChar);
+
+                // Typed or moved on while waiting: a newer request (or nothing) is the right answer.
+                if (requestId != _completionRequestId) return;
+                if (_sourceText != text || SafeCaret() != caret) return;
+
+                ShowCompletion(MdixCompletionModel.Parse(result), text, caret);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
         }
 
-        /// <summary>Fresh completion results from the server — resets the selection to the top item.</summary>
-        private void ShowCompletionPopup(MdixJsonValue items)
+        private void ShowCompletion(List<MdixCompletionEntry> all, string text, int caret)
         {
-            _completionItems = new List<MdixJsonValue>(items.AsArray());
-            _completionSelectedIndex = 0;
+            if (_completionPopup == null) return;
 
-            if (_completionItems.Count == 0) { HideCompletionPopup(); return; }
+            _completionRequestText = text;
+            _completionAnchor      = MdixTextPositions.FindWordStart(text, caret);
+
+            var typed = text.Substring(_completionAnchor, caret - _completionAnchor);
+            _completionView     = MdixCompletionModel.FilterAndSort(all, typed);
+            _completionSelected = 0;
+
+            if (_completionView.Count == 0)
+            {
+                HideCompletion();
+                return;
+            }
+
+            // One plain candidate identical to what's already typed is just noise.
+            if (_completionView.Count == 1 && !_completionView[0].IsSnippet &&
+                string.Equals(_completionView[0].Label, typed, StringComparison.Ordinal))
+            {
+                HideCompletion();
+                return;
+            }
 
             RenderCompletionList();
-            PositionPopupAtCursor(_completionPopup!);
-            _completionPopup!.style.display = DisplayStyle.Flex;
+
+            if (!PlacePopup(_completionPopup, Math.Min(_completionView.Count, 8) * 22f + 6f))
+            {
+                HideCompletion();
+                return;
+            }
+
+            _completionPopup.style.display = DisplayStyle.Flex;
+            _completionVisible = true;
         }
 
-        /// <summary>Re-renders the already-fetched items (e.g. after arrow-key navigation) without touching the selection.</summary>
         private void RenderCompletionList()
         {
-            if (_completionPopup == null || _completionList == null || _codeField == null) return;
+            if (_completionList == null) return;
 
             _completionList.Clear();
+            _completionRows.Clear();
 
-            for (var i = 0; i < _completionItems.Count; i++)
+            for (var i = 0; i < _completionView.Count; i++)
             {
-                var item  = _completionItems[i];
-                var label = item.TryGet("label", out var l) ? l.AsString() : "(unnamed)";
-                var kind  = item.TryGet("detail", out var d) ? d.AsString() : string.Empty;
+                var entry    = _completionView[i];
+                var detail   = !string.IsNullOrEmpty(entry.Detail) ? entry.Detail : MdixCompletionModel.KindTag(entry.Kind);
+                var selected = i == _completionSelected;
 
-                var row = new Label(string.IsNullOrEmpty(kind) ? label : $"{label}  —  {kind}")
+                var markup = MdixRichText.Escape(entry.Label);
+                if (detail.Length > 0)
+                    markup += "   <color=#7A8599>" + MdixRichText.Escape(detail) + "</color>";
+
+                var row = new Label(markup)
                 {
+                    enableRichText       = true,
+                    parseEscapeSequences = false,
                     style =
                     {
-                        paddingTop    = 3,
-                        paddingLeft   = 8,
-                        paddingBottom = 3,
-                        color         = i == _completionSelectedIndex
-                            ? new Color(1f, 1f, 1f)
-                            : new Color(0.82f, 0.85f, 0.90f),
-                        backgroundColor = i == _completionSelectedIndex
-                            ? new Color(0.24f, 0.49f, 0.97f, 0.35f)
-                            : new Color(0, 0, 0, 0),
+                        paddingTop      = 3,
+                        paddingBottom   = 3,
+                        paddingLeft     = 8,
+                        paddingRight    = 8,
+                        whiteSpace      = WhiteSpace.NoWrap,
+                        color           = selected ? new Color(1f, 1f, 1f) : new Color(0.82f, 0.85f, 0.90f),
+                        backgroundColor = selected ? new Color(0.24f, 0.49f, 0.97f, 0.35f) : new Color(0f, 0f, 0f, 0f),
                     },
                 };
 
-                var capturedIndex = i;
-                row.RegisterCallback<ClickEvent>(_ => AcceptCompletionItem(capturedIndex));
+                // Accept on mouse DOWN, not click: by the time a click completes, the press
+                // may already have shifted focus and closed the popup.
+                var index = i;
+                row.RegisterCallback<PointerDownEvent>(e =>
+                {
+                    e.PreventDefault();
+                    e.StopPropagation();
+                    AcceptCompletion(index);
+                });
 
                 _completionList.Add(row);
+                _completionRows.Add(row);
             }
         }
 
-        private void HideCompletionPopup()
+        private void MoveCompletionSelection(int delta)
         {
-            if (_completionPopup == null) return;
-            _completionPopup.style.display = DisplayStyle.None;
-            _completionItems.Clear();
+            if (_completionView.Count == 0) return;
+
+            _completionSelected = Mathf.Clamp(_completionSelected + delta, 0, _completionView.Count - 1);
+            RenderCompletionList();
+
+            if (_completionList != null && _completionSelected < _completionRows.Count)
+                _completionList.ScrollTo(_completionRows[_completionSelected]);
         }
 
-        private bool CompletionPopupOpen =>
-            _completionPopup != null && _completionItems.Count > 0;
-
-        private void AcceptCompletionItem(int index)
+        private void HideCompletion()
         {
-            if (_codeField == null || index < 0 || index >= _completionItems.Count) return;
+            _completionVisible = false;
+            _completionRequestId++; // invalidate any request still in flight
 
-            var item = _completionItems[index];
-            var insertText =
-                item.TryGet("insertText", out var it) && !it.IsNull && it.AsString().Length > 0
-                    ? it.AsString()
-                    : item.TryGet("label", out var lbl) ? lbl.AsString() : string.Empty;
+            if (_completionPopup != null)
+                _completionPopup.style.display = DisplayStyle.None;
+        }
 
-            if (string.IsNullOrEmpty(insertText)) { HideCompletionPopup(); return; }
+        /// <summary>Closes the popup once the caret leaves the word it was opened for.</summary>
+        private void PollCompletionState()
+        {
+            if (!_completionVisible) return;
 
-            var cursorIdx = SafeCursorIndex(_codeField);
-            if (cursorIdx < 0) { HideCompletionPopup(); return; }
-
-            var wordStart = FindWordStart(_sourceText, cursorIdx);
-            var newText   = _sourceText.Substring(0, wordStart) + insertText + _sourceText.Substring(cursorIdx);
-            var newCursor = wordStart + insertText.Length;
-
-            _suppressLspChangeSideEffects = true;
-            try
+            var caret = SafeCaret();
+            if (caret < 0 || caret < _completionAnchor ||
+                !MdixTextPositions.IsAllWordChars(_sourceText, _completionAnchor, caret))
             {
-                _sourceText      = newText;
-                _codeField.value = newText;
-                _codeField.SelectRange(newCursor, newCursor);
+                HideCompletion();
             }
-            finally
+        }
+
+        private void AcceptCompletion(int index)
+        {
+            if (_codeField == null || index < 0 || index >= _completionView.Count) return;
+
+            var entry = _completionView[index];
+            var text  = _sourceText;
+            var caret = SafeCaret();
+            if (caret < 0) return;
+            caret = Math.Min(caret, text.Length);
+
+            // What to replace. The server's explicit range is only trustworthy while the text
+            // is exactly what it answered for; once the user has typed more, replace the word
+            // being typed instead.
+            int start, end;
+            if (entry.HasEditRange && text == _completionRequestText)
             {
-                _suppressLspChangeSideEffects = false;
+                start = MdixTextPositions.PositionToOffset(text, entry.StartLine, entry.StartCharacter);
+                end   = MdixTextPositions.PositionToOffset(text, entry.EndLine, entry.EndCharacter);
+                if (end < caret)   end   = caret;
+                if (start > caret) start = caret;
+            }
+            else
+            {
+                start = MdixTextPositions.FindWordStart(text, caret);
+                end   = caret;
             }
 
-            HideCompletionPopup();
-            _lspSyncPending = true;
-            _lastEditTime   = EditorApplication.timeSinceStartup;
-        }
+            string insert;
+            List<MdixSnippetStop>? stops = null;
 
-        // ── Hover ─────────────────────────────────────────────────────────────
-
-        private void BuildHoverPopup()
-        {
-            _hoverPopup = new VisualElement
+            if (entry.IsSnippet)
             {
-                style =
-                {
-                    position        = Position.Absolute,
-                    display         = DisplayStyle.None,
-                    maxWidth        = 420,
-                    backgroundColor = new Color(0.078f, 0.094f, 0.137f),
-                    borderTopWidth  = 1,
-                    borderTopColor  = new Color(0.30f, 0.34f, 0.42f),
-                    paddingTop      = 6,
-                    paddingLeft     = 8,
-                    paddingRight    = 8,
-                    paddingBottom   = 6,
-                },
-            };
+                var expanded = MdixSnippet.Expand(entry.InsertText, MdixTextPositions.LineIndent(text, start));
+                insert = expanded.Text;
+                stops  = expanded.Stops;
+            }
+            else
+            {
+                insert = entry.InsertText;
+            }
 
-            _hoverLabel = new Label(string.Empty) { style = { whiteSpace = WhiteSpace.Normal, color = new Color(0.85f, 0.88f, 0.92f) } };
-            _hoverPopup.Add(_hoverLabel);
-            rootVisualElement.Add(_hoverPopup);
+            EndSnippet(); // an edit made here invalidates any placeholder session in progress
+            HideCompletion();
+
+            var after = ApplyProgrammaticEdit(start, end, insert);
+            _codeField.Focus();
+
+            if (stops != null) BeginSnippet(start, stops);
+            else               SetSelection(after, after);
         }
 
-        private void UpdateHoverIdleCheck()
+        // ═════════════════════════════════════════════════════════════════════
+        //  Snippet tab stops
+        // ═════════════════════════════════════════════════════════════════════
+
+        private void BeginSnippet(int insertStart, List<MdixSnippetStop> stops)
         {
-            if (_activeTab != 1 || _codeField == null || _hoverRequestInFlight || CompletionPopupOpen)
+            var live = new List<LiveStop>(stops.Count);
+            foreach (var stop in stops)
+                live.Add(new LiveStop { Start = insertStart + stop.Start, Length = stop.Length });
+
+            // The list always ends with the final ($0) stop. With nothing before it there
+            // is nothing to tab through: just put the caret there.
+            if (live.Count <= 1)
+            {
+                var only = live[0];
+                SetSelection(only.Start, only.Start);
+                _snippetStops = null;
                 return;
+            }
 
-            var idx = SafeCursorIndex(_codeField);
+            _snippetStops   = live;
+            _snippetCurrent = 0;
+            SelectStop(live[0]);
+        }
 
-            if (idx != _lastHoverCursorIndex)
+        private void SelectStop(LiveStop stop) => SetSelection(stop.Start + stop.Length, stop.Start);
+
+        private void AdvanceSnippet(int direction)
+        {
+            if (_snippetStops == null) return;
+
+            var last = _snippetStops.Count - 1; // the final stop
+            var next = Math.Max(0, _snippetCurrent + direction);
+
+            if (next >= last)
             {
-                _lastHoverCursorIndex = idx;
-                _cursorIdleSince      = EditorApplication.timeSinceStartup;
-                HideHoverPopup();
+                var final = _snippetStops[last];
+                EndSnippet();
+                SetSelection(final.Start, final.Start);
                 return;
             }
 
-            if (idx >= 0 &&
-                !_hoverPopupVisible &&
-                EditorApplication.timeSinceStartup - _cursorIdleSince >= HoverIdleSeconds)
-            {
-                RequestHoverAtCursor();
-            }
+            _snippetCurrent = next;
+            SelectStop(_snippetStops[next]);
         }
 
-        private static readonly TimeSpan HoverRequestTimeout = TimeSpan.FromSeconds(3);
+        private void EndSnippet() => _snippetStops = null;
 
-        private async void RequestHoverAtCursor()
+        /// <summary>
+        /// Keeps the remaining tab stops pointing at the right text while the user types
+        /// inside the active placeholder, and ends the session if they wander off.
+        /// </summary>
+        private void AdjustSnippetForEdit(string newValue, string previousValue)
         {
-            if (_codeField == null) return;
-            _hoverRequestInFlight = true;
+            if (_snippetStops == null) return;
 
-            try
+            var delta   = newValue.Length - previousValue.Length;
+            var current = _snippetStops[_snippetCurrent];
+            var caret   = SafeCaret();
+
+            var newLength = Math.Max(0, current.Length + delta);
+            if (caret < current.Start || caret > current.Start + newLength)
             {
-                if (!await EnsureLspClientReadyAsync()) return;
-
-                var cursorIdx = SafeCursorIndex(_codeField);
-                if (cursorIdx < 0) return;
-
-                var (line, character) = OffsetToPosition(_sourceText, cursorIdx);
-                var result = await _lspClient!.RequestHoverAsync(
-                    GetDocumentUri(), line, character, HoverRequestTimeout);
-
-                if (result == null || result.IsNull) { HideHoverPopup(); return; }
-                ShowHoverPopup(result);
-            }
-            finally
-            {
-                _hoverRequestInFlight = false;
-            }
-        }
-
-        private void ShowHoverPopup(MdixJsonValue hover)
-        {
-            if (_hoverPopup == null || _hoverLabel == null) return;
-
-            var text = string.Empty;
-
-            if (hover.TryGet("contents", out var contents))
-            {
-                text = contents.Kind switch
-                {
-                    MdixJsonKind.String => contents.AsString(),
-                    MdixJsonKind.Object => contents.TryGet("value", out var v) ? v.AsString() : string.Empty,
-                    MdixJsonKind.Array when contents.Count > 0 =>
-                        contents[0].Kind == MdixJsonKind.Object && contents[0].TryGet("value", out var v2)
-                            ? v2.AsString()
-                            : contents[0].AsString(),
-                    _ => string.Empty,
-                };
+                EndSnippet();
+                return;
             }
 
-            if (string.IsNullOrWhiteSpace(text)) { HideHoverPopup(); return; }
+            foreach (var stop in _snippetStops)
+            {
+                if (!ReferenceEquals(stop, current) && stop.Start > current.Start)
+                    stop.Start += delta;
+            }
 
-            _hoverLabel.text = text;
-            PositionPopupAtCursor(_hoverPopup);
-            _hoverPopup.style.display = DisplayStyle.Flex;
-            _hoverPopupVisible = true;
+            current.Length = newLength;
         }
 
-        private void HideHoverPopup()
+        // ═════════════════════════════════════════════════════════════════════
+        //  Keyboard
+        // ═════════════════════════════════════════════════════════════════════
+
+        private static void Consume(KeyDownEvent evt)
         {
-            if (_hoverPopup == null) return;
-            _hoverPopup.style.display = DisplayStyle.None;
-            _hoverPopupVisible = false;
+            evt.StopPropagation();
+            evt.PreventDefault();
         }
-
-        // ── Shared popup placement ────────────────────────────────────────────
-
-        // See the class doc comment — this is the other spot to eyeball once
-        // it's actually running: worldBound gives the TextField's bounds in
-        // window space, cursorPosition gives the caret's position within the
-        // field's own content. Added together they should land the popup at
-        // the caret; a fixed +18px vertical nudge clears the current text line.
-        private void PositionPopupAtCursor(VisualElement popup)
-        {
-            if (_codeField == null) return;
-
-            var fieldBounds = _codeField.worldBound;
-            var localCursor = SafeCursorPosition(_codeField);
-
-            popup.style.left = fieldBounds.x + localCursor.x;
-            popup.style.top  = fieldBounds.y + localCursor.y + 18;
-        }
-
-        // ── Keyboard navigation while a completion popup is open ─────────────
 
         private void OnCodeFieldKeyDown(KeyDownEvent evt)
         {
-            if ((evt.ctrlKey || evt.commandKey) && evt.keyCode == UnityEngine.KeyCode.Space)
+            var now = EditorApplication.timeSinceStartup;
+            var key = evt.keyCode;
+            var ch  = evt.character;
+
+            // The character half of an Enter/Tab press we already handled.
+            if (key == KeyCode.None && now < _swallowCharUntil && (ch == '\n' || ch == '\r' || ch == '\t'))
             {
-                RequestCompletionAtCursor();
-                evt.StopPropagation();
-                evt.PreventDefault();
+                Consume(evt);
                 return;
             }
 
-            if (!CompletionPopupOpen) return;
-
-            switch (evt.keyCode)
+            // Trigger completion by hand: Ctrl+Space, or Cmd/Ctrl+I (VSCode's macOS binding,
+            // since the OS often owns Ctrl+Space).
+            if ((evt.ctrlKey && key == KeyCode.Space) || (evt.actionKey && key == KeyCode.I))
             {
-                case UnityEngine.KeyCode.DownArrow:
-                    _completionSelectedIndex =
-                        Math.Min(_completionSelectedIndex + 1, _completionItems.Count - 1);
-                    RenderCompletionList();
-                    evt.StopPropagation();
-                    evt.PreventDefault();
-                    break;
+                Consume(evt);
+                RequestCompletionAtCaret(triggerKind: 1, triggerChar: null);
+                return;
+            }
 
-                case UnityEngine.KeyCode.UpArrow:
-                    _completionSelectedIndex = Math.Max(_completionSelectedIndex - 1, 0);
-                    RenderCompletionList();
-                    evt.StopPropagation();
-                    evt.PreventDefault();
-                    break;
+            // Never let Escape reach the TextField: it would revert ALL edits since focus.
+            if (key == KeyCode.Escape)
+            {
+                if (CompletionOpen)               HideCompletion();
+                else if (_hoverVisible)           HideHover();
+                else if (_snippetStops != null)   EndSnippet();
 
-                case UnityEngine.KeyCode.Return:
-                    AcceptCompletionItem(_completionSelectedIndex);
-                    evt.StopPropagation();
-                    evt.PreventDefault();
-                    break;
+                Consume(evt);
+                return;
+            }
 
-                case UnityEngine.KeyCode.Escape:
-                    HideCompletionPopup();
-                    evt.StopPropagation();
-                    evt.PreventDefault();
-                    break;
+            if (CompletionOpen)
+            {
+                switch (key)
+                {
+                    case KeyCode.DownArrow: MoveCompletionSelection(+1); Consume(evt); return;
+                    case KeyCode.UpArrow:   MoveCompletionSelection(-1); Consume(evt); return;
+                    case KeyCode.PageDown:  MoveCompletionSelection(+8); Consume(evt); return;
+                    case KeyCode.PageUp:    MoveCompletionSelection(-8); Consume(evt); return;
+
+                    case KeyCode.Return:
+                    case KeyCode.KeypadEnter:
+                    case KeyCode.Tab:
+                        _swallowCharUntil = now + 0.15;
+                        Consume(evt);
+                        AcceptCompletion(_completionSelected);
+                        return;
+                }
+
+                return;
+            }
+
+            if (_snippetStops != null && key == KeyCode.Tab)
+            {
+                _swallowCharUntil = now + 0.15;
+                Consume(evt);
+                AdvanceSnippet(evt.shiftKey ? -1 : +1);
             }
         }
 
+        // ═════════════════════════════════════════════════════════════════════
+        //  Hover
+        // ═════════════════════════════════════════════════════════════════════
+
+        private void BuildHoverPopup()
+        {
+            _hoverPopup = CreatePopup(minWidth: 120, maxWidth: 520);
+            _hoverPopup.style.paddingTop    = 6;
+            _hoverPopup.style.paddingLeft   = 8;
+            _hoverPopup.style.paddingRight  = 8;
+            _hoverPopup.style.paddingBottom = 6;
+            _hoverPopup.style.borderTopColor = new Color(0.30f, 0.34f, 0.42f);
+
+            _hoverLabel = new Label(string.Empty)
+            {
+                enableRichText       = true,
+                parseEscapeSequences = false,
+                style =
+                {
+                    whiteSpace = WhiteSpace.Normal,
+                    color      = new Color(0.85f, 0.88f, 0.92f),
+                },
+            };
+
+            _hoverPopup.Add(_hoverLabel);
+        }
+
+        private void UpdateHoverIdleCheck(double now)
+        {
+            if (_codeField == null || _hoverInFlight || CompletionOpen) return;
+            if (EditorWindow.focusedWindow != this) return;
+
+            var caret = SafeCaret();
+            if (caret != _lastCaret)
+            {
+                _lastCaret      = caret;
+                _caretIdleSince = now;
+                HideHover();
+                return;
+            }
+
+            // Ask once per caret position: dismissing the popup shouldn't make it reappear.
+            if (caret >= 0 && !_hoverVisible && caret != _hoverDoneCaret &&
+                now - _caretIdleSince >= HoverIdleSeconds)
+            {
+                RequestHoverAtCaret(caret);
+            }
+        }
+
+        private async void RequestHoverAtCaret(int caret)
+        {
+            _hoverInFlight = true;
+            try
+            {
+                if (!await FlushLspSyncAsync())
+                {
+                    _hoverDoneCaret = caret;
+                    return;
+                }
+
+                if (SafeCaret() != caret) return;
+
+                var text   = _sourceText;
+                var client = _lspClient;
+                if (client == null) return;
+
+                var (line, character) = MdixTextPositions.OffsetToPosition(text, Math.Min(caret, text.Length));
+                var result = await client.RequestHoverAsync(CurrentDocUri, line, character);
+
+                _hoverDoneCaret = caret;
+
+                if (SafeCaret() != caret || _sourceText != text) return;
+                ShowHover(result);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+            finally
+            {
+                _hoverInFlight = false;
+            }
+        }
+
+        private void ShowHover(MdixJsonValue? hover)
+        {
+            if (_hoverPopup == null || _hoverLabel == null || hover == null || hover.IsNull)
+            {
+                HideHover();
+                return;
+            }
+
+            // contents: MarkupContent {kind, value} | string | MarkedString | an array of those.
+            var markdown = string.Empty;
+            if (hover.TryGet("contents", out var contents))
+            {
+                switch (contents.Kind)
+                {
+                    case MdixJsonKind.String:
+                        markdown = contents.AsString();
+                        break;
+
+                    case MdixJsonKind.Object:
+                        markdown = contents.TryGet("value", out var v) ? v.AsString() : string.Empty;
+                        break;
+
+                    case MdixJsonKind.Array:
+                        var parts = new List<string>();
+                        foreach (var item in contents.AsArray())
+                        {
+                            if (item.Kind == MdixJsonKind.String) parts.Add(item.AsString());
+                            else if (item.TryGet("value", out var iv)) parts.Add(iv.AsString());
+                        }
+                        markdown = string.Join("\n\n", parts);
+                        break;
+                }
+            }
+
+            var rich = MdixMarkdown.ToRichText(markdown);
+            if (rich.Length == 0)
+            {
+                HideHover();
+                return;
+            }
+
+            _hoverLabel.text = rich;
+
+            if (!PlacePopup(_hoverPopup, 90f))
+            {
+                HideHover();
+                return;
+            }
+
+            _hoverPopup.style.display = DisplayStyle.Flex;
+            _hoverVisible = true;
+        }
+
+        private void HideHover()
+        {
+            _hoverVisible = false;
+            if (_hoverPopup != null)
+                _hoverPopup.style.display = DisplayStyle.None;
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        //  Menu items
+        // ═════════════════════════════════════════════════════════════════════
+
+        private const string MenuRoot      = "MidManStudio/MDIX Language Server/";
+        private const string MenuHighlight = MenuRoot + "Syntax Highlighting";
+        private const string MenuVerbose   = MenuRoot + "Verbose Server Log";
+
+        [MenuItem(MenuHighlight)]
+        private static void ToggleSyntaxHighlighting()
+        {
+            MdixStudioPrefs.SyntaxHighlighting = !MdixStudioPrefs.SyntaxHighlighting;
+            foreach (var window in Resources.FindObjectsOfTypeAll<MdixEditorWindow>())
+                window.ApplyHighlightPreference();
+        }
+
+        [MenuItem(MenuHighlight, true)]
+        private static bool ToggleSyntaxHighlightingValidate()
+        {
+            Menu.SetChecked(MenuHighlight, MdixStudioPrefs.SyntaxHighlighting);
+            return true;
+        }
+
+        [MenuItem(MenuVerbose)]
+        private static void ToggleVerboseServerLog() =>
+            MdixStudioPrefs.VerboseServerLog = !MdixStudioPrefs.VerboseServerLog;
+
+        [MenuItem(MenuVerbose, true)]
+        private static bool ToggleVerboseServerLogValidate()
+        {
+            Menu.SetChecked(MenuVerbose, MdixStudioPrefs.VerboseServerLog);
+            return true;
+        }
+
+        [MenuItem(MenuRoot + "Restart")]
+        private static void RestartLanguageServerMenu()
+        {
+            foreach (var window in Resources.FindObjectsOfTypeAll<MdixEditorWindow>())
+                window.RestartLanguageServer();
+        }
+
+        [MenuItem(MenuRoot + "Set Server Path...")]
+        private static void SetServerPathMenu()
+        {
+            var extension = Application.platform == RuntimePlatform.WindowsEditor ? "exe" : string.Empty;
+            var chosen    = EditorUtility.OpenFilePanel("Select the mdix-lsp executable", string.Empty, extension);
+            if (string.IsNullOrEmpty(chosen)) return;
+
+            MdixLspClient.SetServerPathOverride(chosen);
+            foreach (var window in Resources.FindObjectsOfTypeAll<MdixEditorWindow>())
+                window.RestartLanguageServer();
+        }
     }
 }

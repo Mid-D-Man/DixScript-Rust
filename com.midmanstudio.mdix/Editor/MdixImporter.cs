@@ -67,6 +67,36 @@ namespace MidManStudio.Mdix.Unity.Editor
         private string _statusMessage  = string.Empty;
         private bool   _statusIsError;
 
+        // Parsing runs the native parser over the whole file; OnInspectorGUI runs for every
+        // layout/repaint/mouse event, so cache by source text.
+        private string? _cachedSource;
+        private bool    _cachedValid;
+        private int     _cachedEntryCount;
+        private string  _cachedError = string.Empty;
+
+        private void EnsureParsed(string source)
+        {
+            if (_cachedSource != null && string.Equals(_cachedSource, source)) return;
+
+            var result = MidManStudio.Mdix.Dix.LoadStr(source);
+            _cachedValid = result.IsSuccess;
+
+            if (result.IsSuccess)
+            {
+                var db = result.SuccessResult;
+                _cachedEntryCount = db.EntryCount;
+                _cachedError      = string.Empty;
+                db.Dispose();
+            }
+            else
+            {
+                _cachedEntryCount = 0;
+                _cachedError      = result.Error.Message;
+            }
+
+            _cachedSource = source;
+        }
+
         public override void OnInspectorGUI()
         {
             var asset = (MdixAsset)target;
@@ -75,23 +105,18 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             // ── Status row ────────────────────────────────────────────────────
 
-            var parseResult = MidManStudio.Mdix.Dix.LoadStr(asset.RawSource);
-            var isValid     = parseResult.IsSuccess;
+            EnsureParsed(asset.RawSource);
 
-            if (isValid)
+            if (_cachedValid)
             {
-                var db         = parseResult.SuccessResult;
-                var entryCount = db.EntryCount;
-                db.Dispose();
-
                 DrawStatusBadge(
-                    $"✓  {entryCount} entries",
+                    $"✓  {_cachedEntryCount} entries",
                     new Color(0.27f, 0.72f, 0.45f));
             }
             else
             {
                 DrawStatusBadge(
-                    $"✗  {parseResult.Error.Message}",
+                    $"✗  {_cachedError}",
                     new Color(0.85f, 0.33f, 0.33f));
             }
 
@@ -99,13 +124,26 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             // ── Action buttons ────────────────────────────────────────────────
 
-            using (new EditorGUILayout.HorizontalScope())
+            // Unity flags importer-produced objects NotEditable, so Editor.IsEnabled() is false
+            // and this whole inspector is drawn inside a disabled scope: greyed out, buttons
+            // dead. These buttons only act on the asset, they don't edit it, so switch GUI
+            // back on for just this row.
+            var wasEnabled = GUI.enabled;
+            GUI.enabled = true;
+            try
             {
-                if (GUILayout.Button("Open in MDIX Studio", GUILayout.Height(26)))
-                    MdixEditorWindow.OpenWithAsset(asset);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button("Open in MDIX Studio", GUILayout.Height(26)))
+                        MdixEditorWindow.OpenWithAsset(asset);
 
-                if (GUILayout.Button("Generate ScriptableObject", GUILayout.Height(26)))
-                    MdixBakeWizard.Open(asset);
+                    if (GUILayout.Button("Generate ScriptableObject", GUILayout.Height(26)))
+                        MdixBakeWizard.Open(asset);
+                }
+            }
+            finally
+            {
+                GUI.enabled = wasEnabled;
             }
 
             EditorGUILayout.Space(6);

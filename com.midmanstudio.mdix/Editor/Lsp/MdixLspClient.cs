@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -40,10 +41,12 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
 
         /// <summary>
         /// Fired when the server pushes textDocument/publishDiagnostics.
-        /// Always invoked on the main thread (via EditorApplication.delayCall),
-        /// safe to touch VisualElements from directly.
+        /// Always invoked on the main thread (drained from a thread-safe queue
+        /// on EditorApplication.update), safe to touch VisualElements from.
+        /// The int is the document version the server analysed (the one this
+        /// client last sent), or -1 if the server didn't say.
         /// </summary>
-        public event Action<string /*uri*/, MdixJsonValue /*Diagnostic[]*/>? DiagnosticsReceived;
+        public event Action<string /*uri*/, MdixJsonValue /*Diagnostic[]*/, int /*version*/>? DiagnosticsReceived;
 
         /// <summary>Fired for window/logMessage and window/showMessage. Main-thread.</summary>
         public event Action<string>? ServerMessage;
@@ -212,6 +215,34 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
 
         private readonly Dictionary<string, int> _docVersions = new();
 
+        private volatile bool _stopping;
+
+        // Server events arrive on the reader threads, but listeners touch Unity
+        // objects, so they are marshalled through this queue and drained on the
+        // main thread. EditorApplication.delayCall is NOT used for this: it is a
+        // plain delegate field rather than an event, so `+=` from a background
+        // thread races with the editor swapping it out on the main thread and
+        // callbacks can be silently lost (for diagnostics: an empty Problems
+        // panel with no error anywhere).
+        private readonly ConcurrentQueue<Action> _mainThreadQueue = new ConcurrentQueue<Action>();
+        private bool _pumpHooked;
+
+        private void PostToMainThread(Action action) => _mainThreadQueue.Enqueue(action);
+
+        private void PumpMainThreadQueue()
+        {
+            // Bounded per tick so a flood of log lines can't stall the editor.
+            for (var budget = 256; budget > 0 && _mainThreadQueue.TryDequeue(out var action); budget--)
+            {
+                try { action(); }
+                catch (Exception ex) { Debug.LogException(ex); }
+            }
+        }
+
+        /// <summary>The document version this client last sent for <paramref name="uri"/>, or -1.</summary>
+        public int GetDocumentVersion(string uri) =>
+            _docVersions.TryGetValue(uri, out var v) ? v : -1;
+
         /// <summary>
         /// Starts the mdix-lsp process. Does NOT perform the LSP initialize
         /// handshake — call InitializeAsync() next. Returns false (with no
@@ -247,25 +278,53 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
             {
                 _process = Process.Start(psi);
             }
-            catch (Exception ex)
+            catch (Exception firstError)
             {
-                Debug.LogError($"MdixLspClient: failed to start '{serverPath}': {ex.Message}");
-                _process = null;
-                return false;
+                // A bundled binary can lose its executable bit when a package is
+                // copied or extracted. Try to restore it once, then retry.
+                if (!TryRestoreExecutableBit(serverPath))
+                {
+                    Debug.LogError($"MdixLspClient: failed to start '{serverPath}': {firstError.Message}");
+                    _process = null;
+                    return false;
+                }
+
+                try
+                {
+                    _process = Process.Start(psi);
+                }
+                catch (Exception retryError)
+                {
+                    Debug.LogError($"MdixLspClient: failed to start '{serverPath}': {retryError.Message}");
+                    _process = null;
+                    return false;
+                }
             }
 
             if (_process == null) return false;
 
             _hasExited = false;
             _running   = true;
+            _stopping  = false;
 
-            _process.EnableRaisingEvents = true;
-            _process.Exited += (_, _) =>
+            var started = _process;
+            started.EnableRaisingEvents = true;
+            started.Exited += (_, _) =>
             {
                 _hasExited = true;
-                var code = SafeExitCode(_process);
-                EditorApplication.delayCall += () => ProcessExited?.Invoke(code);
+
+                // An intentional Stop() kills the process too — that is not a crash.
+                if (_stopping) return;
+
+                var code = SafeExitCode(started);
+                PostToMainThread(() => ProcessExited?.Invoke(code));
             };
+
+            if (!_pumpHooked)
+            {
+                EditorApplication.update += PumpMainThreadQueue;
+                _pumpHooked = true;
+            }
 
             _readerThread = new Thread(ReaderLoop) { IsBackground = true, Name = "MdixLspReader" };
             _readerThread.Start();
@@ -278,6 +337,32 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
             stderrThread.Start();
 
             return true;
+        }
+
+        /// <summary>Runs `chmod +x` on the server binary (macOS/Linux only). True if it succeeded.</summary>
+        private static bool TryRestoreExecutableBit(string path)
+        {
+            if (Application.platform == RuntimePlatform.WindowsEditor) return false;
+
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName        = "chmod",
+                    Arguments       = "+x \"" + path + "\"",
+                    UseShellExecute = false,
+                    CreateNoWindow  = true,
+                };
+
+                using var chmod = Process.Start(psi);
+                if (chmod == null) return false;
+                chmod.WaitForExit(3000);
+                return chmod.HasExited && chmod.ExitCode == 0;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static int SafeExitCode(Process? p)
@@ -294,7 +379,7 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
                 while ((line = process.StandardError.ReadLine()) != null)
                 {
                     var captured = line;
-                    EditorApplication.delayCall += () => ServerMessage?.Invoke(captured);
+                    PostToMainThread(() => ServerMessage?.Invoke(captured));
                 }
             }
             catch
@@ -305,7 +390,8 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
 
         public void Stop()
         {
-            _running = false;
+            _stopping = true;
+            _running  = false;
 
             try
             {
@@ -328,6 +414,15 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
 
             _process?.Dispose();
             _process = null;
+
+            // Anything still queued belongs to a server that no longer exists.
+            while (_mainThreadQueue.TryDequeue(out _)) { }
+
+            if (_pumpHooked)
+            {
+                EditorApplication.update -= PumpMainThreadQueue;
+                _pumpHooked = false;
+            }
         }
 
         public void Dispose() => Stop();
@@ -345,6 +440,17 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
 
             var completionCap = MdixJsonValue.Object();
             completionCap["dynamicRegistration"] = MdixJsonValue.Bool(false);
+
+            // MDIX Studio expands snippets (placeholders + tab stops) itself — see
+            // MdixSnippet — so say so; a server may otherwise fall back to plain text.
+            var completionItemCap = MdixJsonValue.Object();
+            completionItemCap["snippetSupport"] = MdixJsonValue.Bool(true);
+            var docFormats = MdixJsonValue.Array();
+            docFormats.Add(MdixJsonValue.String("markdown"));
+            docFormats.Add(MdixJsonValue.String("plaintext"));
+            completionItemCap["documentationFormat"] = docFormats;
+            completionCap["completionItem"] = completionItemCap;
+
             textDocument["completion"] = completionCap;
 
             var hoverCap = MdixJsonValue.Object();
@@ -464,12 +570,25 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
 
         // ── Feature requests ──────────────────────────────────────────────────
 
+        /// <param name="triggerKind">
+        /// LSP CompletionTriggerKind: 1 = invoked (typing an identifier, or the
+        /// explicit shortcut), 2 = a trigger character was typed, 3 = re-trigger
+        /// of an incomplete list.
+        /// </param>
         public async Task<MdixJsonValue?> RequestCompletionAsync(
-            string uri, int line, int character, TimeSpan? timeout = null)
+            string uri, int line, int character,
+            int triggerKind = 1, string? triggerCharacter = null,
+            TimeSpan? timeout = null)
         {
+            var context = MdixJsonValue.Object();
+            context["triggerKind"] = MdixJsonValue.Number(triggerKind);
+            if (!string.IsNullOrEmpty(triggerCharacter))
+                context["triggerCharacter"] = MdixJsonValue.String(triggerCharacter);
+
             var p = MdixJsonValue.Object();
             p["textDocument"] = MakeTextDocumentIdentifier(uri);
             p["position"]     = MakePosition(line, character);
+            p["context"]      = context;
 
             return await SendRequestAsync(
                 "textDocument/completion", p, timeout ?? TimeSpan.FromSeconds(5));
@@ -738,7 +857,8 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
                     if (!message.TryGet("params", out var p)) return;
                     var uri         = p.TryGet("uri", out var u) ? u.AsString() : string.Empty;
                     var diagnostics = p.TryGet("diagnostics", out var d) ? d : MdixJsonValue.Array();
-                    EditorApplication.delayCall += () => DiagnosticsReceived?.Invoke(uri, diagnostics);
+                    var version     = p.TryGet("version", out var ver) && ver.Kind == MdixJsonKind.Number ? ver.AsInt() : -1;
+                    PostToMainThread(() => DiagnosticsReceived?.Invoke(uri, diagnostics, version));
                     break;
                 }
 
@@ -747,7 +867,7 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
                 {
                     if (!message.TryGet("params", out var p)) return;
                     var text = p.TryGet("message", out var m) ? m.AsString() : string.Empty;
-                    EditorApplication.delayCall += () => ServerMessage?.Invoke(text);
+                    PostToMainThread(() => ServerMessage?.Invoke(text));
                     break;
                 }
 

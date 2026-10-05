@@ -19,7 +19,7 @@ use crate::Builtins::Core::DixType;
 use crate::Builtins::Resolver::{has_instance_method, has_static_method, has_static_object};
 use crate::Utilities::Keywords;
 use crate::ErrorManager::{ErrorManager, DebugConfig};
-use rustc_hash::{FxHashMap, FxHashSet};
+use crate::Utilities::RustcHash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 
 // ==================== CONSTANTS ====================

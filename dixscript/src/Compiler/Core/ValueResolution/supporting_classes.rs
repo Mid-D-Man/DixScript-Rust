@@ -5,7 +5,7 @@ use std::fmt;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use rustc_hash::FxHashMap;
+use crate::Utilities::RustcHash::FxHashMap;
 
 use crate::Builtins::Core::DixValue;
 use crate::Compiler::AST::{Expression, QuickFunction};

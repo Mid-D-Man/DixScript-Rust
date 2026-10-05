@@ -6,7 +6,7 @@ use crate::Compiler::Core::SectionEnhancers::{
     QualifiedIdentifierKey, QualifiedIdentifierResolution, QualifiedIdentifierType,
 };
 use crate::ErrorManager::{DebugConfig, ErrorManager};
-use rustc_hash::FxHashMap;
+use crate::Utilities::RustcHash::FxHashMap;
 use std::collections::HashMap;
 use crate::Builtins::Resolver::builtin_call_resolver;
 pub struct QualifiedIdentifierResolver {

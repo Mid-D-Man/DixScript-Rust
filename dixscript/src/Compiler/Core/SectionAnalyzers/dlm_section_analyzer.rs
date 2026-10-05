@@ -5,7 +5,7 @@ use crate::Compiler::AST::{DLMSection, DLMModule, DLMModuleType, DLMModuleSubtyp
 use crate::Compiler::Utilities::SymbolTable;
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::ErrorManager::{ErrorManager, SemanticErrorType, DebugConfig};
-use rustc_hash::FxHashSet;
+use crate::Utilities::RustcHash::FxHashSet;
 use crate::Utilities::LazyStatic::lazy_static;
 
 use super::{SectionAnalysisResult, SemanticErrorInfo, SemanticWarningInfo};

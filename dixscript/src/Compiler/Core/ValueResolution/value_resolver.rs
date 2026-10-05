@@ -12,7 +12,7 @@ use std::rc::Rc;
 use web_time::Instant;
 
 use chrono::Utc;
-use rustc_hash::FxHashMap;
+use crate::Utilities::RustcHash::FxHashMap;
 
 use crate::Builtins::Core::{DixType, DixValue};
 use crate::Builtins::Resolver;

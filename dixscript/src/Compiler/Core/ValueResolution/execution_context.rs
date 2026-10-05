@@ -11,7 +11,7 @@ use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
-use rustc_hash::FxHashMap;
+use crate::Utilities::RustcHash::FxHashMap;
 
 use crate::Builtins::Core::DixValue;
 use super::supporting_classes::ExecutionError;

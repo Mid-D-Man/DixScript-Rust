@@ -8,7 +8,7 @@ use crate::Compiler::AST::{ImportsSection, ImportDeclaration};
 use crate::Compiler::Utilities::SymbolTable;
 use crate::Compiler::Core::OperationalSettings;
 use crate::ErrorManager::{ErrorManager, DebugConfig};
-use rustc_hash::FxHashSet;
+use crate::Utilities::RustcHash::FxHashSet;
 
 pub struct ImportsSectionAnalyzer<'a> {
     symbol_table:         &'a SymbolTable,

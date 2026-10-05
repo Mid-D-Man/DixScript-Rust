@@ -7,7 +7,7 @@ use crate::Compiler::Utilities::{SymbolTable, VariableInfo, PathBuilder};
 use crate::Compiler::Core::OperationalSettings;
 use crate::ErrorManager::{ErrorManager, DebugConfig};
 use crate::Utilities::Keywords;
-use rustc_hash::{FxHashMap, FxHashSet};
+use crate::Utilities::RustcHash::{FxHashMap, FxHashSet};
 use crate::Utilities::Base64::{Engine as _, general_purpose};
 use crate::Utilities::LazyStatic::lazy_static;
 use regex::Regex;

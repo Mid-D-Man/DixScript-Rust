@@ -15,7 +15,7 @@ use crate::Compiler::AST::{RawBlock, Position, Value};
 use crate::Compiler::Utilities::SymbolTable;
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::ErrorManager::{ErrorManager, SemanticErrorType, DebugConfig};
-use rustc_hash::FxHashMap;
+use crate::Utilities::RustcHash::FxHashMap;
 
 use super::{SectionAnalysisResult, SemanticErrorInfo, SemanticWarningInfo};
 

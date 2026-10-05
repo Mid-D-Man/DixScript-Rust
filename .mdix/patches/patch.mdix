@@ -1,12 +1,16 @@
 // =============================================================================
-// COMPRESSION MIGRATION + DATABASE VISIBILITY PATCH  ·  DixScript v1.0.0
+// RUSTC-HASH WIRING PATCH  ·  DixScript v1.0.0
 // =============================================================================
-// 1. bzip2 0.4 → 0.6       (pure Rust via libbz2-rs-sys, all targets)
-// 2. xz2   0.1 → xz 0.4   (pure Rust fork of liblzma, all targets)
-// 3. Both moved from target-conditional to regular [dependencies]
-// 4. cfg gates removed from bzip2_compressor.rs, lzma_compressor.rs, mod.rs
-// 5. mdix-python: database.rs fn data → pub(crate)
-// 6. mdix-python: Cargo.toml adds tempfile = "3"
+// Swaps `use rustc_hash::...` for the hand-rolled port at
+// `crate::Utilities::RustcHash` in the 13 files that import it. One identical
+// kind of edit across many files, so it is a patch rather than 13 re-shipped
+// files. Each anchor is a whole `use` line that occurs exactly once in its file.
+//
+// ORDER MATTERS: apply the replacements archive FIRST (it adds the RustcHash
+// module and makes it public), then run this patch. Several of these files are
+// also inside that archive, so do not leave the archive in .mdix/replacements/
+// afterwards: a later replacements run would re-extract the older copies over
+// the patched files. Set `delete_processed_archives` when applying it.
 // =============================================================================
 
 @CONFIG(
@@ -24,72 +28,88 @@
       content = _content
     }
   }
-
-  ~patch_replace_block<object>(_path, _start_anchor, _end_anchor, _content) {
-    return {
-      path         = _path
-      op           = "replace_block"
-      start_anchor = _start_anchor
-      end_anchor   = _end_anchor
-      content      = _content
-    }
-  }
 )
 
 @DATA(
-  description = "Compression migration: bzip2 0.4→0.6, xz2→xz 0.4, pure Rust everywhere"
+  description = "Wire in the hand-rolled rustc-hash port: 13 import lines"
 
   patch_files::
 
-    patch_replace_block(
-      "dixscript/Cargo.toml",
-      "[target.'cfg(not(target_arch = \"wasm32\"))'.dependencies]",
-      "xz2      = { version = \"0.1\", optional = true }",
-      "[target.'cfg(not(target_arch = \"wasm32\"))'.dependencies]"
+    patch_replace_text(
+      "dixscript/src/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs",
+      "use rustc_hash::{FxHashMap, FxHashSet};",
+      "use crate::Utilities::RustcHash::{FxHashMap, FxHashSet};"
     )
 
     patch_replace_text(
-      "dixscript/Cargo.toml",
-      "url         = \"2.5\"",
-      "url         = \"2.5\"\nbzip2       = { version = \"0.6\", optional = true }\nxz          = { version = \"0.4\", optional = true }"
+      "dixscript/src/Compiler/Core/SectionAnalyzers/dlm_section_analyzer.rs",
+      "use rustc_hash::FxHashSet;",
+      "use crate::Utilities::RustcHash::FxHashSet;"
     )
 
     patch_replace_text(
-      "dixscript/Cargo.toml",
-      "xz-support    = [\"dep:xz2\"]",
-      "xz-support    = [\"dep:xz\"]"
-    )
-
-    patch_replace_block(
-      "dixscript/src/Compiler/DLM/Compressor/mod.rs",
-      "//! Compressor — data compression modules.",
-      "pub use lzma_compressor::LzmaCompressor;",
-      "//! Compressor — data compression modules.\n//! All three compressors are pure Rust and build on every target:\n//! wasm32-unknown-unknown, wasm32-wasip2, Android, iOS, Windows.\n//!\n//! Gzip:  flate2 rust_backend (miniz_oxide) — always pure Rust.\n//! Bzip2: bzip2 0.6+ via libbz2-rs-sys      — pure Rust since June 2025.\n//! LZMA:  xz 0.4+ youknowone fork of liblzma — pure Rust, xz2-compat API.\n\nmod compressor_trait;\nmod gzip_compressor;\nmod bzip2_compressor;\nmod lzma_compressor;\n\npub use compressor_trait::{ICompressor, CompressorResult};\npub use gzip_compressor::{GzipCompressor, CompressionLevel};\npub use bzip2_compressor::Bzip2Compressor;\npub use lzma_compressor::LzmaCompressor;"
-    )
-
-    patch_replace_block(
-      "dixscript/src/Compiler/DLM/Compressor/bzip2_compressor.rs",
-      "//! BZIP2 compression implementation",
-      "#![cfg(not(target_arch = \"wasm32\"))]",
-      "//! BZIP2 compression implementation.\n//! Pure Rust since bzip2 0.6.0 (libbz2-rs-sys) — wasm32 and Android safe.\n//! Slower than Gzip with better ratio (good for medium to large payloads)."
-    )
-
-    patch_replace_block(
-      "dixscript/src/Compiler/DLM/Compressor/lzma_compressor.rs",
-      "//! LZMA compression implementation",
-      "use xz2::write::{XzEncoder, XzDecoder};",
-      "//! LZMA compression implementation.\n//! Pure Rust via xz 0.4+ (youknowone fork of liblzma) — wasm32 and Android safe.\n//! Slowest compression with the best ratio.\nuse super::compressor_trait::{ICompressor, CompressorResult};\nuse crate::Compiler::DLM::dlm_module_base::DLMModuleBase;\nuse crate::ErrorManager::{DlmErrorType, ErrorSeverity};\nuse xz::write::{XzEncoder, XzDecoder};"
+      "dixscript/src/Compiler/Core/SectionAnalyzers/enums_section_analyzer.rs",
+      "use rustc_hash::{FxHashSet, FxHashMap};",
+      "use crate::Utilities::RustcHash::{FxHashSet, FxHashMap};"
     )
 
     patch_replace_text(
-      "mdix-python/src/database.rs",
-      "fn data(&self) -> PyResult<&DixData>",
-      "pub(crate) fn data(&self) -> PyResult<&DixData>"
+      "dixscript/src/Compiler/Core/SectionAnalyzers/imports_section_analyzer.rs",
+      "use rustc_hash::FxHashSet;",
+      "use crate::Utilities::RustcHash::FxHashSet;"
     )
 
     patch_replace_text(
-      "mdix-python/Cargo.toml",
-      "pyo3       = { version = \"0.21\", features = [\"extension-module\", \"abi3-py38\"] }",
-      "pyo3       = { version = \"0.21\", features = [\"extension-module\", \"abi3-py38\"] }\ntempfile   = \"3\""
+      "dixscript/src/Compiler/Core/SectionAnalyzers/quickfuncs_section_analyzer.rs",
+      "use rustc_hash::{FxHashMap, FxHashSet};",
+      "use crate::Utilities::RustcHash::{FxHashMap, FxHashSet};"
+    )
+
+    patch_replace_text(
+      "dixscript/src/Compiler/Core/SectionAnalyzers/raw_section_analyzer.rs",
+      "use rustc_hash::FxHashMap;",
+      "use crate::Utilities::RustcHash::FxHashMap;"
+    )
+
+    patch_replace_text(
+      "dixscript/src/Compiler/Core/SectionAnalyzers/security_section_analyzer.rs",
+      "use rustc_hash::FxHashMap;",
+      "use crate::Utilities::RustcHash::FxHashMap;"
+    )
+
+    patch_replace_text(
+      "dixscript/src/Compiler/Core/SectionEnhancers/qualified_identifier_resolver.rs",
+      "use rustc_hash::FxHashMap;",
+      "use crate::Utilities::RustcHash::FxHashMap;"
+    )
+
+    patch_replace_text(
+      "dixscript/src/Compiler/Core/ValueResolution/ast_walker.rs",
+      "use rustc_hash::FxHashMap;",
+      "use crate::Utilities::RustcHash::FxHashMap;"
+    )
+
+    patch_replace_text(
+      "dixscript/src/Compiler/Core/ValueResolution/execution_context.rs",
+      "use rustc_hash::FxHashMap;",
+      "use crate::Utilities::RustcHash::FxHashMap;"
+    )
+
+    patch_replace_text(
+      "dixscript/src/Compiler/Core/ValueResolution/function_interpreter.rs",
+      "use rustc_hash::FxHashMap;",
+      "use crate::Utilities::RustcHash::FxHashMap;"
+    )
+
+    patch_replace_text(
+      "dixscript/src/Compiler/Core/ValueResolution/supporting_classes.rs",
+      "use rustc_hash::FxHashMap;",
+      "use crate::Utilities::RustcHash::FxHashMap;"
+    )
+
+    patch_replace_text(
+      "dixscript/src/Compiler/Core/ValueResolution/value_resolver.rs",
+      "use rustc_hash::FxHashMap;",
+      "use crate::Utilities::RustcHash::FxHashMap;"
     )
 )

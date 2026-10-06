@@ -52,6 +52,26 @@ namespace MidManStudio.Mdix.Unity.Editor
         private VisualElement? _tabExplorer;
         private VisualElement? _tabEditor;
         private VisualElement? _tabTemplates;
+        private Button?        _btnFoldAll;
+
+        // Explorer folding. The titles of collapsed sections are remembered across rebuilds,
+        // so the layout survives every recompile instead of snapping back open.
+        private readonly HashSet<string>       _foldedSections = new HashSet<string>();
+        private readonly List<ExplorerSection> _sections       = new List<ExplorerSection>();
+
+        private readonly struct ExplorerSection
+        {
+            public readonly string        Title;
+            public readonly Label         Header;
+            public readonly VisualElement Body;
+
+            public ExplorerSection(string title, Label header, VisualElement body)
+            {
+                Title  = title;
+                Header = header;
+                Body   = body;
+            }
+        }
 
         // ── Menu and entry points ─────────────────────────────────────────────
 
@@ -64,8 +84,10 @@ namespace MidManStudio.Mdix.Unity.Editor
             var lastPath = EditorPrefs.GetString(PrefKeyLastPath, string.Empty);
             if (!string.IsNullOrEmpty(lastPath))
             {
+                // The menu item only brings the window forward: it must never replace edits
+                // that haven't been saved.
                 var asset = AssetDatabase.LoadAssetAtPath<MdixAsset>(lastPath);
-                if (asset != null)
+                if (asset != null && !window._isDirty)
                     window.LoadAsset(asset);
             }
         }
@@ -74,7 +96,59 @@ namespace MidManStudio.Mdix.Unity.Editor
         {
             var window = GetWindow<MdixEditorWindow>("MDIX Studio");
             window.minSize = new Vector2(600, 480);
-            window.LoadAsset(asset);
+
+            if (window.ConfirmLeaveCurrentDocument(asset.ProjectRelativePath))
+                window.LoadAsset(asset);
+        }
+
+        /// <summary>
+        /// Double-clicking a .mdix asset opens it here (the README has always promised this).
+        /// Returns false for anything else, so Unity's normal handling is left alone.
+        /// </summary>
+        [UnityEditor.Callbacks.OnOpenAsset(1)]
+        public static bool OnOpenMdixAsset(int instanceID, int line)
+        {
+            var asset = EditorUtility.InstanceIDToObject(instanceID) as MdixAsset;
+            if (asset == null) return false;
+
+            OpenWithAsset(asset);
+            return true;
+        }
+
+        /// <summary>
+        /// True if it is fine to replace the document on screen with <paramref name="nextPath"/>.
+        /// Opening another file used to overwrite unsaved edits without a word.
+        /// </summary>
+        private bool ConfirmLeaveCurrentDocument(string nextPath)
+        {
+            if (!_isDirty) return true;
+
+            // Asked to open the file that is already open and edited: keep the edits, just show the window.
+            if (string.Equals(_currentPath, nextPath, StringComparison.Ordinal)) return false;
+
+            var scratch = string.IsNullOrEmpty(_currentPath);
+            var name    = scratch ? "Untitled" : Path.GetFileName(_currentPath);
+
+            var choice = EditorUtility.DisplayDialogComplex(
+                "Unsaved Changes",
+                $"'{name}' has unsaved changes. Save before opening '{Path.GetFileName(nextPath)}'?",
+                "Save", "Cancel", "Discard");
+
+            switch (choice)
+            {
+                case 0: // Save
+                    if (scratch)
+                        return PromptAndWriteNewFile() != null; // cancelled panel => stay put
+
+                    SaveSource();
+                    return !_isDirty;                           // a failed save => stay put
+
+                case 2: // Discard
+                    return true;
+
+                default: // Cancel
+                    return false;
+            }
         }
 
         // ── UIElements lifecycle ──────────────────────────────────────────────
@@ -127,14 +201,8 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             root.Q<Button>("btn-save")?.RegisterCallback<ClickEvent>(_ => SaveSource());
             root.Q<Button>("btn-compile")?.RegisterCallback<ClickEvent>(_ => Compile());
-            root.Q<Button>("btn-fold-all")?.RegisterCallback<ClickEvent>(_ =>
-            {
-                if (_activeTab == 1)
-                    EditorUtility.DisplayDialog(
-                        "Fold All",
-                        "Fold All is not yet implemented in this version.",
-                        "OK");
-            });
+            _btnFoldAll = root.Q<Button>("btn-fold-all");
+            _btnFoldAll?.RegisterCallback<ClickEvent>(_ => ToggleFoldAll());
 
             _codeField = new TextField
             {
@@ -189,6 +257,8 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             if (index == 0 && !string.IsNullOrEmpty(_sourceText))
                 RebuildExplorer();
+
+            RefreshFoldAllButton();
         }
 
         private static void SetTabActive(VisualElement? tab, bool active)
@@ -210,6 +280,10 @@ namespace MidManStudio.Mdix.Unity.Editor
 
         private void LoadAsset(MdixAsset asset)
         {
+            // A different file has different sections; don't carry the old fold state over.
+            if (!string.Equals(_currentPath, asset.ProjectRelativePath, StringComparison.Ordinal))
+                _foldedSections.Clear();
+
             _currentAsset = asset;
             _currentPath  = asset.ProjectRelativePath;
             _sourceText   = asset.RawSource;
@@ -256,7 +330,8 @@ namespace MidManStudio.Mdix.Unity.Editor
             if (_activeTab == 0)
                 RebuildExplorer(db);
 
-            _isDirty = false;
+            // Compiling only parses the text; it does not write it anywhere. It used to clear the
+            // dirty flag here, so edits that were merely compiled were dropped silently on close.
         }
 
         // ── Explorer ──────────────────────────────────────────────────────────
@@ -277,6 +352,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             if (_panelExplorer == null) return;
 
             _panelExplorer.Clear();
+            _sections.Clear();
 
             var scroll = new ScrollView(ScrollViewMode.Vertical) { style = { flexGrow = 1 } };
 
@@ -290,9 +366,11 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             if (flatKeys.Length > 0)
             {
-                scroll.Add(MakeSectionHeader("FLAT PROPERTIES"));
+                var flatBody = new VisualElement();
                 foreach (var key in flatKeys)
-                    scroll.Add(MakeKeyValueRow(db, key));
+                    flatBody.Add(MakeKeyValueRow(db, key));
+
+                AddSection(scroll, "FLAT PROPERTIES", flatBody);
             }
 
             foreach (var groupKey in groupKeys)
@@ -301,19 +379,94 @@ namespace MidManStudio.Mdix.Unity.Editor
 
                 if (valueType == MdixValueType.Array)
                 {
-                    scroll.Add(MakeSectionHeader($"ARRAY  —  {groupKey}"));
-                    scroll.Add(MakeArrayTable(db, groupKey));
+                    AddSection(scroll, $"ARRAY  —  {groupKey}", MakeArrayTable(db, groupKey));
                 }
                 else if (valueType == MdixValueType.Object)
                 {
-                    scroll.Add(MakeSectionHeader($"TABLE  —  {groupKey}"));
+                    var tableBody = new VisualElement();
                     var childKeys = db.GetKeys(groupKey).UnwrapOr(Array.Empty<string>());
                     foreach (var child in childKeys)
-                        scroll.Add(MakeKeyValueRow(db, $"{groupKey}.{child}", labelOverride: child));
+                        tableBody.Add(MakeKeyValueRow(db, $"{groupKey}.{child}", labelOverride: child));
+
+                    AddSection(scroll, $"TABLE  —  {groupKey}", tableBody);
                 }
             }
 
             _panelExplorer.Add(scroll);
+
+            RefreshFoldAllButton();
+        }
+
+        // ── Explorer folding ──────────────────────────────────────────────────
+
+        private void AddSection(VisualElement parent, string title, VisualElement body)
+        {
+            var header  = MakeSectionHeader(title);
+            var section = new ExplorerSection(title, header, body);
+            _sections.Add(section);
+
+            // The label that titles the section is also its fold handle.
+            header.RegisterCallback<ClickEvent>(_ =>
+            {
+                ToggleSection(section);
+                RefreshFoldAllButton();
+            });
+
+            ApplyFold(section, _foldedSections.Contains(title));
+
+            parent.Add(header);
+            parent.Add(body);
+        }
+
+        private static void ApplyFold(ExplorerSection section, bool folded)
+        {
+            section.Body.style.display = new StyleEnum<DisplayStyle>(
+                folded ? DisplayStyle.None : DisplayStyle.Flex);
+
+            section.Header.text = (folded ? "\u25B8  " : "\u25BE  ") + section.Title;
+        }
+
+        private void ToggleSection(ExplorerSection section)
+        {
+            // HashSet.Add is false when the title was already there, i.e. the section was folded.
+            var folded = _foldedSections.Add(section.Title);
+            if (!folded)
+                _foldedSections.Remove(section.Title);
+
+            ApplyFold(section, folded);
+        }
+
+        private void ToggleFoldAll()
+        {
+            if (_activeTab != 0 || _sections.Count == 0) return;
+
+            // Anything still open => fold everything; everything already folded => open everything.
+            var foldAll = _sections.Exists(s => !_foldedSections.Contains(s.Title));
+
+            foreach (var section in _sections)
+            {
+                if (foldAll) _foldedSections.Add(section.Title);
+                else         _foldedSections.Remove(section.Title);
+
+                ApplyFold(section, foldAll);
+            }
+
+            RefreshFoldAllButton();
+        }
+
+        private void RefreshFoldAllButton()
+        {
+            if (_btnFoldAll == null) return;
+
+            // Folding only means something in the Explorer; the Editor tab is one plain text field.
+            _btnFoldAll.style.display = new StyleEnum<DisplayStyle>(
+                _activeTab == 0 ? DisplayStyle.Flex : DisplayStyle.None);
+
+            var allFolded = _sections.Count > 0 &&
+                            !_sections.Exists(s => !_foldedSections.Contains(s.Title));
+
+            _btnFoldAll.text = allFolded ? "Unfold All" : "Fold All";
+            _btnFoldAll.SetEnabled(_sections.Count > 0);
         }
 
         private static Label MakeSectionHeader(string text)
@@ -621,7 +774,15 @@ namespace MidManStudio.Mdix.Unity.Editor
 
         private void SaveSource()
         {
-            if (string.IsNullOrEmpty(_currentPath)) return;
+            // A scratch document (typed straight into the Editor tab) has no file yet: Save As.
+            if (string.IsNullOrEmpty(_currentPath))
+            {
+                var newPath = PromptAndWriteNewFile();
+                if (newPath != null)
+                    AdoptSavedPath(newPath);
+
+                return;
+            }
 
             try
             {
@@ -634,6 +795,49 @@ namespace MidManStudio.Mdix.Unity.Editor
             {
                 SetStatus($"✗  Save failed: {ex.Message}", error: true);
             }
+        }
+
+        /// <summary>
+        /// Asks where an unsaved (scratch) document should live and writes it there. Returns the
+        /// project-relative path, or null if the person cancelled or the write failed. Leaves the
+        /// window's own state alone, so it is also safe to call while the window is closing.
+        /// </summary>
+        private string? PromptAndWriteNewFile()
+        {
+            var path = EditorUtility.SaveFilePanelInProject(
+                "Save MDIX file", "untitled", "mdix",
+                "Choose where to save this .mdix file inside the project.");
+
+            if (string.IsNullOrEmpty(path)) return null; // cancelled
+
+            try
+            {
+                File.WriteAllText(path, _sourceText);
+                AssetDatabase.ImportAsset(path);
+                return path;
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"✗  Save failed: {ex.Message}", error: true);
+                return null;
+            }
+        }
+
+        /// <summary>Points the window at the file a scratch document was just saved as.</summary>
+        private void AdoptSavedPath(string path)
+        {
+            _currentAsset = AssetDatabase.LoadAssetAtPath<MdixAsset>(path);
+            _currentPath  = path;
+            _isDirty      = false;
+
+            if (_fileLabel != null)
+                _fileLabel.text = Path.GetFileName(path);
+
+            EditorPrefs.SetString(PrefKeyLastPath, path);
+
+            Compile();                  // refreshes the status bar (file name included) and the Explorer
+            NotifyLspDocumentOpened();  // the server drops the untitled document and opens this file
+            SetStatus("✓  Saved", error: false);
         }
 
         // ── Status helpers ────────────────────────────────────────────────────
@@ -681,12 +885,25 @@ namespace MidManStudio.Mdix.Unity.Editor
         {
             if (_isDirty)
             {
+                var scratch = string.IsNullOrEmpty(_currentPath);
+                var name    = scratch ? "Untitled" : Path.GetFileName(_currentPath);
+
                 if (EditorUtility.DisplayDialog(
                     "Unsaved Changes",
-                    $"'{Path.GetFileName(_currentPath)}' has unsaved changes. Save before closing?",
+                    $"'{name}' has unsaved changes. Save before closing?",
                     "Save", "Discard"))
                 {
-                    SaveSource();
+                    if (scratch)
+                    {
+                        // Only write the file: the window is going away, so don't rebind its UI.
+                        var saved = PromptAndWriteNewFile();
+                        if (saved != null)
+                            EditorPrefs.SetString(PrefKeyLastPath, saved);
+                    }
+                    else
+                    {
+                        SaveSource();
+                    }
                 }
             }
 

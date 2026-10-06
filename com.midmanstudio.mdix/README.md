@@ -4,7 +4,7 @@
 More powerful than PlayerPrefs. Lighter than SQLite.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Unity 2023.1+](https://img.shields.io/badge/Unity-2023.1%2B-black)](https://unity.com/)
+[![Unity 2022.3+](https://img.shields.io/badge/Unity-2022.3%2B-black)](https://unity.com/)
 
 ---
 
@@ -199,12 +199,34 @@ public class Spawner : MonoBehaviour
 
 ## MDIX Studio
 
-Open via **Window → MDIX Studio** or double-click any `.mdix` asset.
+Open via **MidManStudio → MDIX Studio**, double-click any `.mdix` asset, or right-click one and
+choose **MDIX → Open in MDIX Studio**.
 
 - **Explorer tab** — compiled data viewer. Flat properties shown as
   key-value rows. Arrays shown as Supabase-style tables with typed columns.
-- **Editor tab** — source text editor with live compile status.
+  Click a section header to fold it; **Fold All** / **Unfold All** does every section at once.
+- **Editor tab** — source text editor with live compile status, syntax highlighting and
+  language-server features (diagnostics, completion, hover — see below). **Save** on an
+  unsaved scratch document asks where to put it.
 - **Templates tab** — create new files from built-in templates.
+
+### Language server
+
+The Editor tab talks to `mdix-lsp`, which ships inside the package (`Editor/Bin/<platform>/`), so
+there is nothing to install.
+
+| Feature | How it works |
+|---|---|
+| Diagnostics | Problem underlines appear after a short typing pause; click a row in the problems list to jump to that line |
+| Completion | Opens on `@ . < ~ { ( [`; **Ctrl+Space** (or **Cmd/Ctrl+I**) opens it on demand. Up/Down/PageUp/PageDown to choose, **Enter** or **Tab** to accept, **Esc** to dismiss |
+| Snippets | After accepting one, **Tab** / **Shift+Tab** move between its placeholders; **Esc** ends it |
+| Hover | Leave the caret still for a moment and the docs for the symbol under it appear |
+| Highlighting | Toggle under **MidManStudio → MDIX Language Server → Syntax Highlighting** |
+
+The Editor tab shows the server's state (starting, ready, how many problems, or the error). The
+**MidManStudio → MDIX Language Server** menu also has **Restart**, **Verbose Server Log** and
+**Set Server Path...**. The server is looked up in this order: the path set from that menu, the
+`MDIX_LSP_PATH` environment variable, the bundled binary, then your `PATH`.
 
 ---
 

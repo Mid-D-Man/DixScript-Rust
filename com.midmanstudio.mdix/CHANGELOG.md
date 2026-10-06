@@ -3,6 +3,53 @@
 All notable changes to the MDIX Unity package are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+
+- MDIX Studio language-server support, powered by the bundled `mdix-lsp`
+  (`Editor/Bin/<platform>/`). In the Editor tab:
+  - Live diagnostics: problem underlines after a short typing pause, and a
+    problems list whose rows jump to the line.
+  - Completion: opens on `@ . < ~ { ( [`, or on demand with Ctrl+Space
+    (Cmd/Ctrl+I as an alternative). Up/Down/PageUp/PageDown to move, Enter or
+    Tab to accept, Esc to dismiss. Snippet completions expand with their
+    placeholders selected; Tab / Shift+Tab move between them.
+  - Hover documentation for the symbol at the caret after a short pause.
+  - A status line showing the real server state (starting, ready, number of
+    problems, or the error).
+  - Unsaved scratch documents are known to the server too (opened under an
+    `untitled:` URI).
+- Syntax highlighting in the Editor tab.
+- **MidManStudio → MDIX Language Server** menu: Syntax Highlighting,
+  Verbose Server Log, Restart, Set Server Path.... The server is looked up in
+  this order: the path set from that menu, the `MDIX_LSP_PATH` environment
+  variable, the binary bundled with the package, then `PATH`.
+- Double-clicking a `.mdix` asset opens it in MDIX Studio.
+- Explorer sections fold and unfold: click a section header, or use
+  Fold All / Unfold All.
+- **Save** on an unsaved scratch document now asks where to save it.
+
+### Fixed
+
+- The **Open in MDIX Studio** and **Generate ScriptableObject** buttons in the
+  `.mdix` asset Inspector did nothing: the importer's read-only asset made
+  Unity draw the Inspector disabled.
+- Opening a file no longer marks it as modified, and the Editor tab is filled
+  in when the window opens before its UI exists.
+- Opening another file now asks first when there are unsaved edits, and
+  choosing **MidManStudio → MDIX Studio** again no longer replaces them.
+- **Compile** no longer marks the document as saved, so edits that were only
+  compiled are not dropped silently when the window closes.
+- Closing the window with an unsaved scratch document offered to save it and
+  then silently discarded it.
+- Added the missing `.meta` files for the `Highlight/` folder, the new scripts
+  under `Highlight/` and `Lsp/`, and the `Editor/Bin/<platform>/` folders. A
+  git-URL install ignores assets that have no `.meta`.
+- Documentation: the Studio menu is **MidManStudio → MDIX Studio** (not
+  Window), and the minimum Unity version is 2022.3, as `package.json` says
+  (the README badge and the 1.0.0 note below said 2023.1).
+
 ## [1.0.0] — 2026-03-15
 
 ### Added

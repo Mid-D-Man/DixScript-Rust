@@ -1,12 +1,17 @@
 @CONFIG(
   version    -> "1.0.0"
-  features   -> "data"
+  features   -> "quickfuncs,data"
   debug_mode -> "off"
 )
 
+@QUICKFUNCS(
+  ~target<object>(name, path) { return { name = name, path = path } }
+)
+
 @DATA(
-  // Every archive member path mirrors its real repo path, so each one is
-  // resolved as a nested file (direct path under target_root) and none is
-  // ever matched by basename.
-  target_root = "."
+  target_root = "com.midmanstudio.mdix/Editor"
+
+  overrides::
+    target("README.md",    "com.midmanstudio.mdix/README.md")
+    target("CHANGELOG.md", "com.midmanstudio.mdix/CHANGELOG.md")
 )

@@ -6,6 +6,7 @@
 use std::time::Duration;
 use crate::ErrorManager::ErrorManager;
 use super::cloud_storage_provider::{CloudStorageProvider, CloudStorageError};
+use crate::Utilities::AsyncTrait::BoxFuture;
 
 const TIMEOUT_SECONDS: u64 = 60;
 const MAX_RETRIES: usize = 3;
@@ -78,9 +79,17 @@ impl HttpCloudProvider {
     }
 }
 
-#[async_trait::async_trait]
 impl CloudStorageProvider for HttpCloudProvider {
-    async fn download_file_async(&self, cloud_url: &str) -> Result<String, CloudStorageError> {
+    fn download_file_async<'life0, 'life1, 'async_trait>(
+        &'life0 self,
+        cloud_url: &'life1 str,
+    ) -> BoxFuture<'async_trait, Result<String, CloudStorageError>>
+    where
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        Self: 'async_trait,
+    {
+        Box::pin(async move {
         if !cloud_url.starts_with("https://") && !cloud_url.starts_with("http://") {
             return Err(CloudStorageError::InvalidUrl {
                 url: cloud_url.to_string(),
@@ -197,9 +206,19 @@ impl CloudStorageProvider for HttpCloudProvider {
                 }
             }
         }
+        })
     }
 
-    async fn file_exists_async(&self, cloud_url: &str) -> Result<bool, CloudStorageError> {
+    fn file_exists_async<'life0, 'life1, 'async_trait>(
+        &'life0 self,
+        cloud_url: &'life1 str,
+    ) -> BoxFuture<'async_trait, Result<bool, CloudStorageError>>
+    where
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        Self: 'async_trait,
+    {
+        Box::pin(async move {
         let processed_url = Self::process_dropbox_url(cloud_url);
         match self.client.head(&processed_url).send().await {
             Ok(response) => Ok(response.status().is_success()),
@@ -211,5 +230,6 @@ impl CloudStorageProvider for HttpCloudProvider {
                 Ok(false)
             }
         }
+        })
     }
 }

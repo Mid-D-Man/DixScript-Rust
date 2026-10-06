@@ -35,7 +35,6 @@ chrono     = { version = "0.4", features = ["serde", "wasmbind"] }
 # on native, Performance.now() (via js-sys) on wasm32. Duration is untouched —
 # only Instant needed swapping. See the 8 `use web_time::Instant;` call sites.
 web-time   = "1.1"
-bitflags   = "2.4"
 
 serde      = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -51,13 +50,13 @@ toml       = "0.8"
 phf         = { version = "0.11", features = ["macros"] }
 memchr      = "2.7"
 regex       = "1.10"
-rustc-hash  = "2.0"
 # itertools, unicase: removed -- grepped for real call sites across src/
 # before cutting either; both were zero.
 #
-# base64, hex, hostname, lazy_static, uuid: no longer runtime dependencies --
-# replaced by the hand-rolled modules under src/Utilities/ (see
-# docs/dixscript/utilities.md). base64, hex, hostname and uuid are kept as
+# async-trait, base64, bitflags, hex, hostname, lazy_static, rustc-hash, uuid:
+# no longer runtime dependencies -- replaced by the hand-rolled modules under
+# src/Utilities/ (see docs/dixscript/utilities.md). All of them except
+# lazy_static are kept as
 # DEV-dependencies below on purpose: the replacements' differential tests call
 # them as oracles (`::base64`, `::hex`, ...), so they keep guarding the
 # replacements. lazy_static has no oracle test and is gone entirely.
@@ -80,7 +79,6 @@ argon2           = "0.5"
 # claimed, since `reqwest` genuinely IS `optional = true`. Left both as-is
 # rather than fix the gating and swap the type in the same pass; real
 # candidate for the DLM feature-gating sweep, not bundled in here.
-async-trait = "0.1"
 url         = "2.5"
 
 # --- Compression backends ──────────────────────────────────────────────────────────
@@ -127,11 +125,15 @@ web-sys   = { version = "0.3", features = ["Window", "Storage"] }
 # --target wasm32-unknown-unknown` check.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion  = { version = "0.5", features = ["html_reports"] }
-# Oracles for the differential tests in src/Utilities/{Base64,Hex,Hostname,Uuid}.
+# Oracles for the differential tests in
+# src/Utilities/{AsyncTrait,Base64,Bitflags,Hex,Hostname,RustcHash,Uuid}.
 # Test-only: nothing in src/ outside #[cfg(test)] may name these crates.
+async-trait = "0.1"
 base64     = "0.21"
+bitflags   = "2.4"
 hex        = "0.4"
 hostname   = "0.3"
+rustc-hash = "2.0"
 uuid       = "1.0"
 tempfile   = "3.10"
 bincode    = "1.3"

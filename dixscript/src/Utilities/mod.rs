@@ -8,8 +8,9 @@ pub mod ast_debug_printer;
 pub mod token_debug_printer;
 
 // ── Hand-rolled replacements for external crates (dependency reduction) ──
-// `pub(crate)` on purpose -- these replace dependencies, they are not part of
-// this crate's public API, and none is re-exported below. See
+// Base64, Hex, Hostname, LazyStatic and Uuid are `pub(crate)` on purpose --
+// they replace dependencies that never reach this crate's public API. The
+// three that do (AsyncTrait, Bitflags, RustcHash) are `pub` further down. See
 // docs/dixscript/utilities.md.
 //
 // WIRED IN (call sites now use these, the external crates are gone from
@@ -27,17 +28,17 @@ pub(crate) mod LazyStatic;
 #[allow(dead_code, unused_imports)]
 pub(crate) mod Uuid;
 
-// NOT WIRED IN, pending a decision on public API (see the "Decisions the
-// wiring pass needs" section of the doc above): `rustc-hash`, `bitflags` and
-// `async-trait` all appear in this published crate's public signatures, so
-// swapping them is not a pure internal change. Nothing calls these yet, hence
-// the broader allow. Remove it if/when they are wired in.
+// WIRED IN, and `pub` on purpose: `rustc-hash`, `bitflags` and `async-trait`
+// all appear in this published crate's public signatures (`FxHashMap` fields
+// and return types, `SectionFlags`, the `CloudStorageProvider` trait), so the
+// replacement types have to be nameable from outside. The `allow`s cover the
+// parts of each port that this crate does not itself call.
 #[allow(dead_code, unused_imports, unused_macros)]
-pub(crate) mod AsyncTrait;
+pub mod AsyncTrait;
 #[allow(dead_code, unused_imports, unused_macros)]
-pub(crate) mod Bitflags;
+pub mod Bitflags;
 #[allow(dead_code, unused_imports, unused_macros)]
-pub(crate) mod RustcHash;
+pub mod RustcHash;
 
 // Test-only helper for the differential tests in the modules above.
 #[cfg(test)]

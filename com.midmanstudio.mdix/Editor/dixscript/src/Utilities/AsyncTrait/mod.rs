@@ -1,15 +1,14 @@
 // ============================================================================
 // NOTICE: Full documentation, design decisions, and fix history for this file
-// live in docs/dixscript/utilities.md, section "Utilities/AsyncTrait/boxed_future.rs"
+// live in docs/dixscript/utilities.md, section "Utilities/AsyncTrait"
 // ============================================================================
-//! Replacement for the `async-trait` attribute macro: a `BoxFuture` alias and a
-//! recipe that reproduces the macro's expansion exactly. See `boxed_future.rs`;
-//! see `docs/dixscript/utilities.md` for the dependency-reduction pass this is
+//! Replacement for the `async-trait` attribute macro: a `BoxFuture` alias and
+//! a hand-desugaring recipe. See `boxed_future.rs`; see
+//! `docs/dixscript/utilities.md` for the dependency-reduction pass this is
 //! part of.
 //!
-//! Public (`dixscript::Utilities::AsyncTrait`), unlike most replacement modules:
-//! `CloudStorageProvider` is a public trait and its methods' signatures name
-//! `BoxFuture`, so the alias must be nameable by implementors.
+//! `pub`: the `CloudStorageProvider` trait is part of this crate's public API
+//! and its methods return [`BoxFuture`].
 
 pub mod boxed_future;
 pub use boxed_future::BoxFuture;

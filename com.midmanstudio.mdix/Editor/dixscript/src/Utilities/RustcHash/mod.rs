@@ -4,25 +4,23 @@
 // ============================================================================
 //! Hand-rolled replacement for the `rustc-hash` crate.
 //!
-//! The default exports (`FxHasher`, `FxBuildHasher`, `FxHashMap`, `FxHashSet`)
-//! come from `rustc_hash_v2.rs`, a port of `rustc-hash` 2.1.1 -- the version this
-//! crate actually used -- so swapping it in changed neither hash values, nor
-//! `HashMap` iteration order, nor speed.
+//! The default exports (`FxHasher`, `FxBuildHasher`, `FxHashMap`,
+//! `FxHashSet`) come from `rustc_hash_v2.rs`, a port of `rustc-hash` 2.1.1 --
+//! the version this crate actually uses -- so swapping it in changes neither
+//! hash values, nor `HashMap` iteration order, nor speed.
 //!
 //! `classic` is the FxHash copied from `mid-engine` (`fx_hash.rs`). It is a
 //! different, older, slower-on-strings algorithm and is deliberately not the
-//! default; see the header of `fx_hash.rs` for the measurements. To flip the
-//! default to the classic one, change the `pub use` below to `fx_hash::{..}`.
+//! default; see the header of `fx_hash.rs` for the measurements.
 //!
-//! **Public**, unlike most replacement modules: 11 items in this crate's public
-//! API (`ExecutionContext::variables`, `FunctionInterpreter::new`/`execute`,
-//! `DataSectionAnalyzer::get_indexes`, ...) take or return `FxHashMap<String, _>`,
-//! so these types must be nameable by callers. That is a deliberate, approved
-//! change to those signatures: a caller that built a `rustc_hash::FxHashMap` to
-//! pass in must now build `dixscript::Utilities::RustcHash::FxHashMap` (same
-//! `HashMap<_, _, _>` shape, different hasher type).
+//! To flip the default to the classic one, change the `pub(crate) use` below
+//! to `fx_hash::{..}`. Nothing else needs to change.
+//!
+//! The default exports are `pub`: several `FxHashMap<String, DixValue>` types
+//! appear in this crate's PUBLIC signatures (see docs/dixscript/utilities.md),
+//! so callers must be able to name the hasher. The `classic` variant stays
+//! crate-private.
 
-// Kept on purpose (it is the copy from mid-engine) but unused by default, so it would warn.
 #[allow(dead_code)]
 pub(crate) mod fx_hash;
 pub mod rustc_hash_v2;

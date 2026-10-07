@@ -2,24 +2,38 @@
 // NOTICE: Full documentation, design decisions, and fix history for this file
 // live in docs/dixscript/utilities.md, section "Utilities/Bitflags"
 // ============================================================================
-//! Port of the `bitflags` crate (2.10.0), `MIT OR Apache-2.0`. See
-//! `bitflags_macro.rs` for what the macro generates and `docs/dixscript/
-//! utilities.md` for the dependency-reduction pass this is part of.
+//! Hand-rolled replacement for the `bitflags` crate (2.x), ported from the
+//! real 2.10.0 source rather than re-derived from its documentation.
 //!
-//! Unlike the other replacement modules, this one is **public**
-//! (`dixscript::Utilities::Bitflags`): `SectionFlags` is a public type, and the
-//! generated type's public methods return `Iter` / `IterNames` and implement
-//! `Flags`, so those names must be reachable for the public API to be
-//! nameable, exactly as with the real crate.
+//! The one place this crate uses it is `SectionFlags` in
+//! `Compiler/Core/BinarySerialization/binary_format.rs`. That type is public,
+//! so it has to keep the real crate's full public shape: the generated
+//! methods and operators, the `Flags` trait impl, `iter()` / `iter_names()`,
+//! `from_name()`, the text format (`Debug` prints `SectionFlags(CONFIG | DATA)`)
+//! and the two-layer type (a public wrapper over a hidden internal bitflags
+//! type). This module is therefore `pub`; the `bitflags!` macro itself stays
+//! crate-private.
+//!
+//! Not ported: serde / arbitrary / bytemuck glue (`external`), the
+//! `bitflags_match!` macro, and the deprecated `BitFlags` trait.
+
+pub use traits::{Bits, Flag, Flags};
 
 pub mod iter;
 pub mod parser;
-pub mod traits;
+mod traits;
+
+#[doc(hidden)]
+pub mod __private {
+    pub use super::traits::__private::*;
+    pub use core;
+}
 
 mod bitflags_macro;
-
-pub(crate) use bitflags_macro::{__impl_flags_public_traits, bitflags};
-pub use traits::{Bits, Flag, Flags, Primitive, PublicFlags};
+#[allow(unused_imports)]
+pub(crate) use bitflags_macro::*;
 
 #[cfg(test)]
-mod tests;
+mod differential_tests;
+#[cfg(test)]
+mod upstream_tests;

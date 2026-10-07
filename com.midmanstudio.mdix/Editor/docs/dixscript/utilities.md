@@ -9,18 +9,13 @@ not yet documented rather than undocumented on purpose.
 ## Overview
 
 Goal: shrink the core crate's `[dependencies]` by removing anything dead and
-hand-rolling everything small enough to own. The plan was to hand-roll them all and
-stick to it; the work was done in three stages -- build each replacement in
-isolation and test it against the real crate, wire the internal-only ones in, then
-wire in the three that change public API. All eight are now wired in. Dev-dependencies
-(`criterion`, `tempfile`, `bincode`, `rmp-serde`, `postcard`, `ciborium`, `bumpalo`)
-were out of scope.
+hand-rolling anything small enough to own. Dev-dependencies (`criterion`,
+`tempfile`, `bincode`, `rmp-serde`, `postcard`, `ciborium`, `bumpalo`) are out
+of scope.
 
-Every decision below came from reading real call sites and, where a replacement was
-built, from testing it against the exact locked version of the crate it replaces.
-For the three largest ports (`bitflags`, `rustc-hash`, `async-trait`) the real
-upstream source was read and followed, not approximated. Counts are from a scripted
-scan of `dixscript/src`.
+Every decision below came from reading real call sites and, where a
+replacement was built, from testing it against the exact locked version of the
+crate it replaces. Counts are from a scripted scan of `dixscript/src`.
 
 | Crate | Real usage | Public API? | Status |
 |---|---|---|---|
@@ -29,26 +24,30 @@ scan of `dixscript/src`.
 | `serde` | `#[derive(Serialize)]` on `DixValue`; 5 sibling binding crates serialize `&DixValue` through it | yes | **Kept** — first judged removable, wrongly |
 | `hex` | 2 call sites (`hex::encode(sha256)`) | no | **Wired in** |
 | `lazy_static` | 18 `static ref` items in 6 blocks / 6 files | no | **Wired in** |
+| `bitflags` | 1 invocation (`SectionFlags`) | **yes** | **Wired in** — faithful port of 2.10.0 |
+| `rustc-hash` | 188 mentions of `FxHashMap`/`FxHashSet`, 13 files | **yes (11 items)** | **Wired in** — port of 2.1.1, 13 imports via the scaffold patch |
 | `base64` | 35 calls, 11 files, `general_purpose::STANDARD` only | no | **Wired in** |
 | `uuid` | 13 call sites, 4 files (`new_v4`, `parse_str`, `nil`, `from_bytes`) | no | **Wired in** |
 | `hostname` | 1 call site, diagnostics only | no | **Wired in** (best-effort, see its section) |
-| `bitflags` | 1 invocation (`SectionFlags`) | **yes** | **Wired in** — full port of 2.10.0 |
-| `rustc-hash` | 188 mentions of `FxHashMap`/`FxHashSet`, 13 files | **yes (11 items)** | **Wired in** — port of 2.1.1; the 11 items' types changed (approved) |
-| `async-trait` | 2 attribute sites on the `CloudStorageProvider` trait | **yes** | **Wired in** — hand-expanded to the macro's exact signature; implementors unaffected (verified) |
-| `url` | 1 call site | no | **Kept for now** — see Open items |
+| `async-trait` | 2 attribute sites on the `CloudStorageProvider` trait | **yes** | **Wired in** — hand-desugared to the macro's exact expansion |
+| `url` | 1 call site | no | **Removed** — hand-rolled `Utilities/Url`, `url` kept as a test oracle |
 
-"Public API?" means the crate's own types appear in a signature or field of something
-reachable from outside the crate. For the three rows marked **yes** the replacement
-module is itself `pub` (`dixscript::Utilities::{Bitflags, RustcHash, AsyncTrait}`) so
-the types stay nameable by callers, exactly as the real crates' types were.
+"Public API?" means the crate's own types appear in a signature or field of
+something reachable from outside the crate. That column decided how the wiring-in
+was staged: the five rows marked **no** were wired in first; the three rows
+marked **yes** change what downstream users of the published crate see, so they
+were held back until the decision was made. It was: **hand-roll every crate on
+the list and stick to the plan** — so all eight are now wired in, and the three
+public-API ones are `pub` modules whose ports reproduce the real crates' exact
+public shape (see each module's section and "Decisions").
 
 Kept on purpose, with the reason, so nobody re-litigates it:
 
-- `regex` — 22 files, includes a user-facing `Regex` value type. Rust's standard library has no regex engine, so there is no native alternative; hand-rolling one is a project in itself. Staying.
+- `regex` — 22 files, includes a user-facing `Regex` value type. Not hand-rollable.
 - `serde` — `DixValue`'s derived `Serialize` is the JSON escape hatch for
   `mdix-ffi` (`mdix_get_json`), `mdix-wasm` (`getJson`), `mdix-lua`
   (`get_json`), `mdix-python` and `mdix-java`.
-- `serde_json`, `toml` — real *parsing* for JSON/TOML import, not just writing. Not replaced; the plan is to **feature-gate** JSON and TOML support in the feature-gating pass instead, so a build that doesn't need the converters doesn't carry them.
+- `serde_json`, `toml` — real *parsing* for JSON/TOML import, not just writing.
 - `phf`, `memchr` — lexer hot path; hand-rolling risks a throughput regression
   the bench suite would only catch after the fact.
 - `sha2`, `aes-gcm`, `chacha20poly1305`, `argon2` — cryptographic primitives.
@@ -67,31 +66,32 @@ Kept on purpose, with the reason, so nobody re-litigates it:
   crate they replace (`Hex`, `Base64`, `Uuid`, ...); files inside are
   snake_case. This matches the rest of the crate (`Compiler/DLM/Auditor/`,
   `Compiler/Core/SectionParsers/`, `Builtins/Static/`).
-- **Visibility:** five modules (`Base64`, `Hex`, `Hostname`, `LazyStatic`, `Uuid`) are
-  `pub(crate)`: they replace dependencies and are not part of the public API. Three
-  (`Bitflags`, `RustcHash`, `AsyncTrait`) are `pub`, because this crate's public API
-  names their types. None is re-exported through `Utilities/mod.rs`'s `pub use` list.
+- **Visibility:** the five internal-only modules (`Base64`, `Hex`, `Hostname`,
+  `LazyStatic`, `Uuid`) are `pub(crate)` and not re-exported. The three whose
+  types reach this crate's public API (`AsyncTrait`, `Bitflags`, `RustcHash`)
+  are `pub mod`, because downstream code must be able to name `FxHashMap`,
+  `SectionFlags`'s `Flags` impl and `BoxFuture`. The `bitflags!` macro and its
+  helper macros stay crate-private.
 - **Drop-in surface:** each module reproduces the *call-site syntax* of the crate
   it replaces where it can (same macro grammar, type names, function names,
   `Engine` trait and `general_purpose::STANDARD`), so wiring in was one `use`
   line (or one inline path) per site. `AsyncTrait` is the exception: it is a
-  recipe applied by hand at three sites, and has not been applied.
+  recipe applied by hand at the two sites (the trait and its one impl).
 - **Differential tests, and the real crates as oracles.** Each module that
   replaces a crate with checkable behavior has tests that run the same inputs
   through both and require identical results. They call the real crate as
   `::name` (leading `::` forces the extern crate, since a same-named local
   module exists). When a crate is dropped from `[dependencies]`, **move it to
   `[dev-dependencies]` instead of deleting it** — the tests then keep guarding
-  the replacement for good. That is what was done for `base64`, `hex`,
-  `hostname` and `uuid`, all under
-  `[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]` (`hostname` was
-  already a non-wasm dependency). `lazy_static` has no oracle test and was
-  removed outright.
-- **`allow(...)` on the module lines in `Utilities/mod.rs`.** The five `pub(crate)`
-  modules keep `allow(dead_code, unused_imports)` because each deliberately offers a
-  little more than the crate calls (`Hex::decode`, extra re-exports). The three `pub`
-  modules need none. Elsewhere lints are narrowed to the specific item (the classic
-  hasher, the never-read `ParseError` payloads, every `lazy_static` static).
+  the replacement for good. That is what was done for `async-trait`, `base64`,
+  `bitflags`, `hex`, `hostname`, `rustc-hash` and `uuid`; `hostname` and `uuid`
+  sit under `[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]`.
+  `lazy_static` has no oracle test and was removed outright.
+- **`allow(...)` on the module lines in `Utilities/mod.rs`.** The five internal
+  modules keep `allow(dead_code, unused_imports)` because each deliberately
+  offers a little more than the crate calls (`Hex::decode`, extra re-exports).
+  The three public ones keep `allow(dead_code, unused_imports, unused_macros)`:
+  the ports reproduce whole upstream APIs, most of which this crate never calls.
 
 ## Modules
 
@@ -108,63 +108,49 @@ Kept on purpose, with the reason, so nobody re-litigates it:
 - Differential tests against `hex` 0.4: encode on random bytes; decode on
   random valid and damaged strings (accept/reject and bytes).
 
-### `Utilities/Bitflags/`
+### `Utilities/Bitflags` — a port of `bitflags` 2.10.0
 
-A port of `bitflags` **2.10.0** (the locked version), `MIT OR Apache-2.0`, written from
-upstream's `traits.rs`, `iter.rs`, `parser.rs`, `public.rs`, `internal.rs` and the
-`bitflags!` macro. Files: `traits.rs` (`Flag`, `Flags`, `Bits`, `Primitive`,
-`PublicFlags`), `iter.rs` (`Iter`, `IterNames`, `IterDefinedNames`), `parser.rs`
-(`to_writer`, `from_str` and the strict/truncate variants, `ParseError`),
-`bitflags_macro.rs`, and `tests.rs`. Each file carries an attribution header.
+`bitflags_macro.rs` (the `bitflags!` macro and the helper macros it expands to),
+`traits.rs` (`Flags`, `Flag`, `Bits`, `Primitive`, `PublicFlags`), `iter.rs`
+(`Iter`, `IterNames`, `IterDefinedNames`), `parser.rs` (the text format).
+`mod.rs` is `pub`; the macro itself is `pub(crate)` (only `SectionFlags`, in
+`binary_format.rs`, invokes it).
 
-**A first draft was wrong, and was replaced.** The first version was a trimmed macro
-covering only what `SectionFlags` called inside the crate, then extended with the set
-algebra. It still printed `SectionFlags(5)` for a derived `Debug`, where the real crate
-prints `SectionFlags(CONFIG | DATA)`, and it lacked `iter()`, `from_name()`, the
-`Flags` trait and the formatting traits. Reading the real source showed why:
-upstream's public type is a *wrapper around a hidden `InternalBitFlags`*, and a derived
-`Debug` on the wrapper delegates to the hidden type's hand-written `Debug`. That
-two-layer shape is now reproduced, and with it the exact text form.
+**Why a port and not a re-derivation.** `SectionFlags` is a public type used in
+public signatures (`BinaryHeader::add_section`, `has_section`, the public field
+`BinaryHeader::flags`). The real macro generates a two-layer type — a public
+tuple struct wrapping a hidden `InternalBitFlags` — and implements `Flags`,
+`Debug` (printing names), `Display`, `FromStr`, `Binary`/`Octal`/`LowerHex`/
+`UpperHex`, `Extend`, `FromIterator`, `IntoIterator`, every set operator, and a
+const-fn surface. An earlier draft of this module was a trimmed macro written
+from the documentation; it printed `SectionFlags(5)` where the real crate prints
+`SectionFlags(CONFIG | DATA)`, and lacked `iter()`, `from_name()` and the `Flags`
+trait. It was replaced, not patched: the real upstream source was read and
+ported, mechanically by a throwaway script that is not kept in the repo
+(extract the macros, rewrite every `$crate::` to `$crate::Utilities::Bitflags::`,
+turn the macro exports into crate-private `pub(crate) use`, keep the upstream
+`std` shape of `parser.rs`), so nothing was retyped by hand.
 
-What is generated, as upstream: the public wrapper; the flag constants; `impl Flags`;
-the full inherent API with upstream's `const fn` set (`empty/all/bits/from_bits/
-from_bits_truncate/from_bits_retain/from_name/is_empty/is_all/intersects/contains/
-insert/remove/toggle/set/intersection/union/difference/symmetric_difference/
-complement/iter/iter_names`); `Binary`/`Octal`/`LowerHex`/`UpperHex`; `| & ^ - !` with
-their `-Assign` forms; `Extend`, `FromIterator`, `IntoIterator`. The `Flags` trait
-adds `truncate`, `clear`, `contains_unknown_bits` and `iter_defined_names`, which (as
-upstream) exist only there.
-
-Deliberate choices:
-- `ParseError` is the `std`-less shape: payload `()`, no trailing `` `name` `` in its
-  text, no `std::error::Error` impl. The manifest used `bitflags = "2.4"` with no
-  features, so that is what the real crate produced for this project.
-- The macro is one macro plus one helper instead of upstream's chain of `__declare_*`
-  / `__impl_*` helpers. That changes how it is written, not what it generates.
-- **Not ported:** unnamed flags (`const _ = ...`), `#[cfg]` on flag constants, the
-  `serde`/`arbitrary`/`bytemuck`/`zerocopy`/`bitflags_match!` integrations, the
-  deprecated `BitFlags` alias trait, and operators/formatting/iteration on the hidden
-  type (nothing can name it; the wrapper's versions forward to the bits). The one
-  invocation in this crate uses none of these.
-
-**Public:** `dixscript::Utilities::Bitflags` is a `pub` module. `SectionFlags` is a
-public type whose methods return `Iter`/`IterNames` and implement `Flags`, so those
-names must be reachable, exactly as with the real crate.
-
-**Tests (`tests.rs`, 31 in the module):** the same flag list is defined with both this
-port and the real crate (called as `::bitflags`) and identical operations are run
-through both. Five flag sets: the exact `SectionFlags` shape (a gap at `0x20`, reserved
-high bits); overlapping and multi-bit flags on `u16` (including a flag defined as
-`Self::A.bits() | Self::B.bits()`); a signed `i8` including `i8::MIN`; a `u32`; a
-`u128`. Compared: `Debug` (plain and pretty), `{:x} {:X} {:o} {:b}` (plain and alternate),
-`bits`, `is_empty`, `is_all`, `iter`, `iter_names`, `from_bits*`, `from_name` (including
-junk and wrong-case names), the `FLAGS` table, `iter_defined_names`, `Flags::truncate`/
-`clear`/`contains_unknown_bits`, the text round trip and a corpus of malformed text
-through `from_str`, `from_str_strict` and `from_str_truncate`, every method and operator
-over all 65,536 byte pairs (and 50–100k sampled pairs for the wider types),
-`Extend`/`FromIterator`/`IntoIterator`, derived `Default`/`Ord`/`Eq`, and `const`
-evaluation. Three deliberate bugs were injected (the iterator's overlap condition, the
-`" | "` separator, the empty-value `0x0` form) and each was caught.
+- **Ported:** everything the `bitflags!` macro generates in `struct` mode and
+  `impl` mode, unnamed flags (`const _ = !0;`), `#[cfg]` on flags, signed and
+  128-bit bit types, the full `Flags` trait, the three parser modes
+  (`from_str`, `_truncate`, `_strict`) and their writers, and upstream's `const fn`
+  set.
+- **Not ported:** the serde / arbitrary / bytemuck glue (`external`), the
+  `bitflags_match!` macro, and the deprecated `BitFlags` trait.
+- **Differential tests (12)** declare the same flags type with the real crate
+  (`::bitflags`, a dev-dependency) and with the port and compare every observable
+  result: all 256 values through every accessor and every text format
+  (`{:?}`, `{:#?}`, `{:b}`, `{:o}`, `{:x}`, `{:X}`), all 65,536 value pairs
+  through every binary operation, `-Assign` forms and mutators, the parser on 36
+  adversarial strings in all three modes (error text included), iterators
+  including `remaining()`, `Extend`/`FromIterator`/`IntoIterator` on 2,000
+  random sets, the const-fn surface evaluated in `const` context, and the
+  `impl` / unnamed / `#[cfg]` / signed / `u128` / zero / empty forms.
+- **Upstream's own unit tests (43)** are copied under `upstream_tests/` and run
+  against the port with only the `crate::` paths rewritten.
+- `section_flags_debug_prints_flag_names_like_the_real_crate` pins the one
+  observable change from the old draft on the real, wired type.
 
 ### `Utilities/LazyStatic/lazy_static_macro.rs`
 
@@ -210,8 +196,8 @@ static now run in the real crate on Rust 1.85.1, the crate's declared
 `rustc_hash_v2.rs` is the default export: a port of `rustc-hash` **2.1.1**, the
 version `Cargo.lock` resolves. `fx_hash.rs` is the classic FxHash copied from
 `mid-engine` (`crates/mid-collections/src/fx_hash.rs`), kept and exported as
-`RustcHash::classic`. To make the classic one the default, change one
-`pub(crate) use` line in `RustcHash/mod.rs`.
+`RustcHash::classic` (crate-private). To make the classic one the default,
+change one `pub use` line in `RustcHash/mod.rs`.
 
 **Why the default is not the file that was asked for.** The instruction was to
 copy `mid-engine`'s FxHash. That was done, but comparing it with the crate it
@@ -264,18 +250,6 @@ third-party notices file is not decided here.
 **32-bit targets.** Both pointer widths are ported (`wasm32` is 32-bit).
 Upstream's 32-bit known-answer vectors are included but could only be run on
 such a target, which wasn't possible here.
-
-**Wired in, and public.** The default exports are now what all 13 importing files use
-(delivered as a patch; see "How to apply"). Because 11 public items take or return
-`FxHashMap<String, _>` -- `ExecutionContext::variables`, `FunctionInterpreter::
-captured_env`, `scope_context`, `ExecutionContext::new`, `get_all_variables`,
-`get_scope_variables_snapshot`, `FunctionInterpreter::new`, `new_with_error_manager`,
-`execute`, `evaluate_arguments_in_caller_context` and `DataSectionAnalyzer::get_indexes`
--- `dixscript::Utilities::RustcHash` is a `pub` module and the types are `pub`. The
-change to those signatures was approved: a caller that built a `rustc_hash::FxHashMap`
-to pass in must now build `dixscript::Utilities::RustcHash::FxHashMap` (the same
-`HashMap<_, _, _>` shape with a different hasher type). The classic `mid-engine` copy
-stays `pub(crate)` as `RustcHash::classic`.
 
 ### `Utilities/Base64/base64_codec.rs`
 
@@ -377,45 +351,76 @@ not just the "found nothing" branch.
 
 ### `Utilities/AsyncTrait/boxed_future.rs`
 
-A `BoxFuture<'a, T>` alias and a **recipe that reproduces `#[async_trait]`'s expansion
-exactly** -- not a macro. `#[async_trait]` is a procedural macro; writing one means a
-`proc-macro = true` crate and `syn` + `quote`, the dependency this pass exists to
-remove, and it is needed in only two places (the `CloudStorageProvider` declaration and
-its one implementation, `HttpCloudProvider`).
+A `BoxFuture<'a, T>` alias and a written recipe — **not a macro**. `#[async_trait]`
+is a proc-macro; writing one means a `proc-macro = true` crate and `syn` +
+`quote`, the dependency this pass exists to remove, and it is needed in only two
+places (the `CloudStorageProvider` trait and `HttpCloudProvider`'s impl).
+`mod.rs` is `pub`: the trait is public and its methods return `BoxFuture`.
 
-- Native `async fn` in traits isn't dyn-compatible, and the trait is used as
-  `Arc<dyn CloudStorageProvider + Send + Sync>`. A method returning a boxed future is.
-  That is the whole job the macro does.
-- **The signature is copied from the macro, not simplified.** A trait method becomes
-  `fn f<'life0, 'life1, 'async_trait>(&'life0 self, url: &'life1 str) ->
-  BoxFuture<'async_trait, R> where 'life0: 'async_trait, 'life1: 'async_trait,
-  Self: 'async_trait;`, and the implementation wraps its body in `Box::pin(async move
-  { ... })`. Method bodies are untouched (no re-indenting, in case one contained a
-  multi-line literal); `return Err(..)` and `?` keep working inside the block.
-- **A first draft used a simpler single-lifetime signature and was wrong for outside
-  implementors.** That version asserted, without testing, that outside implementors
-  would break and that this was a public-API cost to weigh. Testing showed the problem
-  was my signature, not the idea: with the single-lifetime declaration, an
-  `#[async_trait] impl` is rejected with `E0195` ("lifetime parameters or bounds on
-  method `fetch` do not match the trait declaration"); with the macro's exact signature
-  it compiles. So **implementors are unaffected**, and the "this one changes public API"
-  warning that earlier versions of this document carried no longer applies.
+- Native `async fn` in traits isn't dyn-compatible, and `CloudStorageProvider`
+  is used as `Arc<dyn CloudStorageProvider + Send + Sync>`. A method returning a
+  boxed future is. That is the whole job `async-trait` does.
+- **The recipe reproduces the macro's exact expansion** — three lifetimes
+  (`'life0`, `'life1`, `'async_trait`) and the `'life0: 'async_trait`,
+  `'life1: 'async_trait`, `Self: 'async_trait` bounds — not a simpler
+  one-lifetime signature. The simple form was the first draft and it would have
+  broken every external `#[async_trait]` implementor of this public trait with
+  **E0195** ("lifetime parameters or bounds on method do not match the trait
+  declaration"). That was checked directly: an `#[async_trait] impl` against a
+  one-lifetime trait fails with E0195 on the locked `async-trait` 0.1.89; against
+  the exact expansion it compiles. Earlier notes in this file said the change
+  "breaks implementors"; with the exact signature it does not.
+- Bodies are untouched: `Box::pin(async move { <original body> })`.
+  `return Err(..)` inside the block still returns from the block; the one caller
+  (`block_on(provider.download_file_async(url))`) is unchanged.
+- **Tests (6), with the real crate as oracle in both directions:** a hand-written
+  impl behind `Arc<dyn Trait + Send + Sync>` (crossing a real `Pending`), `return`
+  and `?` inside the block, borrows of non-`'static` locals, `Send`-ness of the
+  future, **an `#[async_trait]` impl compiled against the hand-written trait**,
+  and **a hand-written impl compiled against an `#[async_trait]` trait**.
+- **Honest scope of the saving:** it removes the `async-trait` crate but not
+  much of the build — its `proc-macro2`, `quote` and `syn` dependencies are also
+  pulled in by `serde_derive`.
 
-**Public:** `dixscript::Utilities::AsyncTrait` is a `pub` module, because
-`CloudStorageProvider` is a public trait whose signatures name `BoxFuture`.
+### `Utilities/Url/path_segments.rs`
 
-**Tests use the real `async-trait` as an oracle, in both directions:** (1) an
-implementor written the way a downstream crate would have -- `#[async_trait::async_trait]
-impl Trait for X` -- compiles against a trait declared with the hand-written signature
-and works behind `Arc<dyn Trait + Send + Sync>`; (2) a hand-written implementation
-satisfies a trait declared by the real macro. Plus a real `Pending` suspension, `return`
-and `?` inside the block, borrowing a non-`'static` local, and the future being `Send`.
-The old single-lifetime shape was re-introduced temporarily and confirmed to fail with
-`E0195`, so the test cannot pass by accident.
+One function, `last_path_segment(&str) -> Option<String>`, equivalent to
+`Url::parse(s).ok()?.path_segments()?.next_back()`. It is the only thing the crate
+used `url` for: `CloudFileCache` names a cached download `<cache>/<hash16>/<segment>`.
+`pub(crate)`.
 
-**Honest scope of the saving:** the `async-trait` crate leaves `[dependencies]` (it
-stays as a dev-dependency, as the oracle), but the build barely shrinks: its
-`proc-macro2`, `quote` and `syn` dependencies are also pulled in by `serde_derive`.
+- **Why not `reqwest::Url` (the original plan).** `reqwest::Url` *is* `url::Url`, and
+  `reqwest` is optional, so it looked like a free swap behind `cloud-import`. It
+  is not: a build **without** `cloud-import` is documented to still serve entries a
+  cloud build cached, and the file name is part of the lookup path. A different name
+  source in that build would silently miss them. So the logic is written once, here,
+  and every configuration uses it.
+- **Only the final token matters.** A first version kept a stack of path segments
+  like the WHATWG algorithm. A mutation (stop popping on `..`) survived the tests,
+  which showed why: only the *last* segment is returned and the final token always
+  overwrites it, so the stack was unobservable. It is now: take the text after the
+  last separator, percent-encode it with the URL path set (C0 controls, space, `"`,
+  `<`, `>`, `` ` ``, `{`, `}`, every non-ASCII byte), and make a dot-segment (`.`,
+  `..`, `%2e` in any case mix) an empty string.
+- **What it also has to get right** (all checked against the real crate): trimming
+  of C0 control and space, removal of tab/CR/LF, `\` as a separator for special
+  schemes (`http`, `https`, `ws`, `wss`, `ftp`), runs of slashes before the host,
+  userinfo, bracketed IPv6 hosts, ports, percent-decoding of a special-scheme host
+  (`a%41` is a valid host, `a%2Fb` is not), and the non-special quirk that
+  `scheme://host:80\x` ends the authority at the backslash.
+- **Out of scope:** `file:` URLs (returns `None`, the caller's hash-name fallback),
+  and IDNA / IPv4-number host validation. For a non-ASCII host the real parser
+  rejects through IDNA (U+00A0 maps to a space) this returns a segment where `url`
+  returns `None`. That cannot matter for the cache: a URL the real parser rejects
+  can never have been downloaded, so no entry exists for it.
+- **Tests (6):** the typical cloud-URL table, 300,000 generated URLs compared with
+  the real crate (every one of them agrees except the documented IDNA class, which
+  the test names and bounds rather than ignores), every dot-segment combination to
+  depth four with both separators, every ASCII byte and nine Unicode edge
+  characters in a path, the "obviously invalid" table, and `file:`. Seven injected
+  bugs (a dropped dot-segment variant, an unencoded backtick, a final `..` or `.`
+  not emptied, the wrong end of the path, a dropped port-range check, a skipped
+  host percent-decode) were all caught.
 
 ### `Utilities/test_rng.rs`
 
@@ -425,123 +430,106 @@ replay identically on every machine. Not used by anything at runtime;
 
 ## Verification summary
 
-How it was verified: the sandbox's default toolchain is 1.75, but Ubuntu's archive also
-ships `rustc-1.85`/`cargo-1.85` (`apt-get install rustc-1.85 cargo-1.85`, then
-`PATH=/usr/lib/rust-1.85/bin:$PATH`), which is exactly the crate's declared
-`rust-version`. That made it possible to compile and test the real crate rather than
-extracted copies. Earlier statements in this project that the crate could not be
-compiled here, and that `LazyLock` could not be tested, were true of 1.75 and are no
-longer true.
+How it was verified: the sandbox's default toolchain is 1.75, but Ubuntu's
+archive also ships `rustc-1.85`/`cargo-1.85` (`apt-get install rustc-1.85
+cargo-1.85`, then `PATH=/usr/lib/rust-1.85/bin:$PATH`), which is exactly the
+crate's declared `rust-version`. That made it possible to compile and test the
+real crate rather than extracted copies. Earlier statements in this project that
+the crate could not be compiled here, and that `LazyLock` could not be tested,
+were true of 1.75 and are no longer true.
 
 | Item | Status |
 |---|---|
-| The delivery mechanism itself | Rehearsed end to end with the real scaffold engine on a pristine `git HEAD`: the archive applied through the replacements engine (`file_strategy=overwrite`: **28 created, 50 replaced, 0 skipped, 0 errors**), all 78 files byte-identical to the working tree; the patch passed `--validate-only`, a dry run left every file unchanged, and the real run rewrote all 13 files. |
-| The resulting tree builds and passes | `cargo test -p dixscript` on that tree (Rust 1.85.1): **672 passed, 0 failed** — 510 library tests, every integration suite (including `schema_section_tests` 42 and `raw_section_tests` 16) and 2 doc tests. |
-| Warnings | 129 before this work, 129 after, the identical set. Wiring initially added nine (unused-by-design code and a never-read error payload); each was fixed by narrowing a lint to the specific item rather than the module. No `private_interfaces` warnings from the newly public types. |
-| The eight modules' own tests | 87: AsyncTrait 6, Base64 10, Bitflags 31, Hex 8, Hostname 4, LazyStatic 4, RustcHash 14, Uuid 10. |
-| Differential tests | Each replacement is compared with the exact locked crate it replaces (`hex`, `bitflags`, `base64`, `uuid`, `hostname` on Linux, `rustc-hash`, `async-trait`). Roughly 1.3M base64 decodes, 300k uuid parses, 65,536 byte pairs × every bitflags operation, five bitflags flag sets, 300+300 map/set iteration-order comparisons. They run inside the real crate with the oracles as dev-dependencies. |
-| Do the tests have teeth? | Deliberate bugs were injected and caught: 3 in base64, 2 in uuid, 2 in the `rustc-hash` port, 3 in the bitflags port, and the old async-trait signature was re-introduced and confirmed to fail with `E0195`. |
-| Other targets | Earlier in this work (before the final three wiring changes): `--all-targets` (tests, benches, examples), `--no-default-features`, and the two sibling crates that use the local path (`mdix-lua`, `mdix-java`) all built. **Not re-run after wiring `bitflags`/`rustc-hash`/`async-trait`.** A grep confirms no sibling crate references any item whose public type changed (the only hit is `tower_lsp`'s own re-export of an async-trait macro), so a regression there is not expected, but CI is the confirmation. |
-| Cargo.lock | Against `HEAD`, regenerating drops direct edges from the local `dixscript` entry and adds `bumpalo`, which was already missing from `HEAD`'s lock. A `--locked` build refuses — and **already refused on pristine `HEAD`, before any of this work** (checked) — so a Sync Cargo.lock run is needed regardless. Normal (unlocked) builds are unaffected. |
+| The real crate builds | `cargo check -p dixscript --lib` on Rust 1.85.1: **0 errors**. |
+| The full test suite | `cargo test -p dixscript`: **703 passed, 0 failed** (541 library tests plus every integration suite and the doc tests); **674 passed, 0 failed** with `--no-default-features`. Includes `schema_section_tests` (42) and `raw_section_tests` (16). |
+| Warnings | **130** (129 plus one for the new `Url` module, which, like the other 85 PascalCase modules, trips `non_snake_case`; the set is otherwise identical, and no reduced-feature build adds any). Pristine `HEAD` (before the three public-API modules were wired) had 140: the extra 11 were `private_interfaces` warnings from `pub` items that already named the crate-private `FxBuildHasher`; making `RustcHash` `pub` removes exactly those, and no other warning appeared or disappeared. |
+| Other targets | `cargo check -p dixscript --all-targets` (tests, benches, examples) and `--lib --no-default-features` both succeed. |
+| Sibling crates | `mdix-lua` and `mdix-java` — the only two that depend on the local path — both compile against the wired crate. `mdix-lsp`, `mdix-wasm`, `mdix-ffi`, `mdix-python` and `mdix-cli` resolve the *published* `dixscript` 1.0.0 deliberately (their manifests say so), so they were not rebuilt. |
+| Differential tests | Every replacement is compared with the exact locked crate it replaces (`async-trait`, `base64`, `bitflags`, `hex`, `hostname` on Linux, `rustc-hash`, `uuid`): ~1.3M base64 decodes, 300k uuid parses, every byte and byte pair for bitflags plus the parser and the const-fn surface, 300+300 map/set iteration-order comparisons, and both directions of `#[async_trait]` interoperability. |
+| Upstream's own tests | The 43 unit tests of `bitflags` 2.10.0 run unchanged (only `crate::` paths rewritten) against the port. |
+| Do the tests have teeth? | Deliberate bugs were injected and caught: 3 in base64, 2 in uuid, 2 in the `rustc-hash` port, 3 in the bitflags port (set difference, complement, text separator — 2, 4 and 5 tests failed respectively), and the one-lifetime `async-trait` signature fails with E0195. |
+| Names don't collide | No existing type, module or glob import in `src/` shares a name with the new modules. |
+| Cargo.lock | **Still stale on `master`; run Sync Cargo.lock.** `HEAD`'s lock still lists `itertools`, `lazy_static` and `unicase` as dependencies of `dixscript` (removed from `Cargo.toml` in the first batch, lock never regenerated), so a `--locked` build refuses with "needs to be updated" — on pristine `HEAD` too, independent of this delivery. A plain build rewrites it; the whole delta is exactly those three edges (no package leaves the graph, because other crates still use them), and moving crates to `[dev-dependencies]` adds nothing. It is not shipped in the archive: a root-level `Cargo.lock` has no directory in its path, so the resolver would match it by basename. |
 | Inactive `cfg` branches | The 32-bit constants in `rustc_hash_v2.rs` and the Windows, unix and wasm variants of `hostname::get()` were forced on, one at a time, in an isolated copy and type-checked with the real compiler: all compile. That proves they compile, not that they behave correctly on a real 32-bit or wasm target. |
-| `wasm32` | **Still not built or run.** No `wasm32` standard library is packaged for this toolchain. Your CI's `cargo build -p dixscript --target wasm32-unknown-unknown` is the real check. It exercises what nothing here did: `Uuid::new_v4` through `getrandom` 0.2's `js` feature (already enabled for wasm and already relied on by the DLM encryptors), and the 32-bit hasher at runtime. |
+| `wasm32` | **Still not built or run.** No `wasm32` standard library is packaged for this toolchain. Your CI's `cargo build -p dixscript --target wasm32-unknown-unknown` is the real check. What it exercises that nothing here did: `Uuid::new_v4` through `getrandom` 0.2 with its `js` feature (already enabled for wasm and already relied on by the DLM encryptors), and the 32-bit hasher at runtime. |
 
-## Decisions made, and how to apply
+## Decisions
 
-**Decisions.** The plan was to hand-roll every crate on the list, and that was the
-instruction. An interim recommendation to keep `rustc-hash` and skip `async-trait` on
-public-API grounds was set aside: all 11 public items that expose `FxHashMap` may
-change. Where changing a public signature could be avoided, it was: `async-trait`'s
-replacement keeps implementors compiling (verified with the real macro).
+The three replacements that touch **public API of the published crate** were
+held back until decided. The decision: **hand-roll every crate on the list and
+stick to the plan**; all of these may change. What that means for each:
 
-What a downstream user of the published crate sees:
-- `rustc-hash` — the 11 items' `FxHashMap<String, _>` is now
-  `dixscript::Utilities::RustcHash::FxHashMap<String, _>`: the same `HashMap<_, _, _>`
-  shape with a different hasher type, so code that built a `rustc_hash::FxHashMap` to
-  pass in must switch types. **This is a breaking change** to those signatures.
-- `bitflags` — `SectionFlags` is generated by the port. The method set, operators,
-  `const fn`-ness, `Debug` text, iteration and parsing match the real crate (tested);
-  not ported are unnamed flags, `#[cfg]` on flags and the serde/arbitrary/bytemuck/
-  zerocopy integrations (unused here).
-- `async-trait` — nothing changes for implementors of `CloudStorageProvider`; callers
-  still get a boxed future from each method.
+1. **`rustc-hash` — 11 public items expose `FxHashMap<String, …>`**
+   (`ExecutionContext::{variables, new, get_all_variables}`, `FunctionInterpreter::{captured_env, new,
+   new_with_error_manager, execute, evaluate_arguments_in_caller_context}`,
+   `FunctionCallInfo::scope_context`, `ScopeTracker::get_scope_variables_snapshot`,
+   `DataSectionAnalyzer::get_indexes`). The type a downstream user sees changes
+   from `HashMap<_, _, rustc_hash::FxBuildHasher>` to
+   `HashMap<_, _, dixscript::Utilities::RustcHash::FxBuildHasher>`, so code that
+   passes a `rustc_hash::FxHashMap` in stops compiling. **This is a breaking
+   change** and was accepted as one; it needs a version bump when published. The
+   port reproduces `rustc-hash` 2.1.1's hashes and iteration order exactly, so
+   behaviour (as opposed to type identity) is unchanged.
+2. **`bitflags` — `SectionFlags` is public.** Because the port is the upstream
+   source and not a re-derivation, the public surface is the real crate's:
+   `SectionFlags` implements `Flags`, `Debug` prints names, and `iter()`,
+   `iter_names()`, `from_name()` exist. The one change visible to a downstream
+   user is that `Flags`/`Bits` are now `dixscript::Utilities::Bitflags::{Flags,
+   Bits}` rather than `bitflags::{Flags, Bits}`; code that calls the inherent
+   methods is unaffected.
+3. **`async-trait` — `CloudStorageProvider` is a public extension point.** The
+   hand-desugared signatures are the macro's exact expansion, so an external
+   `#[async_trait] impl CloudStorageProvider for X` still compiles (tested against
+   the real macro). Not source-visible, but the trait no longer carries the
+   attribute, so documentation tools show the boxed-future signature.
 
-**How to apply** (the order matters):
-1. Put `dixscript-schema-and-dependency-reduction.tar.gz` in `.mdix/replacements/` and
-   run the apply-replacements workflow (`file_strategy=overwrite`). It supersedes the
-   earlier `schema-section.tar.gz` and `dependency-reduction-batch1.tar.gz`: **delete
-   those two first if they are still in the folder.** The resolver extracts archives in
-   unsorted order, so a leftover older archive can overwrite a newer file.
-2. Put `patch.mdix` at `.mdix/patches/patch.mdix` (replacing the previous one; there is
-   only ever one) and run the apply-patch workflow with `dry_run=false`. It rewrites the
-   13 `use rustc_hash::...` lines to the local port.
-3. **Delete the archive afterwards** (or set `delete_processed_archives`). Several of
-   the 13 patched files are also inside it, so leaving it in place means a later
-   replacements run re-extracts the unpatched copies over them.
-4. Run the Sync Cargo.lock workflow.
+**Wired in:** everything on the list. First batch — `hex`, `lazy_static`,
+`base64`, `uuid`, `hostname` (23 files). Second batch — `rustc-hash` (13
+imports, applied with the scaffold patch because it was the same edit in many
+files), `bitflags` (`binary_format.rs`), `async-trait` (the trait declaration and
+`http_cloud_provider.rs`). `hostname` carries the documented behavior gap versus
+the real crate; the others are checked equivalent.
 
-The patch applies after the archive because the archive adds the `RustcHash` module and
-makes it public; the patch's 13 anchors are whole `use` lines, each occurring exactly
-once in its file.
+Per the convention above, each wired crate went to `[dev-dependencies]` as an
+oracle rather than being deleted (except `lazy_static`).
 
 ## Open items and deferred plan
 
-**The feature-gating pass** (planned; not started). Candidates already found:
-- **All the DLM modules**, properly, plus "a few more things" as the reduction continues.
-- **JSON and TOML** support (`serde_json`, `toml`): gate the converters rather than
-  replace the crates. Nothing here is gated yet.
-- `flate2` is **not** feature-gated, unlike its siblings `bzip2` and `lzma-rust2`.
-  Confirm whether gzip is meant to be the always-on codec.
-- `url` is documented in `Cargo.toml` as "optional — activated via the `cloud-import`
-  feature", but has **no `optional = true` and is not under `[features]`**: it always
-  compiles in, `--no-default-features` included. (`async-trait` shared that
-  misdescription until it was removed.) `url` cannot yet be swapped for `reqwest::Url`
-  (a re-export of the same type): `cloud_file_cache.rs` compiles unconditionally but
-  `reqwest` is genuinely optional, so the swap would break a `--no-default-features`
-  build. Do the gating and the swap together.
-- `uuid`'s old `serde`/`js` features left with the runtime dependency. `chrono` still
-  declares a `serde` feature, **not investigated**: because `DixValue` still derives
-  `Serialize`, it is not known whether that flag is load-bearing.
+**Done since the first version of this file:** the feature-gating pass (DLM
+families, `encryption-support`, `toml-support`, the `url` removal, chrono's unused
+`serde` feature) is written up in [features.md](features.md). Decided there:
+`serde_json` and `flate2` stay unconditional.
 
-**`regex` stays.** Rust's standard library has no regex engine; it backs a user-facing
-`Regex` value type in 22 files.
+**Still open:**
+- **`wasm32`:** not built here; see the verification table.
+- **Version bump.** The `rustc-hash` change is source-breaking for downstream
+  users of the 11 public items (see Decisions).
 
-**Regenerate `Cargo.lock`.** See the verification table. Not shipped in the replacements
-archive: a root-level `Cargo.lock` has no directory in its path, so the resolver would
-match it by basename and could confuse it with another crate's lockfile.
+**Optional follow-ups:**
+- **Cleanup candidate:** `INTERP_METHOD_CALL_RE` and `INTERP_PROPERTY_RE` in
+  `quickfuncs_section_parser.rs` are referenced only by
+  `parse_interpolated_expression`, which is itself never used, so they are dead
+  transitively (see `LazyStatic`). Not deleted here.
+- Benchmark the `RustcHash` port against the real crate on `dixscript`'s own
+  workloads (parity was measured only in a scratch crate).
+- `Hostname` on Windows/macOS behaves differently from `gethostname` in the ways
+  its section documents; nothing here ran on those platforms.
+- Decide whether to add a third-party-notices entry for the files derived from
+  Apache-2.0 / MIT sources (`Bitflags/*` from `bitflags` 2.10.0, `RustcHash/rustc_hash_v2.rs`
+  from `rustc-hash` 2.1.1). The file headers already attribute them.
 
-**Cleanup candidate:** `INTERP_METHOD_CALL_RE` and `INTERP_PROPERTY_RE` in
-`quickfuncs_section_parser.rs` are unused. `lazy_static` had been hiding them; the
-`LazyStatic` macro now suppresses `dead_code` on every static so the swap added no
-warnings, but the two statics look like leftovers of interpolation code that also
-produces `parse_interpolated_expression is never used`.
-
-**`wasm32` and a real 32-bit target** are unverified; see the verification table.
-
-**Not re-checked after the final wiring:** `mdix-lua` / `mdix-java` builds, and the
-benches/`--no-default-features` builds (see the verification table).
+**Not part of this pass but found on the way:**
+- `@SCHEMA` has no editor support yet (VS Code grammar, LSP hover and semantic
+  tokens), and `mdix merge` does not merge `@SCHEMA`.
+- `mdix-lsp`'s `goto_definition.rs` has an exhaustive `match` on `SectionId`
+  with no `Raw`/`Schema` arm; it compiles only because `mdix-lsp` uses the
+  published `dixscript` 1.0.0, and will break the day that dependency moves.
 
 **Docs hygiene, unrelated to dependencies:** `docs/RUST_AND_CRATE_GUIDELINES.md`
-describes the `mid-engine` workspace (`mid-math`, `mid-ecs`, ...), not this one. It looks
-like a template that was never adapted for this repo. Not touched.
+describes the `mid-engine` workspace (`mid-math`, `mid-ecs`, ...), not this one.
+It looks like a template that was never adapted for this repo. Not touched.
 
 ## Fixes and Problems
-
-### Wiring in the three public-API modules (`bitflags`, `async-trait`, `rustc-hash`)
-- `SectionFlags` now comes from the local `bitflags!`; `CloudStorageProvider` and
-  `HttpCloudProvider` are hand-expanded (2 files); the 13 `rustc_hash` imports are a
-  patch. `Bitflags`, `AsyncTrait` and `RustcHash` became `pub` modules; `bitflags`,
-  `async-trait` and `rustc-hash` moved to dev-dependency oracles.
-- **An earlier claim was wrong:** it said the `rustc_hash` references included "8
-  fully-qualified" inline paths. A scan showed all 13 are plain `use` lines (four shapes),
-  so each file needs exactly one edit.
-- **The "held back" posture was set aside** when the instruction was to stick to the plan;
-  the public-API cost it was guarding against was either accepted (`rustc-hash`) or
-  turned out to be avoidable (`async-trait`, once the signature was copied from the
-  macro rather than simplified).
-- Nine warnings appeared during wiring (the never-read `got: ()` payload in the std-less
-  `ParseError`, and the unused-by-design `classic` hasher once its parent module became
-  public and lost its module-level `allow`). Fixed at the narrowest scope.
 
 ### The wiring-in sweep (23 files)
 Rewrote call sites for `lazy_static` (6 files), `hex` (2), `base64` (11 files, 17
@@ -583,8 +571,8 @@ replacement modules.
   `Cargo.toml` carries a comment saying why.
   **Lesson: "unused" has to be checked across the whole workspace, every sibling
   crate, and by call shape rather than by the argument's type name.**
-- Attempted to remove `url` in favor of `reqwest::Url`; reverted after finding the
-  gating mismatch above. Only the misleading comment was changed.
+- `url` was first reverted (a gating mismatch), then replaced for real; see
+  `Utilities/Url` below for why `reqwest::Url` was the wrong replacement.
 
 ### `Utilities/RustcHash` — the first delivery overclaimed
 The first batch shipped only the `mid-engine` FxHash and described it as "the same
@@ -606,6 +594,34 @@ Earlier summaries said `base64` had "17 sites"/"16 files", `uuid` "5 sites" and
 the Fx types "178 call sites". Recounted by script: 35 calls in 11 files, 13 call
 sites in 4 files, and 188 mentions in 13 files. Code comments and this document
 were fixed.
+
+### `Utilities/Bitflags` — the first draft was the wrong shape
+The held-back draft was a trimmed `bitflags!` macro written from the crate's
+documentation. Run against the real crate it was a different type: `Debug` printed
+`SectionFlags(5)` instead of `SectionFlags(CONFIG | DATA)`, and `iter()`,
+`iter_names()`, `from_name()` and the `Flags` trait were missing. It was thrown away
+and replaced with a mechanical port of the real source. Lesson: copy upstream's
+real signatures and behavior instead of simplifying.
+
+### `Utilities/AsyncTrait` — the "breaks implementors" claim was wrong, then right
+The first recipe used one lifetime (`fn f<'a>(&'a self, url: &'a str)`). The docs
+said that would break external `#[async_trait]` implementors, which was true of
+*that* signature (E0195, reproduced) and would have been avoided entirely by using the
+macro's own three-lifetime expansion. The module now does exactly that, and the
+tests use the real macro in both directions instead of asserting it.
+
+### The consolidated delivery was only partly applied
+A check of `master` found the schema work, the first-batch wiring and the
+`rustc-hash` patch landed, but the consolidated archive's second half (the final
+`Bitflags` and `AsyncTrait` modules, the `SectionFlags` and `CloudStorageProvider`
+wiring, the visibility changes and the `Cargo.toml` moves) had not: `Utilities/mod.rs`
+still said "NOT WIRED IN" for three modules, `Bitflags` and `AsyncTrait` were the
+first drafts (13 and 4 tests instead of 55 and 6), and 11 `private_interfaces`
+warnings were present because `rustc-hash` imports were patched while
+`RustcHash` was still `pub(crate)`. The second half was rebuilt from the real
+upstream sources on top of `master`. **Lesson: after a multi-step apply, compare the
+tree against the intended end state before trusting it** — a half-applied
+delivery compiles.
 
 ### `Runtime/dix_value.rs`
 No change. A `serde` derive removal was made and then reverted to the original

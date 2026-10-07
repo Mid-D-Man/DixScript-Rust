@@ -2,21 +2,22 @@
 // NOTICE: Full documentation, design decisions, and fix history for this file
 // live in docs/dixscript/utilities.md, section "Utilities/Bitflags"
 // ============================================================================
-//! Iterators over the contained flags of a value: [`Iter`], [`IterNames`] and
-//! [`IterDefinedNames`].
-//!
-//! ## Attribution
-//! Derived from the `bitflags` crate, v2.10.0
-//! (<https://github.com/bitflags/bitflags>), licensed `MIT OR Apache-2.0`;
-//! the logic follows upstream's `src/iter.rs`, comments condensed.
+// Derived from `bitflags` 2.10.0 (https://github.com/bitflags/bitflags),
+// Copyright (c) The Rust Project Developers, licensed MIT OR Apache-2.0.
+// Port of src/iter.rs, unchanged apart from the crate path.
+//
+/*!
+Yield the bits of a source flags value in a set of contained flags values.
+*/
 
-use super::traits::{Flag, Flags};
+use crate::Utilities::Bitflags::{Flag, Flags};
 
-/// An iterator over flags values.
-///
-/// Yields flags values for contained, defined flags first, with any remaining
-/// bits yielded as one final flags value, so `into_iter` / `from_iter`
-/// round-trip.
+/**
+An iterator over flags values.
+
+This iterator will yield flags values for contained, defined flags first, with any remaining bits yielded
+as a final flags value.
+*/
 pub struct Iter<B: 'static> {
     inner: IterNames<B>,
     done: bool,
@@ -32,7 +33,7 @@ impl<B: Flags> Iter<B> {
 }
 
 impl<B: 'static> Iter<B> {
-    /// Used by the `bitflags!` macro.
+    // Used by the `bitflags` macro
     #[doc(hidden)]
     pub const fn __private_const_new(flags: &'static [Flag<B>], source: B, remaining: B) -> Self {
         Iter {
@@ -51,9 +52,9 @@ impl<B: Flags> Iterator for Iter<B> {
             None if !self.done => {
                 self.done = true;
 
-                // After iterating the valid names, any bits left over come out
-                // as one final value, which makes `into_iter` and `from_iter`
-                // round-trip.
+                // After iterating through valid names, if there are any bits left over
+                // then return one final value that includes them. This makes `into_iter`
+                // and `from_iter` roundtrip
                 if !self.inner.remaining().is_empty() {
                     Some(B::from_bits_retain(self.inner.remaining.bits()))
                 } else {
@@ -65,9 +66,12 @@ impl<B: Flags> Iterator for Iter<B> {
     }
 }
 
-/// An iterator over contained, defined, *named* flags values. Remaining
-/// (unnamed or unknown) bits aren't yielded but are available from
-/// [`IterNames::remaining`].
+/**
+An iterator over flags values.
+
+This iterator only yields flags values for contained, defined, named flags. Any remaining bits
+won't be yielded, but can be found with the [`IterNames::remaining`] method.
+*/
 pub struct IterNames<B: 'static> {
     flags: &'static [Flag<B>],
     idx: usize,
@@ -87,7 +91,7 @@ impl<B: Flags> IterNames<B> {
 }
 
 impl<B: 'static> IterNames<B> {
-    /// Used by the `bitflags!` macro.
+    // Used by the bitflags macro
     #[doc(hidden)]
     pub const fn __private_const_new(flags: &'static [Flag<B>], source: B, remaining: B) -> Self {
         IterNames {
@@ -98,7 +102,11 @@ impl<B: 'static> IterNames<B> {
         }
     }
 
-    /// The bits not yet yielded: unnamed flags and unknown bits.
+    /// Get a flags value of any remaining bits that haven't been yielded yet.
+    ///
+    /// Once the iterator has finished, this method can be used to
+    /// check whether or not there are any bits that didn't correspond
+    /// to a contained, defined, named flag remaining.
     pub fn remaining(&self) -> &B {
         &self.remaining
     }
@@ -123,10 +131,14 @@ impl<B: Flags> Iterator for IterNames<B> {
 
             let bits = flag.value().bits();
 
-            // Yield the flag if it is set in the source AND has bits no earlier
-            // flag has covered yet. For multi-bit flags that means: partially
-            // overlapping flags (0b001 and 0b101) both yield; a flag that fully
-            // overlaps earlier ones (a convenience shorthand) does not.
+            // If the flag is set in the original source _and_ it has bits that haven't
+            // been covered by a previous flag yet then yield it. These conditions cover
+            // two cases for multi-bit flags:
+            //
+            // 1. When flags partially overlap, such as `0b00000001` and `0b00000101`, we'll
+            // yield both flags.
+            // 2. When flags fully overlap, such as in convenience flags that are a shorthand for others,
+            // we won't yield both flags.
             if self.source.contains(B::from_bits_retain(bits))
                 && self.remaining.intersects(B::from_bits_retain(bits))
             {
@@ -140,8 +152,12 @@ impl<B: Flags> Iterator for IterNames<B> {
     }
 }
 
-/// An iterator over all defined named flags, whether or not a particular flags
-/// value contains them.
+/**
+An iterator over all defined named flags.
+
+This iterator will yield flags values for all defined named flags, regardless of
+whether they are contained in a particular flags value.
+*/
 pub struct IterDefinedNames<B: 'static> {
     flags: &'static [Flag<B>],
     idx: usize,

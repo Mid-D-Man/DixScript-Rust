@@ -1,0 +1,618 @@
+//! Main orchestrator for DLM forward pipeline execution during compilation.
+//!
+//! Execution order: Auditor (start) → Compressor → Encryptor → Auditor (finalize).
+//! All three output files (.mdix.enc, .mdix.key, .mdix.au) are locked
+//! read-only immediately after writing.
+
+use crate::Compiler::AST::{DixScript, DLMModuleType, DLMModuleSubtype};
+use crate::Compiler::DLM::{
+    Auditor::IAuditor,
+    Compressor::ICompressor,
+    Encryptor::IEncryptor,
+    KeyManagement::KeyFileManager,
+    dlm_pipeline_result::DLMPipelineResult,
+};
+use crate::Compiler::Utilities::file_permissions;
+#[cfg(feature = "dlm-encryptor")]
+use crate::Compiler::Utilities::SecurityUtilities;
+use crate::ErrorManager::{ErrorManager, DebugConfig, DlmErrorType, ErrorSeverity};
+use std::path::{Path, PathBuf};
+use web_time::Instant;
+use std::fs;
+
+#[cfg(feature = "dlm-auditor")]
+use crate::Compiler::DLM::Auditor::{DiyAuditor, EnhancedAuditor};
+#[cfg(feature = "dlm-compressor")]
+use crate::Compiler::DLM::Compressor::GzipCompressor;
+#[cfg(feature = "dlm-encryptor")]
+use crate::Compiler::DLM::Encryptor::XorEncryptor;
+#[cfg(feature = "encryption-support")]
+use crate::Compiler::DLM::Encryptor::{Aes128Encryptor, Aes256Encryptor, Chacha20Encryptor};
+#[cfg(feature = "bzip2-support")]
+use crate::Compiler::DLM::Compressor::Bzip2Compressor;
+#[cfg(feature = "xz-support")]
+use crate::Compiler::DLM::Compressor::LzmaCompressor;
+
+pub struct DLMPipelineExecutor {
+    error_manager:    ErrorManager,
+    debug_config:     DebugConfig,
+    source_file_path: PathBuf,
+    output_directory: PathBuf,
+    /// Password read once from MDIX_DLM_PASSWORD at construction time.
+    /// Present only when the environment variable is set.
+    // Only read when an encryptor is built (password-mode key derivation).
+    #[cfg_attr(not(feature = "dlm-encryptor"), allow(dead_code))]
+    password:         Option<String>,
+}
+
+impl DLMPipelineExecutor {
+    pub fn new(
+        source_file_path: impl AsRef<Path>,
+        output_directory: impl AsRef<Path>,
+        debug_mode:       crate::Compiler::Core::Config::DebugMode,
+    ) -> Self {
+      Self::new_with_error_manager(source_file_path,output_directory,debug_mode,ErrorManager::get_shared_instance())
+    }
+    pub fn new_with_error_manager(
+        source_file_path: impl AsRef<Path>,
+        output_directory: impl AsRef<Path>,
+        debug_mode:       crate::Compiler::Core::Config::DebugMode,
+        error_manager: ErrorManager
+    ) -> Self {
+
+        let debug_config  = DebugConfig::from_debug_mode(debug_mode);
+        let password      = std::env::var("MDIX_DLM_PASSWORD").ok();
+
+        DLMPipelineExecutor {
+            error_manager,
+            debug_config,
+            source_file_path: source_file_path.as_ref().to_path_buf(),
+            output_directory: output_directory.as_ref().to_path_buf(),
+            password,
+        }
+    }
+    // ── Main entry point ──────────────────────────────────────────────────────
+
+    pub fn execute(&self, ast: &mut DixScript, binary_data: Vec<u8>) -> DLMPipelineResult {
+        let original_size = binary_data.len();
+        let mut result    = DLMPipelineResult::new(original_size);
+        let start_time    = Instant::now();
+
+        self.error_manager.log_info("DLM pipeline execution started");
+
+        let dlm_is_empty = ast.dlm.as_ref()
+            .map(|d| d.modules.is_empty())
+            .unwrap_or(true);
+
+        if dlm_is_empty {
+            self.error_manager.log_info("No DLM modules specified — skipping pipeline");
+            result.is_success     = true;
+            result.processed_size = binary_data.len();
+            result.processed_data = binary_data;
+            result.total_duration = start_time.elapsed();
+            return result;
+        }
+
+        let (auditor, compressor, encryptor) = match self.parse_dlm_section(ast) {
+            Ok(modules) => modules,
+            Err(e) => {
+                self.error_manager.add_dlm_error(
+                    DlmErrorType::ModuleExecutionFailed, e.clone(),
+                    Some(self.base_name()), None, None, ErrorSeverity::Fatal,
+                );
+                result.errors.push(e);
+                result.total_duration = start_time.elapsed();
+                return result;
+            }
+        };
+
+        let mut processed_data                             = binary_data;
+        let mut active_auditor: Option<Box<dyn IAuditor>> = None;
+
+        // Phase 1: start auditor
+        if let Some(mut aud) = auditor {
+            match aud.start_audit(ast, &processed_data) {
+                Ok(_)  => { active_auditor = Some(aud); }
+                Err(e) => {
+                    self.error_manager.add_dlm_error(
+                        DlmErrorType::ModuleExecutionFailed, e.clone(),
+                        Some(self.base_name()), Some("DAuditor".to_string()),
+                        None, ErrorSeverity::Warning,
+                    );
+                    result.warnings.push(e);
+                }
+            }
+        }
+
+        // Phase 2: compress
+        let pre_compress_size = processed_data.len();
+        if let Some(comp) = compressor {
+            let phase_start = Instant::now();
+            match comp.compress(&processed_data) {
+                Ok(compressed) => {
+                    let duration_ms = phase_start.elapsed().as_secs_f64() * 1000.0;
+                    let out_size    = compressed.len();
+
+                    result.executed_modules.push(comp.module_name().to_string());
+                    result.metadata.insert("compressor".to_string(), comp.get_metadata());
+
+                    if let Some(ref mut aud) = active_auditor {
+                        aud.log_step(
+                            comp.module_name(),
+                            &format!("Compressed with {}", comp.algorithm()),
+                            pre_compress_size,
+                            out_size,
+                            duration_ms,
+                        );
+                    }
+
+                    let ratio = 1.0 - (out_size as f64 / pre_compress_size as f64);
+                    self.error_manager.log_info(&format!(
+                        "Compression: {} -> {} bytes ({:.1}% reduction)",
+                        pre_compress_size, out_size, ratio * 100.0,
+                    ));
+
+                    processed_data = compressed;
+                }
+                Err(e) => {
+                    self.error_manager.add_dlm_error(
+                        DlmErrorType::ModuleExecutionFailed, e.clone(),
+                        Some(self.base_name()), Some(comp.module_name().to_string()),
+                        None, ErrorSeverity::Fatal,
+                    );
+                    if let Some(ref mut aud) = active_auditor {
+                        let _ = aud.finalize_audit();
+                    }
+                    result.errors.push(e);
+                    result.total_duration = start_time.elapsed();
+                    return result;
+                }
+            }
+        }
+
+        // Phase 3: encrypt
+        let pre_encrypt_size = processed_data.len();
+        if let Some(enc) = encryptor {
+            let phase_start = Instant::now();
+            match enc.encrypt(&processed_data) {
+                Ok(encrypted) => {
+                    let duration_ms = phase_start.elapsed().as_secs_f64() * 1000.0;
+                    let out_size    = encrypted.len();
+
+                    result.executed_modules.push(enc.module_name().to_string());
+                    result.metadata.insert("encryptor".to_string(), enc.get_metadata());
+
+                    if let Some(ref mut aud) = active_auditor {
+                        aud.log_step(
+                            enc.module_name(),
+                            &format!("Encrypted with {}", enc.algorithm()),
+                            pre_encrypt_size,
+                            out_size,
+                            duration_ms,
+                        );
+                    }
+
+                    self.error_manager.log_info(&format!(
+                        "Encryption: {} -> {} bytes",
+                        pre_encrypt_size, out_size,
+                    ));
+
+                    processed_data = encrypted;
+                }
+                Err(e) => {
+                    self.error_manager.add_dlm_error(
+                        DlmErrorType::ModuleExecutionFailed, e.clone(),
+                        Some(self.base_name()), Some(enc.module_name().to_string()),
+                        None, ErrorSeverity::Fatal,
+                    );
+                    if let Some(ref mut aud) = active_auditor {
+                        let _ = aud.finalize_audit();
+                    }
+                    result.errors.push(e);
+                    result.total_duration = start_time.elapsed();
+                    return result;
+                }
+            }
+        }
+
+        result.processed_size    = processed_data.len();
+        result.compression_ratio = 1.0 - (result.processed_size as f64 / original_size as f64);
+        result.processed_data    = processed_data;
+
+        // Phase 4: finalize auditor
+        if let Some(ref mut aud) = active_auditor {
+            if let Err(e) = aud.finalize_audit() {
+                self.error_manager.add_dlm_error(
+                    DlmErrorType::ModuleExecutionFailed, e.clone(),
+                    Some(self.base_name()), Some("DAuditor".to_string()),
+                    None, ErrorSeverity::Warning,
+                );
+                result.warnings.push(format!("Audit finalization warning: {}", e));
+            }
+        }
+
+        // Phase 5: write .mdix.enc and .mdix.key
+        if let Err(e) = self.generate_output_files(&mut result, original_size) {
+            self.error_manager.add_dlm_error(
+                DlmErrorType::ModuleExecutionFailed, e.clone(),
+                Some(self.base_name()), None,
+                Some("Check output directory write permissions".to_string()),
+                ErrorSeverity::Warning,
+            );
+            result.warnings.push(e);
+        }
+
+        result.is_success     = true;
+        result.total_duration = start_time.elapsed();
+
+        self.error_manager.log_info(&format!(
+            "DLM pipeline complete: {} modules, {} -> {} bytes, {:.2}ms",
+            result.executed_modules.len(),
+            original_size,
+            result.processed_size,
+            result.total_duration.as_secs_f64() * 1000.0,
+        ));
+
+        result
+    }
+
+    // ── Module creation ───────────────────────────────────────────────────────
+
+    fn parse_dlm_section(
+        &self,
+        ast: &mut DixScript,
+    ) -> Result<(
+        Option<Box<dyn IAuditor>>,
+        Option<Box<dyn ICompressor>>,
+        Option<Box<dyn IEncryptor>>,
+    ), String> {
+        let dlm = ast.dlm.as_ref().unwrap();
+
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "[DLMPipelineExecutor] Parsing {} module(s)",
+                dlm.modules.len(),
+            ));
+        }
+
+        let mut auditor:    Option<Box<dyn IAuditor>>    = None;
+        let mut compressor: Option<Box<dyn ICompressor>> = None;
+        let mut encryptor:  Option<Box<dyn IEncryptor>>  = None;
+
+        let modules: Vec<_> = dlm.modules.to_vec();
+
+        for module in &modules {
+            match module.module_type {
+                DLMModuleType::DAuditor => {
+                    auditor = Some(self.create_auditor(module.subtype, ast)?);
+                }
+                DLMModuleType::DCompressor => {
+                    compressor = Some(self.create_compressor(module.subtype)?);
+                }
+                DLMModuleType::DEncryptor => {
+                    encryptor = Some(self.create_encryptor(module.subtype, ast)?);
+                }
+                DLMModuleType::ParseError => {
+                    return Err(
+                        "DLM section contains a parse error — check @DLM syntax".to_string()
+                    );
+                }
+            }
+        }
+
+        Ok((auditor, compressor, encryptor))
+    }
+
+    #[cfg(feature = "dlm-auditor")]
+    fn create_auditor(
+        &self,
+        subtype: Option<DLMModuleSubtype>,
+        ast:     &DixScript,
+    ) -> Result<Box<dyn IAuditor>, String> {
+        let aud: Box<dyn IAuditor> = match subtype {
+            Some(DLMModuleSubtype::Diy) | None => {
+                Box::new(DiyAuditor::new(&self.source_file_path, &self.output_directory))
+            }
+            Some(DLMModuleSubtype::Enhanced) => {
+                Box::new(EnhancedAuditor::new(
+                    self.source_file_path.to_string_lossy().to_string(),
+                    self.output_directory.to_string_lossy().to_string(),
+                    ast.clone(),
+                ))
+            }
+            Some(other) => return Err(format!("Unknown auditor subtype: {:?}", other)),
+        };
+        Ok(aud)
+    }
+
+    /// This build has no `dlm-auditor`: report it instead of silently skipping the module.
+    #[cfg(not(feature = "dlm-auditor"))]
+    fn create_auditor(
+        &self,
+        _subtype: Option<DLMModuleSubtype>,
+        _ast:     &DixScript,
+    ) -> Result<Box<dyn IAuditor>, String> {
+        Err(
+            "This file uses a DAuditor module, but this build of dixscript was compiled \
+             without the 'dlm-auditor' feature. Rebuild with default features \
+             (or `--features dlm-auditor`) to run this file, or remove the DAuditor module.".to_string()
+        )
+    }
+
+    #[cfg(feature = "dlm-compressor")]
+    fn create_compressor(
+        &self,
+        subtype: Option<DLMModuleSubtype>,
+    ) -> Result<Box<dyn ICompressor>, String> {
+        match subtype {
+            Some(DLMModuleSubtype::Gzip) | None => Ok(Box::new(GzipCompressor::new())),
+
+            #[cfg(feature = "bzip2-support")]
+            Some(DLMModuleSubtype::Bzip2) => Ok(Box::new(Bzip2Compressor::new())),
+            #[cfg(not(feature = "bzip2-support"))]
+            Some(DLMModuleSubtype::Bzip2) => Err(
+                "This file requires bzip2 compression (DCompressor.bzip2), but \
+                 this build of dixscript was compiled without the \
+                 'bzip2-support' feature. Rebuild with `--features \
+                 bzip2-support` (or default features) to read this file, or \
+                 use DCompressor.gzip in files you control.".to_string()
+            ),
+
+            #[cfg(feature = "xz-support")]
+            Some(DLMModuleSubtype::Lzma) => Ok(Box::new(LzmaCompressor::new())),
+            #[cfg(not(feature = "xz-support"))]
+            Some(DLMModuleSubtype::Lzma) => Err(
+                "This file requires XZ/LZMA compression (DCompressor.lzma), but \
+                 this build of dixscript was compiled without the 'xz-support' \
+                 feature. Rebuild with `--features xz-support` (or default \
+                 features) to read this file, or use DCompressor.gzip in \
+                 files you control.".to_string()
+            ),
+
+            Some(other) => Err(format!("Unknown compressor subtype: {:?}", other)),
+        }
+    }
+
+    /// This build has no `dlm-compressor`: report it instead of silently skipping the module.
+    #[cfg(not(feature = "dlm-compressor"))]
+    fn create_compressor(
+        &self,
+        _subtype: Option<DLMModuleSubtype>,
+    ) -> Result<Box<dyn ICompressor>, String> {
+        Err(
+            "This file uses a DCompressor module, but this build of dixscript was compiled \
+             without the 'dlm-compressor' feature. Rebuild with default features \
+             (or `--features dlm-compressor`) to run this file, or remove the DCompressor module.".to_string()
+        )
+    }
+
+    #[cfg(feature = "dlm-encryptor")]
+    fn create_encryptor(
+        &self,
+        subtype: Option<DLMModuleSubtype>,
+        ast:     &mut DixScript,
+    ) -> Result<Box<dyn IEncryptor>, String> {
+        ast.security = Some(SecurityUtilities::ensure_valid_security_section(
+            ast.security.take(),
+            ast.dlm.as_ref(),
+        ));
+
+        if let Err(errors) = SecurityUtilities::is_valid_for_encryption(
+            ast.security.as_ref().unwrap(),
+        ) {
+            return Err(format!("SECURITY section validation failed: {:?}", errors));
+        }
+
+        let security = ast.security.as_ref().unwrap();
+
+        let mut enc: Box<dyn IEncryptor> = match subtype {
+            Some(DLMModuleSubtype::Xor)                => Box::new(XorEncryptor::new(Some(security.clone()))),
+            #[cfg(feature = "encryption-support")]
+            Some(DLMModuleSubtype::Aes128)             => Box::new(Aes128Encryptor::new(Some(security.clone()))),
+            #[cfg(feature = "encryption-support")]
+            Some(DLMModuleSubtype::Aes256) | None      => Box::new(Aes256Encryptor::new(Some(security.clone()))),
+            #[cfg(feature = "encryption-support")]
+            Some(DLMModuleSubtype::Chacha20)           => Box::new(Chacha20Encryptor::new(Some(security.clone()))),
+            #[cfg(not(feature = "encryption-support"))]
+            Some(DLMModuleSubtype::Aes128) => return Err(
+                "This file uses AES-128-GCM encryption (DEncryptor.aes128), but this \
+                 build of dixscript was compiled without the \
+                 'encryption-support' feature. Rebuild with `--features \
+                 encryption-support` (or default features), or use \
+                 DEncryptor.xor in files you control.".to_string()
+            ),
+            #[cfg(not(feature = "encryption-support"))]
+            Some(DLMModuleSubtype::Aes256) | None => return Err(
+                "This file uses AES-256-GCM (the default) encryption (DEncryptor.aes256), but this \
+                 build of dixscript was compiled without the \
+                 'encryption-support' feature. Rebuild with `--features \
+                 encryption-support` (or default features), or use \
+                 DEncryptor.xor in files you control.".to_string()
+            ),
+            #[cfg(not(feature = "encryption-support"))]
+            Some(DLMModuleSubtype::Chacha20) => return Err(
+                "This file uses ChaCha20-Poly1305 encryption (DEncryptor.chacha20), but this \
+                 build of dixscript was compiled without the \
+                 'encryption-support' feature. Rebuild with `--features \
+                 encryption-support` (or default features), or use \
+                 DEncryptor.xor in files you control.".to_string()
+            ),
+            Some(other) => return Err(format!("Unknown encryptor subtype: {:?}", other)),
+        };
+
+        // In password mode, the encryptor derives the key from a password via Argon2.
+        // Supply the password so the encryptor can do that derivation before encrypt() is called.
+        let mode = SecurityUtilities::get_encryption_mode(security);
+        if mode.eq_ignore_ascii_case("password") {
+            let password = self.password.as_deref().ok_or_else(|| {
+                "Encryption mode is 'password' but no password was provided. \
+                 Pass --password <pw> to the compile command or set MDIX_DLM_PASSWORD.".to_string()
+            })?;
+
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug(
+                    "[DLMPipelineExecutor] Supplying password to encryptor for key derivation"
+                );
+            }
+
+            enc.set_password(password)
+                .map_err(|e| format!("Failed to initialise encryption password: {}", e))?;
+        } else {
+            // Keyfile mode: nothing derives a key from a password here, so the
+            // encryptor needs an explicit nudge to generate one before encrypt()
+            // is called — every IEncryptor::initialize() impl already generates
+            // a fresh random key when handed a config with no "key_data" entry
+            // (that's what lets the reverse pipeline load an existing key via
+            // the same method), so reuse that instead of adding a separate
+            // per-subtype key-generation entry point.
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug(
+                    "[DLMPipelineExecutor] Generating fresh key for keyfile-mode encryptor"
+                );
+            }
+
+            enc.initialize(std::collections::HashMap::new());
+        }
+
+        Ok(enc)
+    }
+
+    /// This build has no `dlm-encryptor`: report it instead of silently skipping the module.
+    #[cfg(not(feature = "dlm-encryptor"))]
+    fn create_encryptor(
+        &self,
+        _subtype: Option<DLMModuleSubtype>,
+        _ast:     &mut DixScript,
+    ) -> Result<Box<dyn IEncryptor>, String> {
+        Err(
+            "This file uses a DEncryptor module, but this build of dixscript was compiled \
+             without the 'dlm-encryptor' feature. Rebuild with default features \
+             (or `--features dlm-encryptor`) to run this file, or remove the DEncryptor module.".to_string()
+        )
+    }
+
+    // ── Output file generation ────────────────────────────────────────────────
+
+    fn generate_output_files(
+        &self,
+        result:        &mut DLMPipelineResult,
+        original_size: usize,
+    ) -> Result<(), String> {
+        if result.metadata.is_empty() {
+            return Ok(());
+        }
+
+        let base_name = self.source_file_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or("Invalid source file name")?;
+
+        let enc_path = self.output_directory.join(format!("{}.mdix.enc", base_name));
+        let enc_path_str = enc_path.to_string_lossy().to_string();
+
+        // Best-effort disk write — result.processed_data (set by execute()
+        // before this function ever runs) already has the real encrypted
+        // bytes in memory regardless of whether this succeeds, so a
+        // failure here (e.g. no real filesystem on wasm32) must not stop
+        // us from still building key_file_content below.
+        match self.write_enc_file(&enc_path, &result.processed_data) {
+            Ok(()) => {
+                self.error_manager.log_info(&format!("Output file: {}", enc_path.display()));
+                result.encrypted_file_path = Some(enc_path_str.clone());
+            }
+            Err(e) => {
+                self.error_manager.log_warning(&format!(
+                    "Encrypted data ready in memory but could not be written to disk: {}", e
+                ));
+            }
+        }
+
+        let compressed_size = result.metadata
+            .get("compressor")
+            .and_then(|m| m.get("compressed_size"))
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(original_size);
+
+        let key_manager = KeyFileManager::new(
+            self.source_file_path.to_string_lossy().to_string(),
+            self.output_directory.to_string_lossy().to_string(),
+        );
+
+        let (key_file_path, key_content) = key_manager.build_key_file_content(
+            &enc_path_str,
+            result.metadata.get("compressor").cloned(),
+            result.metadata.get("encryptor").cloned(),
+            result.metadata.get("auditor").cloned(),
+            (original_size, compressed_size, result.processed_size),
+        )?;
+
+        // Always available in memory, same as result.processed_data — this
+        // is what a wasm32 caller (no real filesystem) reads directly
+        // instead of result.key_file_path, and what
+        // DLMReverseExecutor::execute_from_bytes expects as its
+        // key_file_content argument.
+        result.key_file_content = Some(key_content.clone());
+
+        // Best-effort disk write. On wasm32 this will fail (no real
+        // filesystem) and result.key_file_path stays None — that's fine,
+        // it's a warning at the call site in execute(), not fatal, and
+        // result.key_file_content above already has what matters.
+        if let Some(parent) = Path::new(&key_file_path).parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        match self.write_key_file(&key_file_path, key_content.as_bytes()) {
+            Ok(()) => {
+                self.error_manager.log_info(&format!("Key file: {}", key_file_path));
+                result.key_file_path = Some(key_file_path);
+            }
+            Err(e) => {
+                self.error_manager.log_warning(&format!(
+                    "Key file content built in memory but could not be written to disk: {}", e
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn write_key_file(&self, path: &str, content: &[u8]) -> Result<(), String> {
+        let p = Path::new(path);
+        if p.exists() {
+            file_permissions::set_writable(p)
+                .map_err(|e| format!("Cannot unlock key file for writing: {}", e))?;
+        }
+        let result = fs::write(p, content)
+            .map_err(|e| format!("Failed to write key file: {}", e));
+        if let Err(e) = file_permissions::set_readonly(p) {
+            self.error_manager.log_warning(&format!("Could not lock key file read-only: {}", e));
+        }
+        result
+    }
+
+    fn write_enc_file(&self, path: &Path, data: &[u8]) -> Result<(), String> {
+        if path.exists() {
+            file_permissions::set_writable(path)
+                .map_err(|e| format!("Cannot unlock .mdix.enc for writing: {}", e))?;
+        }
+
+        let result = fs::write(path, data)
+            .map_err(|e| format!("Failed to write encrypted file: {}", e));
+
+        if let Err(e) = file_permissions::set_readonly(path) {
+            self.error_manager.log_warning(&format!("Could not lock .mdix.enc read-only: {}", e));
+        }
+
+        result
+    }
+
+    // ── Utility ───────────────────────────────────────────────────────────────
+
+    #[inline]
+    fn base_name(&self) -> String {
+        self.source_file_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string()
+    }
+    }

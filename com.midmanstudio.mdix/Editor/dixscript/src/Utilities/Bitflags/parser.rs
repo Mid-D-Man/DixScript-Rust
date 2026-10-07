@@ -2,42 +2,64 @@
 // NOTICE: Full documentation, design decisions, and fix history for this file
 // live in docs/dixscript/utilities.md, section "Utilities/Bitflags"
 // ============================================================================
-//! Formatting and parsing flags values as text.
-//!
-//! The grammar, as upstream documents it:
-//! - _Flags:_ (_Whitespace_ _Flag_ _Whitespace_)`|`*
-//! - _Flag:_ _Name_ | _Hex Number_
-//! - _Name:_ the name of any defined flag (case-sensitive)
-//! - _Hex Number:_ `0x` followed by hex digits
-//!
-//! So `Flags::A | Flags::B | 0x0c` round-trips as `A | B | 0x0c`. This is what
-//! a derived `Debug` on a generated type prints.
-//!
-//! ## Attribution
-//! Derived from the `bitflags` crate, v2.10.0
-//! (<https://github.com/bitflags/bitflags>), licensed `MIT OR Apache-2.0`;
-//! the algorithms follow upstream's `src/parser.rs`.
-//!
-//! ## One deliberate fixed choice: the `std`-less `ParseError`
-//! Upstream's `ParseError` carries the offending text only when its optional
-//! `std` feature is on. This crate depends on `bitflags` with default features
-//! (no `std`), so the faithful behavior is the `std`-less one: the payload is
-//! `()`, the `Display` text has no trailing `` `name` ``, and `ParseError` does
-//! not implement `std::error::Error` (upstream only provides that with `std`).
-//! That is what is ported.
+// Derived from `bitflags` 2.10.0 (https://github.com/bitflags/bitflags),
+// Copyright (c) The Rust Project Developers, licensed MIT OR Apache-2.0.
+// Port of src/parser.rs in its `std` shape (no serde glue; keeps the offending text and implements `Error`).
+//
+/*!
+Parsing flags from text.
+
+Format and parse a flags value as text using the following grammar:
+
+- _Flags:_ (_Whitespace_ _Flag_ _Whitespace_)`|`*
+- _Flag:_ _Name_ | _Hex Number_
+- _Name:_ The name of any defined flag
+- _Hex Number_: `0x`([0-9a-fA-F])*
+- _Whitespace_: (\s)*
+
+As an example, this is how `Flags::A | Flags::B | 0x0c` can be represented as text:
+
+```text
+A | B | 0x0c
+```
+
+Alternatively, it could be represented without whitespace:
+
+```text
+A|B|0x0C
+```
+
+Note that identifiers are *case-sensitive*, so the following is *not equivalent*:
+
+```text
+a|b|0x0C
+```
+*/
+
+#![allow(clippy::let_unit_value)]
 
 use core::fmt::{self, Write};
 
-use super::traits::{Bits, Flags};
+use crate::Utilities::Bitflags::{Bits, Flags};
 
-/// Write a flags value as text. Any bits that aren't part of a contained flag
-/// are written as a hex number, e.g. `A | B | 0xf6`.
+/**
+Write a flags value as text.
+
+Any bits that aren't part of a contained flag will be formatted as a hex number.
+*/
 pub fn to_writer<B: Flags>(flags: &B, mut writer: impl Write) -> Result<(), fmt::Error>
 where
     B::Bits: WriteHex,
 {
-    // The names of set flags, bar-separated, then a hex number for any bits
-    // that are set but don't correspond to a flag.
+    // A formatter for bitflags that produces text output like:
+    //
+    // A | B | 0xf6
+    //
+    // The names of set flags are written in a bar-separated-format,
+    // followed by a hex number of any remaining bits that are set
+    // but don't correspond to any flags.
+
+    // Iterate over known flag values
     let mut first = true;
     let mut iter = flags.iter_names();
     for (name, _) in &mut iter {
@@ -49,6 +71,7 @@ where
         writer.write_str(name)?;
     }
 
+    // Append any extra bits that correspond to flags to the end of the format
     let remaining = iter.remaining().bits();
     if remaining != B::Bits::EMPTY {
         if !first {
@@ -62,15 +85,21 @@ where
     fmt::Result::Ok(())
 }
 
-/// Parse a flags value from text. Fails on any name that isn't a defined flag;
-/// unknown bits (from hex) are retained.
+
+
+/**
+Parse a flags value from text.
+
+This function will fail on any names that don't correspond to defined flags.
+Unknown bits will be retained.
+*/
 pub fn from_str<B: Flags>(input: &str) -> Result<B, ParseError>
 where
     B::Bits: ParseHex,
 {
     let mut parsed_flags = B::empty();
 
-    // Empty input is an empty set of flags.
+    // If the input is empty then return an empty set of flags
     if input.trim().is_empty() {
         return Ok(parsed_flags);
     }
@@ -78,19 +107,23 @@ where
     for flag in input.split('|') {
         let flag = flag.trim();
 
-        // An empty flag between bars is missing input.
+        // If the flag is empty then we've got missing input
         if flag.is_empty() {
             return Err(ParseError::empty_flag());
         }
 
-        // `0x...` is a hex number, parsed straight to the bits type; anything
-        // else is a name, and the generated type decides if it's valid.
+        // If the flag starts with `0x` then it's a hex number
+        // Parse it directly to the underlying bits type
         let parsed_flag = if let Some(flag) = flag.strip_prefix("0x") {
             let bits =
                 <B::Bits>::parse_hex(flag).map_err(|_| ParseError::invalid_hex_flag(flag))?;
 
             B::from_bits_retain(bits)
-        } else {
+        }
+        // Otherwise the flag is a name
+        // The generated flags type will determine whether
+        // or not it's a valid identifier
+        else {
             B::from_name(flag).ok_or_else(|| ParseError::invalid_named_flag(flag))?
         };
 
@@ -100,7 +133,9 @@ where
     Ok(parsed_flags)
 }
 
-/// Write a flags value as text, ignoring any unknown bits.
+/**
+Write a flags value as text, ignoring any unknown bits.
+*/
 pub fn to_writer_truncate<B: Flags>(flags: &B, writer: impl Write) -> Result<(), fmt::Error>
 where
     B::Bits: WriteHex,
@@ -108,7 +143,12 @@ where
     to_writer(&B::from_bits_truncate(flags.bits()), writer)
 }
 
-/// Parse a flags value from text, ignoring any unknown bits.
+/**
+Parse a flags value from text.
+
+This function will fail on any names that don't correspond to defined flags.
+Unknown bits will be ignored.
+*/
 pub fn from_str_truncate<B: Flags>(input: &str) -> Result<B, ParseError>
 where
     B::Bits: ParseHex,
@@ -116,8 +156,13 @@ where
     Ok(B::from_bits_truncate(from_str::<B>(input)?.bits()))
 }
 
-/// Write only the contained, defined, named flags of a value as text.
+/**
+Write only the contained, defined, named flags in a flags value as text.
+*/
 pub fn to_writer_strict<B: Flags>(flags: &B, mut writer: impl Write) -> Result<(), fmt::Error> {
+    // This is a simplified version of `to_writer` that ignores
+    // any bits not corresponding to a named flag
+
     let mut first = true;
     let mut iter = flags.iter_names();
     for (name, _) in &mut iter {
@@ -132,10 +177,19 @@ pub fn to_writer_strict<B: Flags>(flags: &B, mut writer: impl Write) -> Result<(
     fmt::Result::Ok(())
 }
 
-/// Parse a flags value from text. Fails on unknown names and on hex values.
+/**
+Parse a flags value from text.
+
+This function will fail on any names that don't correspond to defined flags.
+This function will fail to parse hex values.
+*/
 pub fn from_str_strict<B: Flags>(input: &str) -> Result<B, ParseError> {
+    // This is a simplified version of `from_str` that ignores
+    // any bits not corresponding to a named flag
+
     let mut parsed_flags = B::empty();
 
+    // If the input is empty then return an empty set of flags
     if input.trim().is_empty() {
         return Ok(parsed_flags);
     }
@@ -143,11 +197,13 @@ pub fn from_str_strict<B: Flags>(input: &str) -> Result<B, ParseError> {
     for flag in input.split('|') {
         let flag = flag.trim();
 
+        // If the flag is empty then we've got missing input
         if flag.is_empty() {
             return Err(ParseError::empty_flag());
         }
 
-        // Hex values aren't supported by the strict parser.
+        // If the flag starts with `0x` then it's a hex number
+        // These aren't supported in the strict parser
         if flag.starts_with("0x") {
             return Err(ParseError::invalid_hex_flag("unsupported hex flag value"));
         }
@@ -160,13 +216,19 @@ pub fn from_str_strict<B: Flags>(input: &str) -> Result<B, ParseError> {
     Ok(parsed_flags)
 }
 
-/// Encode a value as a hex string, without the `0x` prefix.
+/**
+Encode a value as a hex string.
+
+Implementors of this trait should not write the `0x` prefix.
+*/
 pub trait WriteHex {
     /// Write the value as hex.
     fn write_hex<W: fmt::Write>(&self, writer: W) -> fmt::Result;
 }
 
-/// Parse a value from a hex string, without the `0x` prefix.
+/**
+Parse a value from a hex string.
+*/
 pub trait ParseHex {
     /// Parse the value from hex.
     fn parse_hex(input: &str) -> Result<Self, ParseError>
@@ -178,28 +240,43 @@ pub trait ParseHex {
 #[derive(Debug)]
 pub struct ParseError(ParseErrorKind);
 
-// The `got: ()` payloads are never read: they exist so the variant shapes match upstream's
-// `std`-less build (see the module doc). `Debug` shows them, but rustc does not count that.
 #[derive(Debug)]
-#[allow(clippy::enum_variant_names, dead_code)]
+#[allow(clippy::enum_variant_names)]
 enum ParseErrorKind {
     EmptyFlag,
-    InvalidNamedFlag { got: () },
-    InvalidHexFlag { got: () },
+    InvalidNamedFlag {
+        got: String,
+    },
+    InvalidHexFlag {
+        got: String,
+    },
 }
 
 impl ParseError {
     /// An invalid hex flag was encountered.
     pub fn invalid_hex_flag(flag: impl fmt::Display) -> Self {
         let _flag = flag;
-        ParseError(ParseErrorKind::InvalidHexFlag { got: () })
+
+        let got = {
+            {
+                _flag.to_string()
+            }
+        };
+
+        ParseError(ParseErrorKind::InvalidHexFlag { got })
     }
 
-    /// A named flag that doesn't correspond to any on the flags type was
-    /// encountered.
+    /// A named flag that doesn't correspond to any on the flags type was encountered.
     pub fn invalid_named_flag(flag: impl fmt::Display) -> Self {
         let _flag = flag;
-        ParseError(ParseErrorKind::InvalidNamedFlag { got: () })
+
+        let got = {
+            {
+                _flag.to_string()
+            }
+        };
+
+        ParseError(ParseErrorKind::InvalidNamedFlag { got })
     }
 
     /// A hex or named flag wasn't found between separators.
@@ -211,11 +288,23 @@ impl ParseError {
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
-            ParseErrorKind::InvalidNamedFlag { .. } => {
+            ParseErrorKind::InvalidNamedFlag { got } => {
+                let _got = got;
+
                 write!(f, "unrecognized named flag")?;
+
+                {
+                    write!(f, " `{}`", _got)?;
+                }
             }
-            ParseErrorKind::InvalidHexFlag { .. } => {
+            ParseErrorKind::InvalidHexFlag { got } => {
+                let _got = got;
+
                 write!(f, "invalid hex flag")?;
+
+                {
+                    write!(f, " `{}`", _got)?;
+                }
             }
             ParseErrorKind::EmptyFlag => {
                 write!(f, "encountered empty flag")?;
@@ -225,3 +314,5 @@ impl fmt::Display for ParseError {
         Ok(())
     }
 }
+
+impl std::error::Error for ParseError {}

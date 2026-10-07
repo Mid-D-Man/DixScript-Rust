@@ -2,26 +2,23 @@
 // NOTICE: Full documentation, design decisions, and fix history for this file
 // live in docs/dixscript/utilities.md, section "Utilities/Bitflags"
 // ============================================================================
-//! The trait layer of the `bitflags` port: [`Flag`], [`Flags`], [`Bits`],
-//! [`Primitive`] and [`PublicFlags`].
-//!
-//! ## Attribution
-//! Derived from the `bitflags` crate, v2.10.0
-//! (<https://github.com/bitflags/bitflags>), licensed `MIT OR Apache-2.0`.
-//! The trait definitions and every default method body follow upstream's
-//! `src/traits.rs`; explanatory comments are condensed. Upstream's
-//! deprecated `BitFlags` alias trait and `ImplementedByBitFlagsMacro` marker
-//! are not carried over.
-
+// Derived from `bitflags` 2.10.0 (https://github.com/bitflags/bitflags),
+// Copyright (c) The Rust Project Developers, licensed MIT OR Apache-2.0.
+// Port of src/traits.rs. Removed: the deprecated `BitFlags` trait and its marker.
+//
 use core::{
     fmt,
     ops::{BitAnd, BitOr, BitXor, Not},
 };
 
-use super::iter;
-use super::parser::{ParseError, ParseHex, WriteHex};
+use crate::Utilities::Bitflags::{
+    iter,
+    parser::{ParseError, ParseHex, WriteHex},
+};
 
-/// A defined flags value that may be named or unnamed.
+/**
+A defined flags value that may be named or unnamed.
+*/
 #[derive(Debug)]
 pub struct Flag<B> {
     name: &'static str,
@@ -29,40 +26,117 @@ pub struct Flag<B> {
 }
 
 impl<B> Flag<B> {
-    /// Define a flag. If `name` is non-empty the flag is named, otherwise it
-    /// is unnamed.
+    /**
+    Define a flag.
+
+    If `name` is non-empty then the flag is named, otherwise it's unnamed.
+    */
     pub const fn new(name: &'static str, value: B) -> Self {
         Flag { name, value }
     }
 
-    /// The flag's name; empty if the flag is unnamed.
+    /**
+    Get the name of this flag.
+
+    If the flag is unnamed then the returned string will be empty.
+    */
     pub const fn name(&self) -> &'static str {
         self.name
     }
 
-    /// The flag's value.
+    /**
+    Get the flags value of this flag.
+    */
     pub const fn value(&self) -> &B {
         &self.value
     }
 
-    /// Whether the flag is named.
+    /**
+    Whether the flag is named.
+
+    If [`Flag::name`] returns a non-empty string then this method will return `true`.
+    */
     pub const fn is_named(&self) -> bool {
         !self.name.is_empty()
     }
 
-    /// Whether the flag is unnamed.
+    /**
+    Whether the flag is unnamed.
+
+    If [`Flag::name`] returns a non-empty string then this method will return `false`.
+    */
     pub const fn is_unnamed(&self) -> bool {
         self.name.is_empty()
     }
 }
 
-/// A set of defined flags using a bits type as storage.
-///
-/// Implemented by the `bitflags!` macro; it can also be written by hand.
-/// Everything with a default body here is also available, under the same name,
-/// as an inherent method on the generated type, except `truncate`, `clear`,
-/// `contains_unknown_bits` and `iter_defined_names`, which (as upstream) exist
-/// only on this trait.
+/**
+A set of defined flags using a bits type as storage.
+
+## Implementing `Flags`
+
+This trait is implemented by the [`bitflags`](macro.bitflags.html) macro:
+
+```text
+use bitflags::bitflags;
+
+bitflags! {
+    struct MyFlags: u8 {
+        const A = 1;
+        const B = 1 << 1;
+    }
+}
+```
+
+It can also be implemented manually:
+
+```text
+use bitflags::{Flag, Flags};
+
+struct MyFlags(u8);
+
+impl Flags for MyFlags {
+    const FLAGS: &'static [Flag<Self>] = &[
+        Flag::new("A", MyFlags(1)),
+        Flag::new("B", MyFlags(1 << 1)),
+    ];
+
+    type Bits = u8;
+
+    fn from_bits_retain(bits: Self::Bits) -> Self {
+        MyFlags(bits)
+    }
+
+    fn bits(&self) -> Self::Bits {
+        self.0
+    }
+}
+```
+
+## Using `Flags`
+
+The `Flags` trait can be used generically to work with any flags types. In this example,
+we can count the number of defined named flags:
+
+```text
+# use bitflags::{bitflags, Flags};
+fn defined_flags<F: Flags>() -> usize {
+    F::FLAGS.iter().filter(|f| f.is_named()).count()
+}
+
+bitflags! {
+    struct MyFlags: u8 {
+        const A = 1;
+        const B = 1 << 1;
+        const C = 1 << 2;
+
+        const _ = !0;
+    }
+}
+
+assert_eq!(3, defined_flags::<MyFlags>());
+```
+*/
 pub trait Flags: Sized + 'static {
     /// The set of defined flags.
     const FLAGS: &'static [Flag<Self>];
@@ -86,15 +160,19 @@ pub trait Flags: Sized + 'static {
         Self::from_bits_retain(truncated)
     }
 
-    /// Whether any unknown bits are set.
+    /// This method will return `true` if any unknown bits are set.
     fn contains_unknown_bits(&self) -> bool {
         Self::all().bits() & self.bits() != self.bits()
     }
 
     /// Get the underlying bits value.
+    ///
+    /// The returned value is exactly the bits set in this flags value.
     fn bits(&self) -> Self::Bits;
 
-    /// Convert from a bits value exactly; `None` if any unknown bit is set.
+    /// Convert from a bits value.
+    ///
+    /// This method will return `None` if any unknown bits are set.
     fn from_bits(bits: Self::Bits) -> Option<Self> {
         let truncated = Self::from_bits_truncate(bits);
 
@@ -110,11 +188,13 @@ pub trait Flags: Sized + 'static {
         Self::from_bits_retain(bits & Self::all().bits())
     }
 
-    /// Convert from a bits value, keeping every bit.
+    /// Convert from a bits value exactly.
     fn from_bits_retain(bits: Self::Bits) -> Self;
 
     /// Get a flags value with the bits of a flag with the given name set.
-    /// `None` if there's no flag with that name, or if `name` is empty.
+    ///
+    /// This method will return `None` if `name` is empty or doesn't
+    /// correspond to any named flag.
     fn from_name(name: &str) -> Option<Self> {
         // Don't parse empty names as empty flags
         if name.is_empty() {
@@ -130,13 +210,18 @@ pub trait Flags: Sized + 'static {
         None
     }
 
-    /// Yield a set of contained flags values: defined flags first, then any
-    /// leftover bits as one final value.
+    /// Yield a set of contained flags values.
+    ///
+    /// Each yielded flags value will correspond to a defined named flag. Any unknown bits
+    /// will be yielded together as a final flags value.
     fn iter(&self) -> iter::Iter<Self> {
         iter::Iter::new(self)
     }
 
     /// Yield a set of contained named flags values.
+    ///
+    /// This method is like [`Flags::iter`], except only yields bits in contained named flags.
+    /// Any unknown bits, or bits not corresponding to a contained flag will not be yielded.
     fn iter_names(&self) -> iter::IterNames<Self> {
         iter::IterNames::new(self)
     }
@@ -153,12 +238,12 @@ pub trait Flags: Sized + 'static {
 
     /// Whether all known bits in this flags value are set.
     fn is_all(&self) -> bool {
-        // NOTE: Checked against `Self::all`, not `Self::Bits::ALL`, because the
-        // set of all flags may not use every bit.
+        // NOTE: We check against `Self::all` here, not `Self::Bits::ALL`
+        // because the set of all flags may not use all bits
         Self::all().bits() | self.bits() == self.bits()
     }
 
-    /// Whether any set bits in a source flags value are also set in a target.
+    /// Whether any set bits in a source flags value are also set in a target flags value.
     fn intersects(&self, other: Self) -> bool
     where
         Self: Sized,
@@ -166,7 +251,7 @@ pub trait Flags: Sized + 'static {
         self.bits() & other.bits() != Self::Bits::EMPTY
     }
 
-    /// Whether all set bits in a source flags value are also set in a target.
+    /// Whether all set bits in a source flags value are also set in a target flags value.
     fn contains(&self, other: Self) -> bool
     where
         Self: Sized,
@@ -190,8 +275,10 @@ pub trait Flags: Sized + 'static {
         *self = Self::from_bits_retain(self.bits()).union(other);
     }
 
-    /// The intersection of a source flags value with the complement of a
-    /// target flags value (`&!`). Unknown bits in `other` are not retained.
+    /// The intersection of a source flags value with the complement of a target flags value (`&!`).
+    ///
+    /// This method is not equivalent to `self & !other` when `other` has unknown bits set.
+    /// `remove` won't truncate `other`, but the `!` operator will.
     fn remove(&mut self, other: Self)
     where
         Self: Sized,
@@ -207,8 +294,7 @@ pub trait Flags: Sized + 'static {
         *self = Self::from_bits_retain(self.bits()).symmetric_difference(other);
     }
 
-    /// Call [`Flags::insert`] when `value` is `true` or [`Flags::remove`] when
-    /// `value` is `false`.
+    /// Call [`Flags::insert`] when `value` is `true` or [`Flags::remove`] when `value` is `false`.
     fn set(&mut self, other: Self, value: bool)
     where
         Self: Sized,
@@ -220,7 +306,7 @@ pub trait Flags: Sized + 'static {
         }
     }
 
-    /// Unset all bits.
+    /// Unsets all bits in the flags.
     fn clear(&mut self)
     where
         Self: Sized,
@@ -240,8 +326,10 @@ pub trait Flags: Sized + 'static {
         Self::from_bits_retain(self.bits() | other.bits())
     }
 
-    /// The intersection of a source flags value with the complement of a
-    /// target flags value (`&!`).
+    /// The intersection of a source flags value with the complement of a target flags value (`&!`).
+    ///
+    /// This method is not equivalent to `self & !other` when `other` has unknown bits set.
+    /// `difference` won't truncate `other`, but the `!` operator will.
     #[must_use]
     fn difference(self, other: Self) -> Self {
         Self::from_bits_retain(self.bits() & !other.bits())
@@ -253,15 +341,16 @@ pub trait Flags: Sized + 'static {
         Self::from_bits_retain(self.bits() ^ other.bits())
     }
 
-    /// The bitwise negation (`!`) of the bits in a flags value, truncating the
-    /// result.
+    /// The bitwise negation (`!`) of the bits in a flags value, truncating the result.
     #[must_use]
     fn complement(self) -> Self {
         Self::from_bits_truncate(!self.bits())
     }
 }
 
-/// A bits type that can be used as storage for a flags type.
+/**
+A bits type that can be used as storage for a flags type.
+*/
 pub trait Bits:
     Clone
     + Copy
@@ -280,9 +369,8 @@ pub trait Bits:
     const ALL: Self;
 }
 
-/// Marks the primitive integer types the macro accepts as storage. Not
-/// implementable outside this module, so a custom `Bits` type can't be fed to
-/// the macro.
+// Not re-exported: prevent custom `Bits` impls being used in the `bitflags!` macro,
+// or they may fail to compile based on crate features
 pub trait Primitive {}
 
 macro_rules! impl_bits {
@@ -337,12 +425,17 @@ impl_bits! {
     usize, isize,
 }
 
-/// A trait for referencing the `bitflags`-owned internal type without
-/// exposing it publicly.
+/// A trait for referencing the `bitflags`-owned internal type
+/// without exposing it publicly.
 pub trait PublicFlags {
     /// The type of the underlying storage.
     type Primitive: Primitive;
 
     /// The type of the internal field on the generated flags type.
     type Internal;
+}
+
+
+pub(crate) mod __private {
+    pub use super::PublicFlags;
 }

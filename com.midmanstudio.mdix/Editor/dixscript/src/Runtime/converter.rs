@@ -756,8 +756,14 @@ impl DixConverter {
         })
     }
 
-    // ── TOML export ───────────────────────────────────────────────────────────
+}
 
+// ── TOML export / import ─────────────────────────────────────────────────────
+// A separate `impl` so the whole block can sit behind one `cfg`: with
+// `toml-support` off, the `toml` crate (and its toml_edit / winnow stack) is not
+// compiled and `to_toml` / `from_toml` do not exist.
+#[cfg(feature = "toml-support")]
+impl DixConverter {
     pub fn to_toml(&self, ast: &DixScript) -> Result<String, String> {
         let toml_value = self.ast_to_toml_value(ast)?;
         toml::to_string_pretty(&toml_value)
@@ -938,7 +944,9 @@ impl DixConverter {
             }
         })
     }
+}
 
+impl DixConverter {
     // ── Array homogeneity helpers ─────────────────────────────────────────────
 
     /// Classify a `DixValue` into a type-kind bucket for array homogeneity

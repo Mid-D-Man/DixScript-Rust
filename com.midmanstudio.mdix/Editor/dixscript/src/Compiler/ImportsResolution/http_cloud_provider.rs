@@ -79,7 +79,6 @@ impl HttpCloudProvider {
     }
 }
 
-// Hand-desugared from `#[async_trait]`; see Utilities/AsyncTrait/boxed_future.rs.
 impl CloudStorageProvider for HttpCloudProvider {
     fn download_file_async<'life0, 'life1, 'async_trait>(
         &'life0 self,

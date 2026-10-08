@@ -29,8 +29,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Explorer sections fold and unfold: click a section header, or use
   Fold All / Unfold All.
 - **Save** on an unsaved scratch document now asks where to save it.
+- **Search** tab: find text in every `.mdix` file of the project (Assets and
+  packages). Plain or regex, optional match case, and **Names only** to skip
+  values and comments. The open document is searched with its unsaved edits.
+  Click a result to open the file with the match selected.
+- The Explorer shows nested data to any depth: objects and arrays inside
+  objects, arrays of arrays, and arrays of objects that hold more arrays. Every
+  level folds. Arrays of flat objects stay a table.
+- The bake wizard lists the `[MdixBakeable]` classes best fit first, with how
+  much of the file each one reads. It tells you what the bake could not fill
+  (members without data, keys nothing reads, members Unity would not store),
+  refuses a bake that would put defaults where the data had a value, and
+  updates an existing asset in place so references to it survive.
+- Bake binder (`Editor/Bake/MdixBinder.cs`): fills public fields,
+  `[SerializeField]` fields and writable properties, lists, arrays, nested
+  classes and enums to any depth.
 
 ### Fixed
+
+- **Generate ScriptableObject** left every list or array member empty, because
+  the serializer it used cannot fill them, and it built the ScriptableObject
+  with `new`, which Unity does not allow. Baking now fills the instance that
+  `CreateInstance` made, from the engine's own values.
+- The Explorer listed array items a second time as extra top-level rows, did
+  not draw tables for arrays at the top of a file, and the status bar counted
+  those items as "flat keys". The counts now match the entry count in the
+  Inspector.
+- The `[MdixBakeable]` documentation example could not work (a data path that
+  already named the array, and properties Unity does not store). Corrected.
 
 - The **Open in MDIX Studio** and **Generate ScriptableObject** buttons in the
   `.mdix` asset Inspector did nothing: the importer's read-only asset made

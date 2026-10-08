@@ -170,30 +170,46 @@ StreamingAssets/
 For data that never changes at runtime, bake your `.mdix` into a typed
 Unity ScriptableObject for zero-cost access:
 ```csharp
-// 1. Mark your ScriptableObject
-[MdixBakeable("enemies")]
-public class EnemyDataAsset : ScriptableObject
+// 1. Describe the data. Public fields are what Unity stores. A key such as
+//    spawn_cap is read by a member called SpawnCap, spawnCap or spawn_cap.
+[Serializable]
+public class EnemyConfig
 {
-    public List<EnemyConfig> enemies;
+    public string Name;
+    public int Health;
+}
+
+[MdixBakeable]
+public class EnemyDatabase : ScriptableObject
+{
+    public int SpawnCap;
+    public List<EnemyConfig> Enemies;
 }
 
 // 2. Right-click the .mdix asset in the Project window
-//    → Generate ScriptableObject
-//    → Pick EnemyDataAsset from the list
+//    → MDIX → Generate ScriptableObject
+//    → the class that fits this file best is already selected
 //    → Click Generate
 
 // 3. Use the baked asset directly — no parsing, no FFI
 public class Spawner : MonoBehaviour
 {
-    [SerializeField] private EnemyDataAsset _enemies;
+    [SerializeField] private EnemyDatabase _enemies;
 
-    void Start()
-    {
-        var goblin = _enemies.enemies[0];
-        Debug.Log(goblin.Name);
-    }
+    void Start() => Debug.Log(_enemies.Enemies[0].Name);
 }
 ```
+
+What the bake reads: public fields and `[SerializeField]` fields, writable properties, lists and
+arrays, nested `[Serializable]` classes and structs, and enums, to any depth. Enums are matched by
+their number, so keep the numbers of a C# enum equal to those in the file's `@ENUMS` section.
+Numbers convert between int, float and double; a value that does not fit refuses the bake instead
+of being rounded.
+
+After each bake the wizard lists the members the file has no value for, the keys nothing reads, and
+the members Unity would not store (a property without `[field: SerializeField]`, a nested class that
+is not `[Serializable]`). Baking again updates the same asset in place, so scenes and prefabs that
+point at it keep working. The class list shows how much of the file each class reads, best first.
 
 ---
 
@@ -202,12 +218,18 @@ public class Spawner : MonoBehaviour
 Open via **MidManStudio → MDIX Studio**, double-click any `.mdix` asset, or right-click one and
 choose **MDIX → Open in MDIX Studio**.
 
-- **Explorer tab** — compiled data viewer. Flat properties shown as
-  key-value rows. Arrays shown as Supabase-style tables with typed columns.
-  Click a section header to fold it; **Fold All** / **Unfold All** does every section at once.
+- **Explorer tab** — compiled data viewer. Plain values are key-value rows. An array of flat
+  objects is a table with typed columns. Objects and arrays nest to any depth; each one folds when
+  you click its header, and **Fold All** / **Unfold All** does every one at once. Large data is
+  capped (200 items per array) and says so.
 - **Editor tab** — source text editor with live compile status, syntax highlighting and
   language-server features (diagnostics, completion, hover — see below). **Save** on an
   unsaved scratch document asks where to put it.
+- **Search tab** — find text in every `.mdix` file of the project, packages included. Typing
+  searches after a short pause and Enter searches at once. **Match case**, **Regex** and
+  **Names only** (keys, sections, enums and functions, skipping values and comments) narrow it. Click
+  a result to open the file at the match. The open document is searched as you have it, unsaved
+  edits included.
 - **Templates tab** — create new files from built-in templates.
 
 ### Language server

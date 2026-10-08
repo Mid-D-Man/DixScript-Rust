@@ -133,6 +133,7 @@ pub mod dix_serialize;
 pub mod dix_value;
 pub mod format_options;
 pub mod hot_reload;
+#[cfg(feature = "dlm")]
 pub mod key_resolver;
 pub mod load_options;
 pub mod loader;
@@ -164,6 +165,7 @@ pub use data_builder::{
 
 // ── Encryption / key management ───────────────────────────────────────────────
 
+#[cfg(feature = "dlm")]
 pub use key_resolver::{
     KeyFileResolution,
     KeyFileResolver,

@@ -237,13 +237,11 @@ mod native_cache {
         }
 
         fn extract_filename_from_url(url: &str) -> String {
-            if let Ok(parsed) = url::Url::parse(url) {
-                if let Some(mut segments) = parsed.path_segments() {
-                    if let Some(last) = segments.next_back() {
-                        if !last.is_empty() {
-                            return last.to_string();
-                        }
-                    }
+            // Was `url::Url::parse(url)?.path_segments()?.next_back()`; the same
+            // result, without the `url` crate (see Utilities/Url).
+            if let Some(last) = crate::Utilities::Url::last_path_segment(url) {
+                if !last.is_empty() {
+                    return last;
                 }
             }
             let hash = compute_url_hash(normalize_cache_key(url));

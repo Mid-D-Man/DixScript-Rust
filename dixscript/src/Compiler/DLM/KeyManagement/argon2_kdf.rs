@@ -4,6 +4,7 @@
 use crate::Compiler::AST::SecuritySection;
 use crate::ErrorManager::{ErrorManager, DlmErrorType};
 use std::collections::HashMap;
+#[cfg(feature = "argon2-support")]
 use argon2::{Argon2, Algorithm, Version, Params};
 
 /// Argon2id Key Derivation Function
@@ -162,6 +163,13 @@ impl Argon2KDF {
             );
         }
 
+        self.argon2id(password, key_length)
+    }
+
+    /// The Argon2id (v0x13) derivation itself: the only place this file touches the
+    /// `argon2` crate, so the dependency can sit behind `argon2-support`.
+    #[cfg(feature = "argon2-support")]
+    fn argon2id(&self, password: &str, key_length: usize) -> Result<Vec<u8>, String> {
         let start = web_time::Instant::now();
 
         let params = Params::new(
@@ -206,6 +214,27 @@ impl Argon2KDF {
         ));
 
         Ok(key)
+    }
+
+    /// Without `argon2-support` the parameters, salt and metadata still work (so a
+    /// key file can be read and written), but nothing can derive a key from a
+    /// password.
+    #[cfg(not(feature = "argon2-support"))]
+    fn argon2id(&self, _password: &str, _key_length: usize) -> Result<Vec<u8>, String> {
+        let msg = "Argon2id key derivation is not available: this build of dixscript was \
+                   compiled without the 'argon2-support' feature. Rebuild with default \
+                   features (or `--features argon2-support`), or use keyfile mode instead \
+                   of password mode."
+            .to_string();
+        self.error_manager.add_dlm_error(
+            DlmErrorType::KeyGenerationFailed,
+            msg.clone(),
+            Some("Argon2KDF".to_string()),
+            None,
+            None,
+            crate::ErrorManager::ErrorSeverity::Error,
+        );
+        Err(msg)
     }
 
     /// Return all KDF parameters as a metadata map for writing to `.mdix.key`.
@@ -265,6 +294,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "argon2-support")]
     #[test]
     fn test_argon2_key_derivation() {
         let kdf  = Argon2KDF::new(&make_security(65536, 3, 4));
@@ -310,6 +340,7 @@ mod tests {
         assert!(Argon2KDF::from_params_with_salt(65536, 3, 4, vec![0u8; 16]).is_err());
     }
 
+    #[cfg(feature = "argon2-support")]
     #[test]
     fn test_forward_reverse_key_match() {
         let fwd_kdf = Argon2KDF::new(&make_security(65536, 3, 4));
@@ -340,4 +371,16 @@ mod tests {
             .unwrap();
         assert_eq!(decoded, kdf.salt());
     }
+    
+
+    #[cfg(not(feature = "argon2-support"))]
+    #[test]
+    fn derive_key_is_a_clear_error_without_argon2_support() {
+        let kdf = Argon2KDF::new(&make_security(65536, 3, 4));
+        let e = kdf.derive_key("test_password", 32).unwrap_err();
+        assert!(e.contains("'argon2-support' feature"), "unhelpful error: {e}");
+        // parameters and salt still work, so key files can be read and written
+        assert_eq!(kdf.salt().len(), 32);
+        assert_eq!(kdf.get_metadata()["kdf_algorithm"], "argon2id");
     }
+}

@@ -3,9 +3,9 @@
 //! Execution order: Decryptor → Decompressor.
 
 use crate::Compiler::DLM::{
-    Auditor::{IAuditor, DiyAuditor},
-    Compressor::{ICompressor, GzipCompressor},
-    Encryptor::{IEncryptor, XorEncryptor, Aes128Encryptor, Aes256Encryptor, Chacha20Encryptor},
+    Auditor::IAuditor,
+    Compressor::ICompressor,
+    Encryptor::IEncryptor,
     KeyManagement::{KeyFileManager, KeyFileData},
     dlm_pipeline_result::DLMReverseResult,
 };
@@ -15,6 +15,18 @@ use std::path::{Path, PathBuf};
 use web_time::Instant;
 use std::fs;
 
+#[cfg(feature = "dlm-auditor")]
+use crate::Compiler::DLM::Auditor::DiyAuditor;
+#[cfg(feature = "dlm-compressor")]
+use crate::Compiler::DLM::Compressor::GzipCompressor;
+#[cfg(feature = "dlm-encryptor")]
+use crate::Compiler::DLM::Encryptor::XorEncryptor;
+#[cfg(feature = "aes128-support")]
+use crate::Compiler::DLM::Encryptor::Aes128Encryptor;
+#[cfg(feature = "aes256-support")]
+use crate::Compiler::DLM::Encryptor::Aes256Encryptor;
+#[cfg(feature = "chacha20-support")]
+use crate::Compiler::DLM::Encryptor::Chacha20Encryptor;
 #[cfg(feature = "bzip2-support")]
 use crate::Compiler::DLM::Compressor::Bzip2Compressor;
 #[cfg(feature = "xz-support")]
@@ -376,6 +388,8 @@ impl DLMReverseExecutor {
 
         let mut encryptor:  Option<Box<dyn IEncryptor>>  = None;
         let mut compressor: Option<Box<dyn ICompressor>> = None;
+        // Assigned only when an auditor can be built; otherwise it stays `None`.
+        #[cfg_attr(not(feature = "dlm-auditor"), allow(unused_mut))]
         let mut auditor:    Option<Box<dyn IAuditor>>    = None;
 
         if let Some(ref enc_data) = key_data.key_data.encryption {
@@ -407,22 +421,36 @@ impl DLMReverseExecutor {
             .any(|m| m.to_lowercase().contains("dauditor"));
 
         if had_auditor {
-            let source = self.derive_source_path();
-            let output = self.encrypted_file_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."));
-            auditor = Some(Box::new(DiyAuditor::new(&source, output)));
+            #[cfg(feature = "dlm-auditor")]
+            {
+                let source = self.derive_source_path();
+                let output = self.encrypted_file_path
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."));
+                auditor = Some(Box::new(DiyAuditor::new(&source, output)));
 
-            if self.debug_config.is_enabled {
-                self.error_manager.log_debug(
-                    "[DLMReverseExecutor] Auditor created for decryption logging",
-                );
+                if self.debug_config.is_enabled {
+                    self.error_manager.log_debug(
+                        "[DLMReverseExecutor] Auditor created for decryption logging",
+                    );
+                }
             }
+            // This file's pipeline included an auditor, so decrypting it is meant
+            // to leave an audit trail. A build that cannot write one must not
+            // decrypt quietly.
+            #[cfg(not(feature = "dlm-auditor"))]
+            return Err(
+                "This file was written with a DAuditor module, so reading it is meant to be \
+                 audited, but this build of dixscript was compiled without the 'dlm-auditor' \
+                 feature. Rebuild with default features (or `--features dlm-auditor`) to read \
+                 this file.".to_string()
+            );
         }
 
         Ok((encryptor, compressor, auditor))
     }
 
+    #[cfg(feature = "dlm-encryptor")]
     fn create_decryptor(
         &self,
         algorithm: &str,
@@ -430,9 +458,57 @@ impl DLMReverseExecutor {
     ) -> Result<Box<dyn IEncryptor>, String> {
         let mut enc: Box<dyn IEncryptor> = match algorithm.to_lowercase().as_str() {
             "xor"                              => Box::new(XorEncryptor::new(None)),
+            #[cfg(feature = "aes128-support")]
             "aes128-gcm" | "aes128"            => Box::new(Aes128Encryptor::new(None)),
+            #[cfg(feature = "aes256-support")]
             "aes256-gcm" | "aes256"            => Box::new(Aes256Encryptor::new(None)),
+            #[cfg(feature = "chacha20-support")]
             "chacha20-poly1305" | "chacha20"   => Box::new(Chacha20Encryptor::new(None)),
+            #[cfg(not(feature = "aes128-support"))]
+            "aes128-gcm" | "aes128" => {
+                let msg = "This key file was written with AES-128-GCM encryption, but this build of \
+                           dixscript was compiled without the 'aes128-support' feature. Rebuild with \
+                           `--features aes128-support` (or default features) to read this file.".to_string();
+                self.error_manager.add_dlm_error(
+                    DlmErrorType::ModuleExecutionFailed,
+                    msg.clone(),
+                    Some(self.file_label()),
+                    None,
+                    None,
+                    ErrorSeverity::Fatal,
+                );
+                return Err(msg);
+            }
+            #[cfg(not(feature = "aes256-support"))]
+            "aes256-gcm" | "aes256" => {
+                let msg = "This key file was written with AES-256-GCM encryption, but this build of \
+                           dixscript was compiled without the 'aes256-support' feature. Rebuild with \
+                           `--features aes256-support` (or default features) to read this file.".to_string();
+                self.error_manager.add_dlm_error(
+                    DlmErrorType::ModuleExecutionFailed,
+                    msg.clone(),
+                    Some(self.file_label()),
+                    None,
+                    None,
+                    ErrorSeverity::Fatal,
+                );
+                return Err(msg);
+            }
+            #[cfg(not(feature = "chacha20-support"))]
+            "chacha20-poly1305" | "chacha20" => {
+                let msg = "This key file was written with ChaCha20-Poly1305 encryption, but this build of \
+                           dixscript was compiled without the 'chacha20-support' feature. Rebuild with \
+                           `--features chacha20-support` (or default features) to read this file.".to_string();
+                self.error_manager.add_dlm_error(
+                    DlmErrorType::ModuleExecutionFailed,
+                    msg.clone(),
+                    Some(self.file_label()),
+                    None,
+                    None,
+                    ErrorSeverity::Fatal,
+                );
+                return Err(msg);
+            }
             _ => {
                 let msg = format!(
                     "Unknown encryption algorithm in key file: '{}'", algorithm
@@ -453,6 +529,21 @@ impl DLMReverseExecutor {
         Ok(enc)
     }
 
+    /// This build has no `dlm-encryptor`: report it instead of silently skipping the module.
+    #[cfg(not(feature = "dlm-encryptor"))]
+    fn create_decryptor(
+        &self,
+        _algorithm: &str,
+        _config: &HashMap<String, String>,
+    ) -> Result<Box<dyn IEncryptor>, String> {
+        Err(
+            "This file uses a DEncryptor module (this key file was written by one), but this build of dixscript was compiled \
+             without the 'dlm-encryptor' feature. Rebuild with default features \
+             (or `--features dlm-encryptor`) to read this file.".to_string()
+        )
+    }
+
+    #[cfg(feature = "dlm-compressor")]
     fn create_decompressor(
         &self,
         algorithm: &str,
@@ -497,8 +588,22 @@ impl DLMReverseExecutor {
         }
     }
 
+    /// This build has no `dlm-compressor`: report it instead of silently skipping the module.
+    #[cfg(not(feature = "dlm-compressor"))]
+    fn create_decompressor(
+        &self,
+        _algorithm: &str,
+    ) -> Result<Box<dyn ICompressor>, String> {
+        Err(
+            "This file uses a DCompressor module (this file was written by one), but this build of dixscript was compiled \
+             without the 'dlm-compressor' feature. Rebuild with default features \
+             (or `--features dlm-compressor`) to read this file.".to_string()
+        )
+    }
+
     // ── Utility ───────────────────────────────────────────────────────────────
 
+    #[cfg(feature = "dlm-auditor")]
     fn derive_source_path(&self) -> PathBuf {
         let dir = self.encrypted_file_path
             .parent()

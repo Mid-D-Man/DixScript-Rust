@@ -9,6 +9,7 @@
 //!        `optimization` feature intentionally off, see Cargo.toml.
 
 mod compressor_trait;
+#[cfg(feature = "dlm-compressor")]
 mod gzip_compressor;
 #[cfg(feature = "bzip2-support")]
 mod bzip2_compressor;
@@ -16,6 +17,7 @@ mod bzip2_compressor;
 mod lzma_compressor;
 
 pub use compressor_trait::{ICompressor, CompressorResult};
+#[cfg(feature = "dlm-compressor")]
 pub use gzip_compressor::{GzipCompressor, CompressionLevel};
 #[cfg(feature = "bzip2-support")]
 pub use bzip2_compressor::Bzip2Compressor;

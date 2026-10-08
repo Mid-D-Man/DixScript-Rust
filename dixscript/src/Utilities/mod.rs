@@ -27,6 +27,8 @@ pub(crate) mod Hostname;
 pub(crate) mod LazyStatic;
 #[allow(dead_code, unused_imports)]
 pub(crate) mod Uuid;
+#[allow(dead_code, unused_imports)]
+pub(crate) mod Url;
 
 // WIRED IN, and `pub` on purpose: `rustc-hash`, `bitflags` and `async-trait`
 // all appear in this published crate's public signatures (`FxHashMap` fields

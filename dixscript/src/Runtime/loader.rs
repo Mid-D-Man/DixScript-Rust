@@ -9,18 +9,30 @@ use std::sync::Mutex;
 use std::collections::HashMap;
 use chrono::Utc;
 use crate::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
-use crate::Compiler::Core::Config::{ConfigSectionHandler, DebugMode, OperationalSettings};
+use crate::Compiler::Core::Config::{ConfigSectionHandler, OperationalSettings};
+#[cfg(feature = "dlm")]
+use crate::Compiler::Core::Config::DebugMode;
 use crate::Compiler::Core::{GeneralParser, GeneralSemanticAnalyzer, GeneralAstEnhancer};
+#[cfg(feature = "dlm")]
 use crate::Compiler::Core::BinarySerialization::{BinaryPacker, BinaryUnpacker};
 use crate::Compiler::Core::ValueResolution::ValueResolver;
 use crate::Compiler::Core::SectionAnalyzers::SchemaSectionAnalyzer;
+#[cfg(feature = "dlm")]
 use crate::Compiler::DLM::{DLMPipelineExecutor, DLMReverseExecutor, DLMPipelineResult};
+#[cfg(feature = "dlm")]
 use crate::Compiler::DLM::KeyManagement::KeyFileManager;
+#[cfg(feature = "dlm-auditor")]
 use crate::Compiler::DLM::Auditor::{IAuditor, DiyAuditor, EnhancedAuditor};
+#[cfg(feature = "dlm")]
 use crate::Compiler::Utilities::SecurityUtilities;
-use crate::Compiler::AST::{DixScript, DLMModuleType, DLMModuleSubtype};
+use crate::Compiler::AST::DixScript;
+#[cfg(feature = "dlm")]
+use crate::Compiler::AST::DLMModuleType;
+#[cfg(feature = "dlm-auditor")]
+use crate::Compiler::AST::DLMModuleSubtype;
 use crate::ErrorManager::{ErrorManager, RuntimeErrorType};
 use super::load_options::DixLoadOptions;
+#[cfg(feature = "dlm")]
 use super::key_resolver::{KeyFileResolver, KeyFileResolution, KeyFileSource};
 use super::dix_data::DixData;
 use super::array_homogenizer::homogenize_data_section;
@@ -33,6 +45,7 @@ use super::array_homogenizer::homogenize_data_section;
 /// and `load_text`'s use of it.
 pub struct DixLoader {
     error_manager: ErrorManager,
+    #[cfg(feature = "dlm")]
     key_resolver:  KeyFileResolver,
     // Keyed by file path -> (mtime at cache time, the loaded result).
     // Mutex because load_text takes &self, not &mut self (DixLoader is
@@ -85,6 +98,7 @@ impl DixLoader {
     pub fn new() -> Self {
         DixLoader {
             error_manager: ErrorManager::new_isolated(),
+            #[cfg(feature = "dlm")]
             key_resolver:  KeyFileResolver::new(),
             load_cache: Mutex::new(HashMap::new()),
         }
@@ -105,6 +119,7 @@ impl DixLoader {
     pub fn new_silent() -> Self {
         DixLoader {
             error_manager: ErrorManager::new_isolated_silent(),
+            #[cfg(feature = "dlm")]
             key_resolver:  KeyFileResolver::new(),
             load_cache: Mutex::new(HashMap::new()),
         }
@@ -268,6 +283,7 @@ impl DixLoader {
         ))
     }
 
+    #[cfg(feature = "dlm")]
     /// Compile `source` and, if it declares an `@DLM(DCompressor...
     /// DEncryptor...)` section, run the DLM pipeline (compress, encrypt,
     /// audit) — entirely in memory, no filesystem access at all.
@@ -336,6 +352,7 @@ impl DixLoader {
         Ok(dlm_executor.execute(&mut ast_with_security, ser_result.binary_data))
     }
 
+    #[cfg(feature = "dlm")]
     /// Reverse of `compile_with_dlm_from_str`: takes the (possibly
     /// compressed+encrypted) bytes and the `.mdix.key` file content
     /// directly, entirely in memory, and returns the reconstructed
@@ -389,6 +406,7 @@ impl DixLoader {
         ))
     }
 
+    #[cfg(feature = "dlm")]
     pub fn load_encrypted(
         &self,
         enc_path: &str,
@@ -427,6 +445,7 @@ impl DixLoader {
         self.decrypt_and_deserialize(&encrypted_data, &key_resolution, enc_path, options)
     }
 
+    #[cfg(feature = "dlm")]
     pub fn load_from_encrypted_bytes(
         &self,
         encrypted_bytes: &[u8],
@@ -546,6 +565,7 @@ impl DixLoader {
 
     // ── Shared decryption + deserialization ───────────────────────────────────
 
+    #[cfg(feature = "dlm")]
     fn decrypt_and_deserialize(
         &self,
         _encrypted_data: &[u8],
@@ -893,6 +913,7 @@ impl DixLoader {
 
     // ── DLM dispatch ──────────────────────────────────────────────────────────
 
+    #[cfg(feature = "dlm")]
     fn determine_dlm_behavior(
         &self,
         ast: &DixScript,
@@ -984,6 +1005,49 @@ impl DixLoader {
         Ok(result)
     }
 
+    /// Without the `dlm` feature nothing can execute DLM modules. A file with no
+    /// `@DLM` modules loads exactly as before; one that declares any fails loudly
+    /// instead of silently skipping the compression / encryption / audit it asked
+    /// for.
+    #[cfg(not(feature = "dlm"))]
+    fn determine_dlm_behavior(
+        &self,
+        ast: &DixScript,
+        _source_file_path: &str,
+        _options: &DixLoadOptions,
+    ) -> Result<DLMFileGeneration, String> {
+        match ast.dlm.as_ref() {
+            Some(d) if !d.modules.is_empty() => {
+                let msg = "This file declares @DLM modules (DCompressor / DEncryptor / DAuditor), \
+                           but this build of dixscript was compiled without the 'dlm' feature, so \
+                           they cannot run. Rebuild with default features (or `--features dlm`), or \
+                           remove the @DLM section."
+                    .to_string();
+                self.error_manager.add_runtime_error(
+                    RuntimeErrorType::InvalidArgument,
+                    msg.clone(),
+                    Some("DixLoader.determine_dlm_behavior".to_string()),
+                    0, 0, vec![],
+                    Some("Enable the 'dlm' cargo feature".to_string()),
+                );
+                Err(msg)
+            }
+            _ => {
+                self.error_manager.log_info("No DLM modules - returning resolved AST only");
+                Ok(DLMFileGeneration {
+                    resolved_ast:         ast.clone(),
+                    is_encrypted:         false,
+                    is_compressed:        false,
+                    applied_modules:      Vec::new(),
+                    generated_enc_file:   None,
+                    generated_key_file:   None,
+                    generated_audit_file: None,
+                })
+            }
+        }
+    }
+
+    #[cfg(all(feature = "dlm", feature = "dlm-auditor"))]
     fn generate_audit_only(
         &self,
         ast: &DixScript,
@@ -1028,8 +1092,31 @@ impl DixLoader {
         Ok(audit_result.audit_file_path)
     }
 
+    /// `dlm` is on but `dlm-auditor` is not: there is no auditor to run.
+    #[cfg(all(feature = "dlm", not(feature = "dlm-auditor")))]
+    fn generate_audit_only(
+        &self,
+        _ast: &DixScript,
+        _source_file_path: &str,
+        _options: &DixLoadOptions,
+    ) -> Result<String, String> {
+        let msg = "This file declares a DAuditor module, but this build of dixscript was \
+                   compiled without the 'dlm-auditor' feature. Rebuild with default features \
+                   (or `--features dlm-auditor`), or remove the DAuditor module."
+            .to_string();
+        self.error_manager.add_runtime_error(
+            RuntimeErrorType::InvalidArgument,
+            msg.clone(),
+            Some("DixLoader.generate_audit_only".to_string()),
+            0, 0, vec![],
+            Some("Enable the 'dlm-auditor' cargo feature".to_string()),
+        );
+        Err(msg)
+    }
+
     // ── Key file parsing ──────────────────────────────────────────────────────
 
+    #[cfg(feature = "dlm")]
     fn parse_key_file_content(&self, key_content: &str) -> Result<LoaderKeyMetadata, String> {
         let temp_dir      = std::env::temp_dir();
         let temp_key_file = temp_dir.join(format!(
@@ -1078,6 +1165,7 @@ impl DixLoader {
 
     // ── Reverse pipeline ──────────────────────────────────────────────────────
 
+    #[cfg(feature = "dlm")]
     fn execute_reverse_pipeline(
         &self,
         enc_path: &str,
@@ -1163,6 +1251,7 @@ struct DLMFileGeneration {
     generated_audit_file: Option<String>,
 }
 
+#[cfg(feature = "dlm")]
 struct LoaderKeyMetadata {
     version:          String,
     compile_time:     chrono::DateTime<Utc>,
@@ -1187,6 +1276,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg(feature = "dlm")]
     #[test]
     fn test_load_from_encrypted_bytes_empty_fails() {
         let loader = DixLoader::new();
@@ -1204,4 +1294,90 @@ mod tests {
         let errors = loader.error_manager.get_runtime_errors();
         assert_eq!(errors.len(), 1, "only the most recent load's error should remain");
     }
-            }
+
+    // ── DLM feature gating ────────────────────────────────────────────────
+    // `@DLM(...)` always parses; what the features decide is whether a module
+    // can RUN. Asking for one that is not compiled in must be a clear error,
+    // never a silent skip. Each test below exists only in the configuration it
+    // describes, so each runs under the matching `--no-default-features
+    // --features ...` build.
+
+    /// Writes `source` to a fresh temp directory and loads it with the output
+    /// directory pointed there too, returning the loader's `Err` text (or
+    /// panicking if the load succeeded).
+    #[allow(dead_code)]
+    fn load_text_err(tag: &str, source: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("dixscript_gate_{}_{}", tag, std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("gate_test.mdix");
+        std::fs::write(&path, source).unwrap();
+        let mut options = DixLoadOptions::new();
+        options.output_directory = Some(dir.to_string_lossy().to_string());
+        let result = DixLoader::new().load_text(path.to_str().unwrap(), &options);
+        let _ = std::fs::remove_dir_all(&dir);
+        match result {
+            Err(e) => e,
+            Ok(_) => panic!("expected load_text to fail for {tag}, but it succeeded"),
+        }
+    }
+
+    #[test]
+    fn plain_file_loads_in_every_configuration() {
+        let dir = std::env::temp_dir().join(format!("dixscript_gate_plain_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plain.mdix");
+        std::fs::write(&path, "@DATA(\n name = \"v\"\n)\n").unwrap();
+        let result = DixLoader::new().load_text(path.to_str().unwrap(), &DixLoadOptions::new());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(result.is_ok(), "a file with no @DLM section must load without any DLM feature: {:?}", result.err());
+    }
+
+    #[cfg(not(feature = "dlm"))]
+    #[test]
+    fn dlm_section_is_a_clear_error_without_the_dlm_feature() {
+        let e = load_text_err("nodlm", "@DLM(\n  DCompressor.gzip\n)\n@DATA(\n name = \"v\"\n)\n");
+        assert!(e.contains("'dlm' feature"), "unhelpful error: {e}");
+    }
+
+    #[cfg(all(feature = "dlm", not(feature = "dlm-auditor")))]
+    #[test]
+    fn auditor_is_a_clear_error_without_dlm_auditor() {
+        let e = load_text_err("noaud", "@DLM(\n  DAuditor.diy\n)\n@DATA(\n name = \"v\"\n)\n");
+        assert!(e.contains("'dlm-auditor' feature"), "unhelpful error: {e}");
+    }
+
+    #[cfg(all(feature = "dlm", not(feature = "dlm-compressor")))]
+    #[test]
+    fn compressor_is_a_clear_error_without_dlm_compressor() {
+        let e = load_text_err("nocomp", "@DLM(\n  DCompressor.gzip\n)\n@DATA(\n name = \"v\"\n)\n");
+        assert!(e.contains("'dlm-compressor' feature"), "unhelpful error: {e}");
+    }
+
+    #[cfg(all(feature = "dlm", not(feature = "dlm-encryptor")))]
+    #[test]
+    fn encryptor_is_a_clear_error_without_dlm_encryptor() {
+        let e = load_text_err("noenc", "@DLM(\n  DEncryptor.xor\n)\n@DATA(\n name = \"v\"\n)\n");
+        assert!(e.contains("'dlm-encryptor' feature"), "unhelpful error: {e}");
+    }
+
+    #[cfg(all(feature = "dlm-encryptor", not(feature = "aes128-support")))]
+    #[test]
+    fn aes128_is_a_clear_error_without_aes128_support() {
+        let e = load_text_err("noaes128", "@DLM(\n  DEncryptor.aes128\n)\n@DATA(\n name = \"v\"\n)\n");
+        assert!(e.contains("'aes128-support' feature"), "unhelpful error: {e}");
+    }
+
+    #[cfg(all(feature = "dlm-encryptor", not(feature = "aes256-support")))]
+    #[test]
+    fn aes256_is_a_clear_error_without_aes256_support() {
+        let e = load_text_err("noaes256", "@DLM(\n  DEncryptor.aes256\n)\n@DATA(\n name = \"v\"\n)\n");
+        assert!(e.contains("'aes256-support' feature"), "unhelpful error: {e}");
+    }
+
+    #[cfg(all(feature = "dlm-encryptor", not(feature = "chacha20-support")))]
+    #[test]
+    fn chacha20_is_a_clear_error_without_chacha20_support() {
+        let e = load_text_err("nochacha20", "@DLM(\n  DEncryptor.chacha20\n)\n@DATA(\n name = \"v\"\n)\n");
+        assert!(e.contains("'chacha20-support' feature"), "unhelpful error: {e}");
+    }
+}

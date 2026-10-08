@@ -30,7 +30,7 @@ crate it replaces. Counts are from a scripted scan of `dixscript/src`.
 | `uuid` | 13 call sites, 4 files (`new_v4`, `parse_str`, `nil`, `from_bytes`) | no | **Wired in** |
 | `hostname` | 1 call site, diagnostics only | no | **Wired in** (best-effort, see its section) |
 | `async-trait` | 2 attribute sites on the `CloudStorageProvider` trait | **yes** | **Wired in** — hand-desugared to the macro's exact expansion |
-| `url` | 1 call site | no | **Kept for now** — see Open items |
+| `url` | 1 call site | no | **Removed** — hand-rolled `Utilities/Url`, `url` kept as a test oracle |
 
 "Public API?" means the crate's own types appear in a signature or field of
 something reachable from outside the crate. That column decided how the wiring-in
@@ -382,6 +382,46 @@ places (the `CloudStorageProvider` trait and `HttpCloudProvider`'s impl).
   much of the build — its `proc-macro2`, `quote` and `syn` dependencies are also
   pulled in by `serde_derive`.
 
+### `Utilities/Url/path_segments.rs`
+
+One function, `last_path_segment(&str) -> Option<String>`, equivalent to
+`Url::parse(s).ok()?.path_segments()?.next_back()`. It is the only thing the crate
+used `url` for: `CloudFileCache` names a cached download `<cache>/<hash16>/<segment>`.
+`pub(crate)`.
+
+- **Why not `reqwest::Url` (the original plan).** `reqwest::Url` *is* `url::Url`, and
+  `reqwest` is optional, so it looked like a free swap behind `cloud-import`. It
+  is not: a build **without** `cloud-import` is documented to still serve entries a
+  cloud build cached, and the file name is part of the lookup path. A different name
+  source in that build would silently miss them. So the logic is written once, here,
+  and every configuration uses it.
+- **Only the final token matters.** A first version kept a stack of path segments
+  like the WHATWG algorithm. A mutation (stop popping on `..`) survived the tests,
+  which showed why: only the *last* segment is returned and the final token always
+  overwrites it, so the stack was unobservable. It is now: take the text after the
+  last separator, percent-encode it with the URL path set (C0 controls, space, `"`,
+  `<`, `>`, `` ` ``, `{`, `}`, every non-ASCII byte), and make a dot-segment (`.`,
+  `..`, `%2e` in any case mix) an empty string.
+- **What it also has to get right** (all checked against the real crate): trimming
+  of C0 control and space, removal of tab/CR/LF, `\` as a separator for special
+  schemes (`http`, `https`, `ws`, `wss`, `ftp`), runs of slashes before the host,
+  userinfo, bracketed IPv6 hosts, ports, percent-decoding of a special-scheme host
+  (`a%41` is a valid host, `a%2Fb` is not), and the non-special quirk that
+  `scheme://host:80\x` ends the authority at the backslash.
+- **Out of scope:** `file:` URLs (returns `None`, the caller's hash-name fallback),
+  and IDNA / IPv4-number host validation. For a non-ASCII host the real parser
+  rejects through IDNA (U+00A0 maps to a space) this returns a segment where `url`
+  returns `None`. That cannot matter for the cache: a URL the real parser rejects
+  can never have been downloaded, so no entry exists for it.
+- **Tests (6):** the typical cloud-URL table, 300,000 generated URLs compared with
+  the real crate (every one of them agrees except the documented IDNA class, which
+  the test names and bounds rather than ignores), every dot-segment combination to
+  depth four with both separators, every ASCII byte and nine Unicode edge
+  characters in a path, the "obviously invalid" table, and `file:`. Seven injected
+  bugs (a dropped dot-segment variant, an unencoded backtick, a final `..` or `.`
+  not emptied, the wrong end of the path, a dropped port-range check, a skipped
+  host percent-decode) were all caught.
+
 ### `Utilities/test_rng.rs`
 
 Test-only (`#[cfg(test)]`). A deterministic xorshift64 so the differential tests
@@ -401,8 +441,8 @@ were true of 1.75 and are no longer true.
 | Item | Status |
 |---|---|
 | The real crate builds | `cargo check -p dixscript --lib` on Rust 1.85.1: **0 errors**. |
-| The full test suite | `cargo test -p dixscript`: **696 passed, 0 failed** (534 library tests plus every integration suite and the doc tests). Includes `schema_section_tests` (42) and `raw_section_tests` (16). |
-| Warnings | **129**. Pristine `HEAD` (before the three public-API modules were wired) had 140: the extra 11 were `private_interfaces` warnings from `pub` items that already named the crate-private `FxBuildHasher`; making `RustcHash` `pub` removes exactly those, and no other warning appeared or disappeared. |
+| The full test suite | `cargo test -p dixscript`: **703 passed, 0 failed** (541 library tests plus every integration suite and the doc tests); **674 passed, 0 failed** with `--no-default-features`. Includes `schema_section_tests` (42) and `raw_section_tests` (16). |
+| Warnings | **130** (129 plus one for the new `Url` module, which, like the other 85 PascalCase modules, trips `non_snake_case`; the set is otherwise identical, and no reduced-feature build adds any). Pristine `HEAD` (before the three public-API modules were wired) had 140: the extra 11 were `private_interfaces` warnings from `pub` items that already named the crate-private `FxBuildHasher`; making `RustcHash` `pub` removes exactly those, and no other warning appeared or disappeared. |
 | Other targets | `cargo check -p dixscript --all-targets` (tests, benches, examples) and `--lib --no-default-features` both succeed. |
 | Sibling crates | `mdix-lua` and `mdix-java` — the only two that depend on the local path — both compile against the wired crate. `mdix-lsp`, `mdix-wasm`, `mdix-ffi`, `mdix-python` and `mdix-cli` resolve the *published* `dixscript` 1.0.0 deliberately (their manifests say so), so they were not rebuilt. |
 | Differential tests | Every replacement is compared with the exact locked crate it replaces (`async-trait`, `base64`, `bitflags`, `hex`, `hostname` on Linux, `rustc-hash`, `uuid`): ~1.3M base64 decodes, 300k uuid parses, every byte and byte pair for bitflags plus the parser and the const-fn surface, 300+300 map/set iteration-order comparisons, and both directions of `#[async_trait]` interoperability. |
@@ -455,24 +495,12 @@ oracle rather than being deleted (except `lazy_static`).
 
 ## Open items and deferred plan
 
-**Explicitly deferred (per the plan for this pass):**
-- **Feature-gate the DLM modules properly, plus JSON/TOML and "a few more
-  things".** `regex` stays (Rust's standard library has no regex engine);
-  `serde_json` and `toml` are to be *gated*, not replaced. Candidates already found:
-  - `flate2` is **not** feature-gated, unlike its siblings `bzip2` and
-    `lzma-rust2`. Confirm whether gzip is meant to be the always-on codec.
-  - `url` is documented in `Cargo.toml` as "optional — activated via the
-    `cloud-import` feature", but has **no `optional = true` and does not
-    appear under `[features]`**. It always compiles in, in every configuration
-    including `--no-default-features`. (`async-trait` had the same problem; it is
-    gone now.) The old comment was wrong and has been replaced with an accurate one.
-  - Consequence: `url` cannot yet be swapped for `reqwest::Url` (a re-export of
-    the same type). `cloud_file_cache.rs` compiles unconditionally, but `reqwest`
-    is genuinely optional, so the swap would break a `--no-default-features`
-    build. Do the gating and the swap together.
-  - `chrono` is declared with a `"serde"` feature. **Not investigated** — because
-    `DixValue` still derives `Serialize`, it is not known whether that flag is
-    load-bearing.
+**Done since the first version of this file:** the feature-gating pass (DLM
+families, `encryption-support`, `toml-support`, the `url` removal, chrono's unused
+`serde` feature) is written up in [features.md](features.md). Decided there:
+`serde_json` and `flate2` stay unconditional.
+
+**Still open:**
 - **`wasm32`:** not built here; see the verification table.
 - **Version bump.** The `rustc-hash` change is source-breaking for downstream
   users of the 11 public items (see Decisions).
@@ -543,8 +571,8 @@ replacement modules.
   `Cargo.toml` carries a comment saying why.
   **Lesson: "unused" has to be checked across the whole workspace, every sibling
   crate, and by call shape rather than by the argument's type name.**
-- Attempted to remove `url` in favor of `reqwest::Url`; reverted after finding the
-  gating mismatch above. Only the misleading comment was changed.
+- `url` was first reverted (a gating mismatch), then replaced for real; see
+  `Utilities/Url` below for why `reqwest::Url` was the wrong replacement.
 
 ### `Utilities/RustcHash` — the first delivery overclaimed
 The first batch shipped only the `mid-engine` FxHash and described it as "the same

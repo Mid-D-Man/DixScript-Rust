@@ -1,17 +1,20 @@
+// Applies dixscript-gating-complete.tar.gz to the REPO ROOT (target_root = ".").
+//
+// Put this file and the .tar.gz TOGETHER in their own folder:
+//     .mdix/dixscript-root/replacements/
+// (the folder must be named "replacements" and this file must keep the name
+// replacements.mdix: that is how the engine recognises a replacements manifest),
+// then run the "Apply replacements" workflow with
+//     template = .mdix/dixscript-root/replacements/replacements.mdix
+// Leave .mdix/replacements/replacements.mdix (the Unity-package template,
+// target_root = com.midmanstudio.mdix/Editor) alone. Applying this archive with THAT
+// manifest is what put the last delivery inside the Unity package.
 @CONFIG(
   version    -> "1.0.0"
-  features   -> "quickfuncs,data"
+  features   -> "data"
   debug_mode -> "off"
 )
 
-@QUICKFUNCS(
-  ~target<object>(name, path) { return { name = name, path = path } }
-)
-
 @DATA(
-  target_root = "com.midmanstudio.mdix/Editor"
-
-  overrides::
-    target("README.md",    "com.midmanstudio.mdix/README.md")
-    target("CHANGELOG.md", "com.midmanstudio.mdix/CHANGELOG.md")
+  target_root = "."
 )

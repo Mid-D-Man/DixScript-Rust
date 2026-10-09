@@ -507,7 +507,7 @@ impl VersionConstraints {
         constraints.insert(
             "SupportedDLMModules".to_string(),
             json!({
-                "DCompressor": ["gzip", "bzip2", "lzma"],
+                "DCompressor": ["gzip"],
                 "DAuditor":    ["diy", "enhanced"],
                 "DEncryptor":  ["xor", "aes128", "aes256", "chacha20"]
             }),

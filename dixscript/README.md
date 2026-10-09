@@ -741,31 +741,28 @@ dixscript = "1.0.0"
 pulls in everything below by default — existing behavior is unchanged if
 you don't touch this. To trim what you don't need:
 ```toml
-dixscript = { version = "1.0.0", default-features = false, features = ["xz-support"] }
+dixscript = { version = "1.0.0", default-features = false, features = ["toml-support"] }
 ```
 
 | Feature | Default | What it adds |
 |---------|---------|---------------|
 | `cloud-import` | on | HTTP/HTTPS `@IMPORTS` resolution (reqwest + rustls-tls) |
-| `bzip2-support` | on | bzip2 compression for `@DLM(DCompressor.bzip2)` |
-| `xz-support` | on | XZ/LZMA compression for `@DLM(DCompressor.lzma)` |
+| `bzip2-support`, `xz-support` | off | Removed codecs. Kept as empty stubs so existing manifests still resolve; they enable nothing |
 | `rayon-support` | on | Parallel section parsing/(de)serialization for large files |
 
 Building with a feature off and then loading a `.mdix` file that actually
-needs it (e.g. `xz-support` disabled but the file specifies
-`DCompressor.lzma`) returns a clear `Err` naming the missing feature —
-never a panic.
+needs it returns a clear `Err` naming the missing feature, never a panic.
+`DCompressor.bzip2` and `DCompressor.lzma` are no longer supported in any
+build: the analyzer reports a "no longer supported" error (`DLM004`) and
+points at `DCompressor.gzip`. Files compressed with those codecs by
+dixscript 1.0.0 can still be read with 1.0.0.
 
 ### Platform notes
 
-- **gzip, bzip2, and XZ compression** all work identically on every
-  target — native, `wasm32-unknown-unknown`, and Android. All three
-  backends are pure Rust (bzip2 via `libbz2-rs-sys`, XZ via `lzma-rust2`,
-  a real ported encoder, not a "compiles but barely compresses"
-  placeholder) — no C toolchain, no NDK cross-compile pain, no wasm build
-  failures. This wasn't always true; the platform notes here used to say
-  bzip2/lzma were excluded on wasm32 — that was accurate for older
-  versions and is no longer accurate as of this release.
+- **gzip compression** works identically on every target: native,
+  `wasm32-unknown-unknown`, and Android. The backend is pure Rust (flate2
+  with `miniz_oxide`), so there is no C toolchain, no NDK cross-compile
+  step, and no wasm build failure.
 - **All encryption algorithms** (AES-128, AES-256-GCM, ChaCha20-Poly1305)
   work on every target including `wasm32` and Android — pure Rust
   RustCrypto primitives throughout, no exceptions.
@@ -788,8 +785,9 @@ never a panic.
 
 ## MSRV
 
-Rust **1.85** or later. (`bzip2` 0.6's pure-Rust backend needs 1.82;
-`lzma-rust2` needs 1.85 — the higher of the two is the real floor.)
+Rust **1.85** or later (the declared `rust-version`). The bzip2 and
+`lzma-rust2` crates that used to set this floor are gone; see
+`docs/dixscript/features.md` for what still holds it up.
 
 ---
 

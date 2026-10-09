@@ -1,25 +1,18 @@
-//! Compressor — data compression modules.
-//! All three compressors are pure Rust and build on every target:
-//! wasm32-unknown-unknown, wasm32-wasip2, Android, iOS, Windows.
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/dlm.md, section "Compressor/mod.rs"
+// ============================================================================
+
+//! Compressor: data compression modules for DLM.
 //!
-//! Gzip:  flate2 rust_backend (miniz_oxide)  — always pure Rust.
-//! Bzip2: bzip2 0.6+ via libbz2-rs-sys       — pure Rust since June 2025.
-//! LZMA:  lzma-rust2 (ported from tukaani xz-for-java) — pure Rust, real
-//!        encoder (not the lzma-rs "dumb" literal-only placeholder encoder).
-//!        `optimization` feature intentionally off, see Cargo.toml.
+//! Gzip is the only codec. It uses flate2 with the `rust_backend`
+//! (miniz_oxide), which is pure Rust and builds on every target. The bzip2
+//! and lzma codecs were removed, see the DLM doc for the reasoning.
 
 mod compressor_trait;
 #[cfg(feature = "dlm-compressor")]
 mod gzip_compressor;
-#[cfg(feature = "bzip2-support")]
-mod bzip2_compressor;
-#[cfg(feature = "xz-support")]
-mod lzma_compressor;
 
 pub use compressor_trait::{ICompressor, CompressorResult};
 #[cfg(feature = "dlm-compressor")]
 pub use gzip_compressor::{GzipCompressor, CompressionLevel};
-#[cfg(feature = "bzip2-support")]
-pub use bzip2_compressor::Bzip2Compressor;
-#[cfg(feature = "xz-support")]
-pub use lzma_compressor::LzmaCompressor;

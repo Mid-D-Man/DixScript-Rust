@@ -1,3 +1,7 @@
+# ============================================================================
+# NOTICE: Full documentation, design decisions, and fix history for this file
+# live in docs/dixscript/features.md, section "The feature graph"
+# ============================================================================
 [package]
 name = "dixscript"
 version = "1.0.0"
@@ -79,15 +83,8 @@ argon2           = { version = "0.5",  optional = true }
 # `cloud-import`; see docs/dixscript/utilities.md.) `reqwest` and `tokio` are the
 # real cloud-import dependencies and are optional, below.
 
-# --- Compression backends ──────────────────────────────────────────────────────────
-bzip2       = { version = "0.6", optional = true }
-# lzma-rust2: real LZMA2/XZ codec (ported from tukaani's xz-for-java), not a
-# liblzma C binding. Zero non-Rust deps (only optional pure-Rust `sha2` for
-# the XZ integrity checksum). `optimization` is deliberately left off — it's
-# sound per upstream, but disabling it guarantees 100% safe standard Rust
-# with zero hand-written-asm surface across every target, which matters more
-# here than the speed it buys back on x86_64/aarch64 hosts.
-lzma-rust2  = { version = "0.16", default-features = false, features = ["std", "encoder", "xz"], optional = true }
+# Compression: gzip only, through flate2 above. The bzip2 and lzma codecs (and the
+# bzip2 and lzma-rust2 crates behind them) were removed; docs/dixscript/dlm.md has why.
 
 # ── Non-WASM native deps ───────────────────────────────────────────────────────
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -186,7 +183,6 @@ harness = false
 [[bench]]
 name    = "binary_serialization_benchmark"
 harness = false
-required-features = ["bzip2-support", "xz-support"]
 [[bench]]
 name    = "runtime_benchmark"
 harness = false
@@ -215,7 +211,7 @@ required-features = ["toml-support"]
 default        = [
     "cloud-import", "rayon-support", "toml-support",
     "dlm", "dlm-auditor", "dlm-compressor", "dlm-encryptor",
-    "bzip2-support", "xz-support", "encryption-support",
+    "encryption-support",
 ]
 cloud-import   = ["dep:reqwest", "dep:tokio"]
 rayon-support  = ["dep:rayon"]
@@ -230,7 +226,7 @@ toml-support   = ["dep:toml"]
 #   dlm-compressor DCompressor (gzip; `flate2` is deliberately NOT optional)
 #   dlm-encryptor  DEncryptor  (xor; key files)
 # and the heavy algorithms on top of a family:
-#   bzip2-support / xz-support   extra DCompressor codecs
+#   bzip2-support / xz-support   removed codecs, now empty stubs (see below)
 #   aes128-support / aes256-support / chacha20-support   one encryptor each
 #   argon2-support               Argon2id: password-protected key files and
 #                                `DEncryptor` password mode
@@ -241,8 +237,12 @@ dlm            = []
 dlm-auditor    = ["dlm"]
 dlm-compressor = ["dlm"]
 dlm-encryptor  = ["dlm"]
-bzip2-support  = ["dlm-compressor", "dep:bzip2"]
-xz-support     = ["dlm-compressor", "dep:lzma-rust2"]
+# bzip2 and lzma were removed. These two names stay as empty stubs (each still implies
+# dlm-compressor, as before) so a downstream `features = ["xz-support"]` keeps resolving.
+# They enable no code: a file that uses either codec fails with a "no longer supported"
+# error. They are off by default and can be deleted in the next breaking release.
+bzip2-support  = ["dlm-compressor"]
+xz-support     = ["dlm-compressor"]
 aes128-support   = ["dlm-encryptor", "dep:aes-gcm"]
 aes256-support   = ["dlm-encryptor", "dep:aes-gcm"]
 chacha20-support = ["dlm-encryptor", "dep:chacha20poly1305"]

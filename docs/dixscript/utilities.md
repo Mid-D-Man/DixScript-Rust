@@ -54,7 +54,8 @@ Kept on purpose, with the reason, so nobody re-litigates it:
   Never hand-rolled regardless of size.
 - `rand` — the crypto path (key/salt/nonce via `OsRng`) requires it, and the
   new `Uuid` builds on it.
-- `flate2`, `bzip2`, `lzma-rust2` — real codecs.
+- `flate2` — a real codec (gzip). `bzip2` and `lzma-rust2` were also kept at the
+  time and were removed later, see [dlm.md](dlm.md).
 - `chrono` — backs real `Date`/`Timestamp` literal parsing with calendar
   validation. Hand-rollable in principle, easy to get subtly wrong.
 - `web-time`, `web-sys`, `rayon`, `reqwest`, `tokio`, `getrandom` — already

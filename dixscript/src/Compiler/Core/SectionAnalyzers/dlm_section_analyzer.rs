@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/dlm.md, section "dlm_section_analyzer.rs"
+// ============================================================================
 
 //! Semantic validation of the @DLM section.
 
@@ -13,6 +17,7 @@ use super::{SectionAnalysisResult, SemanticErrorInfo, SemanticWarningInfo};
 const ERROR_DUPLICATE_MODULE:      &str = "DUPLICATE_MODULE";
 const ERROR_INVALID_MODULE_TYPE:   &str = "INVALID_MODULE_TYPE";
 const ERROR_INVALID_MODULE_SUBTYPE: &str = "INVALID_MODULE_SUBTYPE";
+const ERROR_REMOVED_MODULE_SUBTYPE: &str = "REMOVED_MODULE_SUBTYPE";
 
 const WARN_NO_SUBTYPE:             &str = "DLM_WARN001";
 const WARN_SUBOPTIMAL_ORDERING:    &str = "DLM_WARN002";
@@ -27,8 +32,6 @@ lazy_static! {
     static ref VALID_COMPRESSOR_SUBTYPES: FxHashSet<DLMModuleSubtype> = {
         let mut s = FxHashSet::default();
         s.insert(DLMModuleSubtype::Gzip);
-        s.insert(DLMModuleSubtype::Bzip2);
-        s.insert(DLMModuleSubtype::Lzma);
         s
     };
     
@@ -206,6 +209,26 @@ pub fn new_with_error_manager(
             Some(s) => s,
         };
 
+        // bzip2 and lzma still parse so this error can name them; they are not
+        // in the valid set because no codec backs them any more.
+        if module.module_type == DLMModuleType::DCompressor
+            && matches!(subtype, DLMModuleSubtype::Bzip2 | DLMModuleSubtype::Lzma)
+        {
+            let name = match subtype {
+                DLMModuleSubtype::Bzip2 => "bzip2",
+                _ => "lzma",
+            };
+            self.add_error(
+                result,
+                "DLM004",
+                ERROR_REMOVED_MODULE_SUBTYPE,
+                &format!("DCompressor.{} is no longer supported", name),
+                "The codec was removed from dixscript. Use DCompressor.gzip.",
+                Some(module.position),
+            );
+            return;
+        }
+
         if !Self::is_valid_subtype(module.module_type, subtype) {
             self.add_error(
                 result,
@@ -342,7 +365,7 @@ pub fn new_with_error_manager(
     #[inline]
     fn valid_subtypes_str(module_type: DLMModuleType) -> &'static str {
         match module_type {
-            DLMModuleType::DCompressor => "Gzip, Bzip2, Lzma",
+            DLMModuleType::DCompressor => "Gzip",
             DLMModuleType::DAuditor    => "Diy, Enhanced",
             DLMModuleType::DEncryptor  => "Xor, Aes128, Aes256, Chacha20",
             DLMModuleType::ParseError  => "none",
@@ -354,8 +377,8 @@ pub fn new_with_error_manager(
     fn subtype_description(subtype: DLMModuleSubtype) -> &'static str {
         match subtype {
             DLMModuleSubtype::Gzip      => "fast compression, moderate ratio",
-            DLMModuleSubtype::Bzip2     => "better compression, slower",
-            DLMModuleSubtype::Lzma      => "best compression, slowest",
+            DLMModuleSubtype::Bzip2     => "removed, no longer supported",
+            DLMModuleSubtype::Lzma      => "removed, no longer supported",
             DLMModuleSubtype::Diy       => "simple text audit log",
             DLMModuleSubtype::Enhanced  => "structured comprehensive audit trail",
             DLMModuleSubtype::Xor       => "XOR cipher — obfuscation only, LOW security",

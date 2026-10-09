@@ -12,6 +12,21 @@ bindings, and per-language wrappers (WASM/Python/C#/Go/Java/Lua/PHP) are
 separate, independently-versioned packages in this same workspace with
 their own release history.
 
+## [Unreleased]
+
+### Removed
+
+- **`DCompressor.bzip2` and `DCompressor.lzma`.** gzip is the only DLM
+  compression codec. The `bzip2` and `lzma-rust2` dependencies are gone
+  (10 fewer crates in the default build). A file that names either codec
+  now fails analysis with a `DLM004` "no longer supported" error, and a key
+  file that records one fails to decompress with the same kind of message.
+  The `bzip2-support` and `xz-support` features remain as empty stubs so
+  existing `features = [...]` lists still resolve, and they are no longer in
+  `default`. Files written by 1.0.0 with these codecs can still be read with
+  1.0.0.
+- `binary_serialization_benchmark` compares gzip only.
+
 ## [1.0.0] — 2026-07-21
 
 ### Added

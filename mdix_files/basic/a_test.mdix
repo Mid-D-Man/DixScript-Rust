@@ -1,5 +1,5 @@
 @DLM(
-  DCompressor.lzma
+  DCompressor.gzip
   DAuditor.diy
 )
 @QUICKFUNCS(

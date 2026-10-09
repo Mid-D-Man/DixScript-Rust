@@ -11,7 +11,7 @@
 
 
 @DLM(
-    DCompressor.bzip2,
+    DCompressor.gzip,
     DAuditor.diy
 )
 

@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/dlm.md, section "dlm_pipeline_executor.rs"
+// ============================================================================
 //! Main orchestrator for DLM forward pipeline execution during compilation.
 //!
 //! Execution order: Auditor (start) → Compressor → Encryptor → Auditor (finalize).
@@ -32,10 +36,6 @@ use crate::Compiler::DLM::Encryptor::Aes128Encryptor;
 use crate::Compiler::DLM::Encryptor::Aes256Encryptor;
 #[cfg(feature = "chacha20-support")]
 use crate::Compiler::DLM::Encryptor::Chacha20Encryptor;
-#[cfg(feature = "bzip2-support")]
-use crate::Compiler::DLM::Compressor::Bzip2Compressor;
-#[cfg(feature = "xz-support")]
-use crate::Compiler::DLM::Compressor::LzmaCompressor;
 
 pub struct DLMPipelineExecutor {
     error_manager:    ErrorManager,
@@ -351,26 +351,15 @@ impl DLMPipelineExecutor {
         match subtype {
             Some(DLMModuleSubtype::Gzip) | None => Ok(Box::new(GzipCompressor::new())),
 
-            #[cfg(feature = "bzip2-support")]
-            Some(DLMModuleSubtype::Bzip2) => Ok(Box::new(Bzip2Compressor::new())),
-            #[cfg(not(feature = "bzip2-support"))]
+            // bzip2 and lzma still parse so a file that names them gets this
+            // message instead of an unknown-keyword error.
             Some(DLMModuleSubtype::Bzip2) => Err(
-                "This file requires bzip2 compression (DCompressor.bzip2), but \
-                 this build of dixscript was compiled without the \
-                 'bzip2-support' feature. Rebuild with `--features \
-                 bzip2-support` (or default features) to read this file, or \
-                 use DCompressor.gzip in files you control.".to_string()
+                "DCompressor.bzip2 is no longer supported: the bzip2 codec was \
+                 removed from dixscript. Use DCompressor.gzip.".to_string()
             ),
-
-            #[cfg(feature = "xz-support")]
-            Some(DLMModuleSubtype::Lzma) => Ok(Box::new(LzmaCompressor::new())),
-            #[cfg(not(feature = "xz-support"))]
             Some(DLMModuleSubtype::Lzma) => Err(
-                "This file requires XZ/LZMA compression (DCompressor.lzma), but \
-                 this build of dixscript was compiled without the 'xz-support' \
-                 feature. Rebuild with `--features xz-support` (or default \
-                 features) to read this file, or use DCompressor.gzip in \
-                 files you control.".to_string()
+                "DCompressor.lzma is no longer supported: the lzma codec was \
+                 removed from dixscript. Use DCompressor.gzip.".to_string()
             ),
 
             Some(other) => Err(format!("Unknown compressor subtype: {:?}", other)),

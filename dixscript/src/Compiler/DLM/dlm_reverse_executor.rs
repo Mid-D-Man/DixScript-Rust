@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/dlm.md, section "dlm_reverse_executor.rs"
+// ============================================================================
 //! Reverse orchestrator for DLM pipeline during loading.
 //!
 //! Execution order: Decryptor → Decompressor.
@@ -27,10 +31,6 @@ use crate::Compiler::DLM::Encryptor::Aes128Encryptor;
 use crate::Compiler::DLM::Encryptor::Aes256Encryptor;
 #[cfg(feature = "chacha20-support")]
 use crate::Compiler::DLM::Encryptor::Chacha20Encryptor;
-#[cfg(feature = "bzip2-support")]
-use crate::Compiler::DLM::Compressor::Bzip2Compressor;
-#[cfg(feature = "xz-support")]
-use crate::Compiler::DLM::Compressor::LzmaCompressor;
 
 pub struct DLMReverseExecutor {
     error_manager:       ErrorManager,
@@ -551,24 +551,17 @@ impl DLMReverseExecutor {
         match algorithm.to_lowercase().as_str() {
             "gzip" => Ok(Box::new(GzipCompressor::new())),
 
-            #[cfg(feature = "bzip2-support")]
-            "bzip2" => Ok(Box::new(Bzip2Compressor::new())),
-            #[cfg(not(feature = "bzip2-support"))]
+            // Files written by dixscript 1.0.0 with these codecs can still be
+            // named in a key file, so they get an explicit message.
             "bzip2" => Err(
-                "This file was compressed with bzip2, but this build of \
-                 dixscript was compiled without the 'bzip2-support' feature. \
-                 Rebuild with `--features bzip2-support` (or default \
-                 features) to decompress it.".to_string()
+                "This file was compressed with bzip2, which dixscript no longer \
+                 supports. Read it with dixscript 1.0.0 and re-compress it \
+                 with gzip.".to_string()
             ),
-
-            #[cfg(feature = "xz-support")]
-            "lzma" => Ok(Box::new(LzmaCompressor::new())),
-            #[cfg(not(feature = "xz-support"))]
             "lzma" => Err(
-                "This file was compressed with XZ/LZMA, but this build of \
-                 dixscript was compiled without the 'xz-support' feature. \
-                 Rebuild with `--features xz-support` (or default features) \
-                 to decompress it.".to_string()
+                "This file was compressed with XZ/LZMA, which dixscript no \
+                 longer supports. Read it with dixscript 1.0.0 and re-compress \
+                 it with gzip.".to_string()
             ),
 
             _ => {

@@ -3,7 +3,7 @@
 `dixscript` is feature-gated so a build only compiles what it uses. This is the
 second half of the dependency-reduction pass: [utilities.md](utilities.md) covers
 the crates that were removed or hand-rolled, this file covers the ones that were
-made optional. Everything below is **on by default**, so `cargo build` behaves as
+made optional. Everything below is **on by default** (except the two removed-codec stubs), so `cargo build` behaves as
 before; the gating only matters to anyone passing `--no-default-features`.
 
 ## The feature graph
@@ -17,8 +17,7 @@ before; the gating only matters to anyone passing `--no-default-features`.
 | `dlm-auditor` | `DAuditor` — `DiyAuditor`, `EnhancedAuditor`, `.mdix.au` files | nothing extra |
 | `dlm-compressor` | `DCompressor` — gzip | nothing extra (`flate2` is not optional, see below) |
 | `dlm-encryptor` | `DEncryptor` — XOR | nothing extra |
-| `bzip2-support` | `DCompressor.bzip2` (implies `dlm-compressor`) | `bzip2` |
-| `xz-support` | `DCompressor.lzma` (implies `dlm-compressor`) | `lzma-rust2` |
+| `bzip2-support`, `xz-support` | nothing: removed codecs, kept as empty stubs (each implies `dlm-compressor`) so existing manifests resolve; not in `default` | nothing |
 | `aes128-support` | `DEncryptor.aes128` (implies `dlm-encryptor`) | `aes-gcm` |
 | `aes256-support` | `DEncryptor.aes256`, and the encryptor a bare `DEncryptor` means (implies `dlm-encryptor`) | `aes-gcm` (shared with `aes128-support`) |
 | `chacha20-support` | `DEncryptor.chacha20` (implies `dlm-encryptor`) | `chacha20poly1305` |
@@ -50,7 +49,7 @@ believing it happened:
 | `dlm`, no `dlm-encryptor` | `DEncryptor` | *"...'dlm-encryptor' feature..."* |
 | no `aes128-support` / `aes256-support` / `chacha20-support` | `DEncryptor.aes128` / `.aes256` / `.chacha20` (a bare `DEncryptor` is AES-256) | the same kind of error, naming that algorithm's feature; the other algorithms and `DEncryptor.xor` still work |
 | no `argon2-support` | `DEncryptor` in password mode, or a password-protected (Argon2id) key file | *"...compiled without the 'argon2-support' feature..."*; keyfile mode still works |
-| no `bzip2-support` / `xz-support` | `DCompressor.bzip2` / `.lzma` | the same kind of error (this pattern pre-dates the pass and the others copy it) |
+| any build | `DCompressor.bzip2` / `.lzma` | analyzer error `DLM004`, "no longer supported" (see [dlm.md](dlm.md)) |
 
 **Reading an audited file is stricter.** If a key file records that the original
 pipeline had a `DAuditor`, then reading it is supposed to leave an audit trail. A
@@ -120,6 +119,13 @@ the saving is for builds without `cloud-import`.
   `encryption-support` still exists and still means "all of it", so an existing
   `features = ["encryption-support"]` keeps working.
 - **`url` is gone, not gated.** See `Utilities/Url`.
+- **`bzip2` and `lzma` were removed, not gated.** They were already optional, but
+  nobody used them and `lzma-rust2` alone set the declared Rust floor (1.85;
+  `bzip2` needed 1.82). Removing them takes 10 crates out of the default build, by
+  the lockfile (`bzip2` and `libbz2-rs-sys`: 2; `lzma-rust2` and the `sha2` 0.11
+  chain it pulls: 8). The crate counts in "What the gating buys" were measured
+  before this and were not re-run. The two feature names stay as stubs, see
+  [dlm.md](dlm.md).
 
 ## Test targets and `required-features`
 
@@ -127,8 +133,8 @@ A test or bench that needs a feature declares it in `Cargo.toml`
 (`required-features`), so `cargo test --no-default-features` skips it instead of
 failing to compile: `enum_converter_json_toml_regression`, `enum_extract`, and the
 two TOML benches need `toml-support`; `enum_metadata_binary_regression` needs `dlm`;
-`binary_serialization_benchmark` needs `bzip2-support` and `xz-support` (it was
-already uncompilable without defaults). With that, `cargo check -p dixscript
+`binary_serialization_benchmark` no longer needs any feature (it compares gzip only
+now). With that, `cargo check -p dixscript
 --no-default-features --all-targets` is clean for the first time.
 
 ## Verification

@@ -71,7 +71,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       # Default features on purpose — this is what mdix-wasm actually builds
-      # with. Confirms cloud-import/bzip2-support/xz-support/rayon-support
+      # with. Confirms cloud-import/rayon-support
       # all resolve correctly (or gracefully no-op, for cloud-import) on the
       # target that's historically been the fragile one all along.
       - name: Build dixscript for wasm32

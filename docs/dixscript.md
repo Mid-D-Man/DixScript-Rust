@@ -28,6 +28,11 @@ as not yet documented rather than assumed undocumented-on-purpose.
   families (`dlm`, `dlm-auditor`, `dlm-compressor`, `dlm-encryptor`), the heavy
   algorithms (`encryption-support`, `bzip2-support`, `xz-support`), `toml-support`,
   what each costs in crates, and what a build without one does
+- [Arena AST scoping](dixscript/arena-ast.md) — measurements and blast radius for
+  an arena-allocated AST: how much of a compile the AST is (under 4% of allocations),
+  where compile time goes, the arena benchmark, the parser over-reservation and
+  value-resolution scaling findings, the three design options, and a recommended
+  sequence
 - Benchmarks comparing DixScript against JSON/TOML live in
   `dixscript/benches/format_comparison_benchmark.rs` (synthetic small/
   medium/large fixtures) and `dixscript/benches/chemistry_db_comparison_benchmark.rs`

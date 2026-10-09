@@ -1,19 +1,19 @@
-// OPTIONAL, separate on purpose because it deletes.
+// Deletes the two codec source files that the codec-removal drop stops compiling.
 //
-// Deletes the 114 files of com.midmanstudio.mdix/Editor/dixscript/, a stray copy
-// of the Rust source that two earlier "Apply replacements" runs created inside the
-// Unity package (they ran with the Unity template manifest, so target_root was
-// com.midmanstudio.mdix/Editor). The folder first appears in the bot commits of
-// 2026-10-05 and 2026-10-07 and in no other commit, nothing in the repo references
-// it, and build-upm.yml does not use it. Only files are listed (the delete pass
-// removes files, not directories); the emptied folders disappear from git on their
-// own.
+// Put this at .mdix/patches/patch.mdix and run "Apply Surgical Patch" (dry_run = true
+// first; it lists what it would delete). This replaces the template that is there now,
+// the Unity-mirror cleanup. That folder (com.midmanstudio.mdix/Editor/dixscript) no
+// longer exists in the repo, so that cleanup has already been applied.
 //
-// This is a normal scaffold template, NOT a replacements manifest. Put it at
-//     .mdix/cleanup-unity-mirror.mdix
-// and run the "Apply replacements" workflow with
-//     template = .mdix/cleanup-unity-mirror.mdix
-// (try dry_run = true first; it lists what it would delete).
+// Run it AFTER the replacements drop. Once Compressor/mod.rs no longer declares these
+// modules, the files are dead code, so deleting them is safe. Only files are listed;
+// the delete pass removes files, not directories, and the Compressor folder keeps
+// gzip_compressor.rs, compressor_trait.rs and mod.rs.
+//
+// mdix_files/tests/dlm/02_bzip2.mdix and 03_lzma.mdix are NOT deleted here on purpose.
+// The edge-case runner uses the mdix binary built from the published dixscript 1.0.0,
+// which still has both codecs, so those two fixtures still pass today. Retire them
+// when mdix-cli moves to the release that carries this change.
 @CONFIG(
   version    -> "1.0.0"
   features   -> "quickfuncs,data"
@@ -26,119 +26,6 @@
 
 @DATA(
   delete_files::
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/Cargo.toml")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/benches/runtime_benchmark.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Builtins/Core/dix_value.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Builtins/Instance/blob_methods.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Builtins/Static/guid_object.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Builtins/Static/schema_object.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/AST/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/AST/raw.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/AST/root.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/AST/schema.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/BinarySerialization/binary_format.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/BinarySerialization/binary_unpacker.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/Config/config_schema.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/SectionAnalyzers/dlm_section_analyzer.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/SectionAnalyzers/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/SectionAnalyzers/raw_section_analyzer.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/SectionAnalyzers/schema_section_analyzer.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/SectionAnalyzers/security_section_analyzer.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/SectionParsers/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/SectionParsers/schema_section_parser.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/Tokenizer/config_token_splitter.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/Tokenizer/lexer.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/Tokenizer/token.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/general_parser.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/Core/general_semantics_analyzer.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/Auditor/auditor_trait.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/Auditor/diy_auditor.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/Auditor/enhanced_auditor.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/Auditor/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/Compressor/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/Encryptor/aes128_encryptor.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/Encryptor/aes256_encryptor.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/Encryptor/chacha20_encryptor.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/Encryptor/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/Encryptor/xor_encryptor.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/KeyManagement/argon2_kdf.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/KeyManagement/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/dlm_pipeline_executor.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/DLM/dlm_reverse_executor.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/ImportsResolution/cloud_file_cache.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/ImportsResolution/cloud_storage_provider.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/ImportsResolution/http_cloud_provider.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/VersionControl/version_constraints.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/VersionControl/version_manager.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Compiler/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/ErrorManager/diagnostic_dumper.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Runtime/array_homogenizer.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Runtime/converter.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Runtime/data_builder.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Runtime/dix_data.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Runtime/dix_deserialize.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Runtime/key_resolver.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Runtime/loader.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Runtime/merge.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Runtime/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/AsyncTrait/boxed_future.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/AsyncTrait/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Base64/base64_codec.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Base64/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/bitflags_macro.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/differential_tests.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/iter.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/parser.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/tests.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/traits.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/all.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/bits.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/clear.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/complement.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/contains.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/difference.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/empty.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/eq.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/extend.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/flags.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/fmt.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/from_bits.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/from_bits_retain.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/from_bits_truncate.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/from_name.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/insert.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/intersection.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/intersects.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/is_all.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/is_empty.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/iter.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/parser.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/remove.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/symmetric_difference.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/truncate.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/union.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Bitflags/upstream_tests/unknown.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Hex/hex.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Hex/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Hostname/hostname.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Hostname/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/LazyStatic/lazy_static_macro.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/LazyStatic/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/RustcHash/fx_hash.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/RustcHash/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/RustcHash/rustc_hash_v2.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Url/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Url/path_segments.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Uuid/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/Uuid/uuid.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/mod.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/test_rng.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/src/Utilities/token_debug_printer.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/tests/runtime_tests.rs")
-    delete_file("com.midmanstudio.mdix/Editor/dixscript/tests/schema_section_tests.rs")
+    delete_file("dixscript/src/Compiler/DLM/Compressor/bzip2_compressor.rs")
+    delete_file("dixscript/src/Compiler/DLM/Compressor/lzma_compressor.rs")
 )
-

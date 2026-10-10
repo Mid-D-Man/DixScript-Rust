@@ -64,7 +64,8 @@ impl VersionConstraints {
 
     // ==================== DLM MODULE VALIDATION ====================
 
-    /// Checks if a DLM module type and subtype combination is valid
+    /// Checks if a DLM module type and subtype combination is valid.
+    /// `DCompressor.bzip2` and `.lzma` are valid only for language version 1.0.0.
     pub fn is_valid_dlm_module(
         &self,
         module_type: DLMModuleType,
@@ -77,9 +78,14 @@ impl VersionConstraints {
 
         match (module_type, subtype) {
             (DLMModuleType::DCompressor, Some(DLMModuleSubtype::Gzip))
-            | (DLMModuleType::DCompressor, Some(DLMModuleSubtype::Bzip2))
-            | (DLMModuleType::DCompressor, Some(DLMModuleSubtype::Lzma))
             | (DLMModuleType::DCompressor, None) => true,
+
+            (DLMModuleType::DCompressor, Some(DLMModuleSubtype::Bzip2)) => {
+                manager.supports_feature("dlm_codec_bzip2")
+            }
+            (DLMModuleType::DCompressor, Some(DLMModuleSubtype::Lzma)) => {
+                manager.supports_feature("dlm_codec_lzma")
+            }
 
             (DLMModuleType::DAuditor, Some(DLMModuleSubtype::Diy))
             | (DLMModuleType::DAuditor, Some(DLMModuleSubtype::Enhanced))
@@ -513,6 +519,10 @@ impl VersionConstraints {
             }),
         );
         constraints.insert(
+            "RemovedDLMModules".to_string(),
+            json!({ "DCompressor": ["bzip2", "lzma"] }),
+        );
+        constraints.insert(
             "ValidDebugModes".to_string(),
             json!(["off", "regular", "verbose"]),
         );
@@ -629,6 +639,24 @@ impl VersionConstraints {
         let mut errors = Vec::new();
         for module in &dlm.modules {
             if !self.is_valid_dlm_module(module.module_type, module.subtype) {
+                // A removed codec gets its own message, since "invalid module"
+                // would not tell the author what to change.
+                if module.module_type == DLMModuleType::DCompressor
+                    && matches!(
+                        module.subtype,
+                        Some(DLMModuleSubtype::Bzip2) | Some(DLMModuleSubtype::Lzma)
+                    )
+                {
+                    let name = match module.subtype {
+                        Some(DLMModuleSubtype::Bzip2) => "bzip2",
+                        _ => "lzma",
+                    };
+                    errors.push(format!(
+                        "DCompressor.{} was removed in language version 2.0.0; use DCompressor.gzip",
+                        name
+                    ));
+                    continue;
+                }
                 let subtype_str = module.subtype
                     .map(|s| format!(".{:?}", s))
                     .unwrap_or_default();

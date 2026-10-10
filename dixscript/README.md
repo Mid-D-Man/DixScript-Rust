@@ -747,7 +747,6 @@ dixscript = { version = "1.0.0", default-features = false, features = ["toml-sup
 | Feature | Default | What it adds |
 |---------|---------|---------------|
 | `cloud-import` | on | HTTP/HTTPS `@IMPORTS` resolution (reqwest + rustls-tls) |
-| `bzip2-support`, `xz-support` | off | Removed codecs. Kept as empty stubs so existing manifests still resolve; they enable nothing |
 | `rayon-support` | on | Parallel section parsing/(de)serialization for large files |
 
 Building with a feature off and then loading a `.mdix` file that actually

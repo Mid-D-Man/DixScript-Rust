@@ -50,9 +50,11 @@ duplicates, ordering, security notes.
   the module's position and suggests `DCompressor.gzip`. That is a clearer failure
   than an unknown-keyword error, and it works in builds with `dlm` off because the
   analyzer is always compiled.
-- `VersionControl/version_constraints.rs` still treats the two names as known
-  language-level modules. Only its `SupportedDLMModules` list, which tooling reads,
-  changed to `["gzip"]`.
+- `VersionControl/version_constraints.rs` is version-aware: bzip2 and lzma are valid
+  modules for language version 1.0.0 and invalid for 2.0.0, where the version check
+  reports that they were removed. Its `SupportedDLMModules` list, which tooling reads,
+  is `["gzip"]`, and a new `RemovedDLMModules` entry names the two codecs. See
+  [compiler.md](compiler.md) for the language version.
 
 ### `binary_serialization_benchmark.rs`
 
@@ -68,11 +70,15 @@ binary_serialization_benchmark`.
 
 ## Compatibility and follow-ups
 
-- `bzip2-support` and `xz-support` remain in `Cargo.toml` as empty stubs (each still
-  implies `dlm-compressor`) and are no longer in `default`. A downstream
-  `features = ["xz-support"]` keeps resolving. They can be deleted in the next
-  breaking release.
-- The crate version was not changed here.
+- This ships in 2.0.0, a breaking release, so the `bzip2-support` and `xz-support`
+  features are removed outright and not kept as stubs. A downstream manifest that names
+  either one stops resolving.
+- The crate version is not changed in this drop. The Create version branch workflow
+  sets it, and it only rewrites each crate's own `version`, never a dependency
+  requirement. `mdix-lua` and `mdix-java` declare
+  `dixscript = { path = "../dixscript", version = "1.0.0" }`, which stops resolving
+  once the local crate is 2.0.0, so those two requirements need bumping in the same
+  change as the version branch.
 - `mdix-wasm`, `mdix-cli`, `mdix-lsp`, `mdix-ffi` and `mdix-python` resolve the
   published dixscript 1.0.0, which still has both codecs. Their codec-specific
   material should change when each one moves to the release that carries this

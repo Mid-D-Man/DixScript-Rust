@@ -226,7 +226,6 @@ toml-support   = ["dep:toml"]
 #   dlm-compressor DCompressor (gzip; `flate2` is deliberately NOT optional)
 #   dlm-encryptor  DEncryptor  (xor; key files)
 # and the heavy algorithms on top of a family:
-#   bzip2-support / xz-support   removed codecs, now empty stubs (see below)
 #   aes128-support / aes256-support / chacha20-support   one encryptor each
 #   argon2-support               Argon2id: password-protected key files and
 #                                `DEncryptor` password mode
@@ -237,12 +236,6 @@ dlm            = []
 dlm-auditor    = ["dlm"]
 dlm-compressor = ["dlm"]
 dlm-encryptor  = ["dlm"]
-# bzip2 and lzma were removed. These two names stay as empty stubs (each still implies
-# dlm-compressor, as before) so a downstream `features = ["xz-support"]` keeps resolving.
-# They enable no code: a file that uses either codec fails with a "no longer supported"
-# error. They are off by default and can be deleted in the next breaking release.
-bzip2-support  = ["dlm-compressor"]
-xz-support     = ["dlm-compressor"]
 aes128-support   = ["dlm-encryptor", "dep:aes-gcm"]
 aes256-support   = ["dlm-encryptor", "dep:aes-gcm"]
 chacha20-support = ["dlm-encryptor", "dep:chacha20poly1305"]

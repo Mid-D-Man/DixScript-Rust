@@ -164,7 +164,7 @@ impl<'src> Tokenizer<'src> {
             .read()
             .map(|vm| {
                 let v = vm.get_current_version();
-                v == "1.0.0" || v.starts_with("1.")
+                v.starts_with("1.") || v.starts_with("2.")
             })
             .unwrap_or(true);
 

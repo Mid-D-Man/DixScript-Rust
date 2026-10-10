@@ -278,6 +278,31 @@ that.
 section-name list that needed `"raw"`/`"raw_section"` added, found while
 wiring the feature gate through, not part of any pre-existing plan.
 
+**Language version 2.0.0.** The manager knows two language versions, 1.0.0 and
+2.0.0, and a file picks one with `@CONFIG` `version`. They are the same language
+except for the DLM codecs: bzip2 and lzma are valid in 1.0.0 and invalid in 2.0.0.
+- The per-version feature set carries one key per codec (`dlm_codec_gzip` in both,
+  `dlm_codec_bzip2` and `dlm_codec_lzma` in 1.0.0 only). `is_valid_dlm_module` reads
+  those keys, so a 2.0.0 file that names a removed codec fails the version check with
+  a message that says it was removed. A 1.0.0 file passes the version check and is
+  stopped later by the DLM analyzer (`DLM004`), because the codecs no longer exist in
+  the implementation for either version.
+- `is_compatible_with(v)` now means "this manager can read files up to version v".
+  It used to be an exact match against a set that only held 1.0.0.
+- `VersionConstraints::get_version_constraints` keeps `SupportedDLMModules` as what
+  actually runs (gzip) and adds `RemovedDLMModules` for tooling that wants to explain
+  a removed codec.
+- The defaults did not move. `OperationalSettings`, the config schema defaults, the
+  minimal config and the manager's fallback are all still 1.0.0, because tests assert
+  on them. A file opts into 2.0.0 by declaring it. Moving the defaults is a separate
+  step that also has to move those tests.
+- The manager is a process-wide singleton set when a file's `@CONFIG` is processed.
+  Compiling files that declare different versions on different threads can see the
+  other file's version for the codec check. The outcome is the same either way (both
+  versions end in an error for a removed codec), only the message differs. The new
+  unit tests build their own `VersionManager` and use the pure helpers so they never
+  touch the singleton.
+
 ## Fixes and Problems
 
 ### `Compiler/VersionControl/version_constraints.rs`
@@ -291,6 +316,12 @@ wiring the feature gate through, not part of any pre-existing plan.
   missing `"raw_section"`. Same class of problem as above, one layer
   down: without it, `@RAW` would never be considered a supported feature
   of version 1.0.0 at all, regardless of a file's own `@CONFIG`.
+- A file that declared `version -> "2.0.0"` was accepted by the config schema (its
+  version regex allows any `N.N.N`) but the manager silently treated it as 1.0.0, and
+  `initialize_singletons` logged a version mismatch. 2.0.0 is now a real version.
+- `Core/Tokenizer/lexer.rs` kept a fast path only for versions starting with `1.`.
+  A manager at 2.0.0 would have sent every token down the slow per-token feature
+  check. The fast path now covers `2.` as well.
 
 ### Adding `DixScript.raw` broke every other struct-literal construction site
 - Real CI (`cargo bench --no-run`, the actual crate compiled with every

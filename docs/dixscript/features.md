@@ -3,7 +3,7 @@
 `dixscript` is feature-gated so a build only compiles what it uses. This is the
 second half of the dependency-reduction pass: [utilities.md](utilities.md) covers
 the crates that were removed or hand-rolled, this file covers the ones that were
-made optional. Everything below is **on by default** (except the two removed-codec stubs), so `cargo build` behaves as
+made optional. Everything below is **on by default**, so `cargo build` behaves as
 before; the gating only matters to anyone passing `--no-default-features`.
 
 ## The feature graph
@@ -17,7 +17,6 @@ before; the gating only matters to anyone passing `--no-default-features`.
 | `dlm-auditor` | `DAuditor` — `DiyAuditor`, `EnhancedAuditor`, `.mdix.au` files | nothing extra |
 | `dlm-compressor` | `DCompressor` — gzip | nothing extra (`flate2` is not optional, see below) |
 | `dlm-encryptor` | `DEncryptor` — XOR | nothing extra |
-| `bzip2-support`, `xz-support` | nothing: removed codecs, kept as empty stubs (each implies `dlm-compressor`) so existing manifests resolve; not in `default` | nothing |
 | `aes128-support` | `DEncryptor.aes128` (implies `dlm-encryptor`) | `aes-gcm` |
 | `aes256-support` | `DEncryptor.aes256`, and the encryptor a bare `DEncryptor` means (implies `dlm-encryptor`) | `aes-gcm` (shared with `aes128-support`) |
 | `chacha20-support` | `DEncryptor.chacha20` (implies `dlm-encryptor`) | `chacha20poly1305` |
@@ -124,8 +123,8 @@ the saving is for builds without `cloud-import`.
   `bzip2` needed 1.82). Removing them takes 10 crates out of the default build, by
   the lockfile (`bzip2` and `libbz2-rs-sys`: 2; `lzma-rust2` and the `sha2` 0.11
   chain it pulls: 8). The crate counts in "What the gating buys" were measured
-  before this and were not re-run. The two feature names stay as stubs, see
-  [dlm.md](dlm.md).
+  before this and were not re-run. The two feature names are removed as well,
+  since 2.0.0 is a breaking release. See [dlm.md](dlm.md).
 
 ## Test targets and `required-features`
 

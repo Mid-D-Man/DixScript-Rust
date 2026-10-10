@@ -81,12 +81,10 @@ impl ForwardCompatibilityManager {
 
             result.is_newer_version = true;
 
-            if script_version != "1.0.0" {
-                result.errors.push(format!(
-                    "Script version {} not supported by v1.0.0 compiler",
-                    script_version
-                ));
-            }
+            result.errors.push(format!(
+                "Script version {} not supported by v{} compiler",
+                script_version, compiler_version
+            ));
         } else {
             result.is_compatible = true;
         }

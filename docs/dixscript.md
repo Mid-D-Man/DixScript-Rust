@@ -26,7 +26,7 @@ as not yet documented rather than assumed undocumented-on-purpose.
   replacement for the `url` crate
 - [Features](dixscript/features.md) — the Cargo feature graph: the DLM
   families (`dlm`, `dlm-auditor`, `dlm-compressor`, `dlm-encryptor`), the heavy
-  algorithms (`encryption-support`), the two removed-codec stubs, `toml-support`,
+  algorithms (`encryption-support`), `toml-support`,
   what each costs in crates, and what a build without one does
 - [DLM](dixscript/dlm.md) — the compressor module, the pipeline and reverse
   executors, the DLM analyzer, and the removal of the bzip2 and lzma codecs

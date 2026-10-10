@@ -10,14 +10,17 @@ use std::collections::HashSet;
 use crate::Compiler::Core::Tokenizer::TokenType;
 use std::sync::{LazyLock, RwLock};
 
-/// Version constants
+/// Language versions a `.mdix` file can declare with `@CONFIG` `version`.
 pub const VERSION_1_0: &str = "1.0.0";
+/// Same language as 1.0.0 except the DLM codecs: bzip2 and lzma were removed.
+pub const VERSION_2_0: &str = "2.0.0";
+/// Fallback for a missing or unrecognized version. It matches the defaults in
+/// `ConfigSchema` and `OperationalSettings`, which are still 1.0.0.
 pub const DEFAULT_VERSION: &str = VERSION_1_0;
 
 /// VersionManager singleton - manages version-specific features
 pub struct VersionManager {
     current_version: String,
-    version_hierarchy: HashSet<String>,
     feature_map: HashSet<String>,
 }
 
@@ -32,12 +35,8 @@ impl VersionManager {
         let validated_version = Self::validate_version_static(version);
         let feature_map = Self::initialize_features_for_version(&validated_version);
 
-        let mut version_hierarchy = HashSet::new();
-        version_hierarchy.insert(VERSION_1_0.to_string());
-
         VersionManager {
             current_version: validated_version,
-            version_hierarchy,
             feature_map,
         }
     }
@@ -84,10 +83,27 @@ impl VersionManager {
 
     /// Validate version string
     fn validate_version_static(version: &str) -> String {
-        if version.is_empty() || version != VERSION_1_0 {
-            DEFAULT_VERSION.to_string()
-        } else {
-            version.to_string()
+        Self::normalize_version(version).unwrap_or(DEFAULT_VERSION).to_string()
+    }
+
+    /// Canonical form of a declared version, or `None` if it is not a language
+    /// version this build knows. `x_N.*` is the extension form of major N.
+    fn normalize_version(version: &str) -> Option<&'static str> {
+        match version {
+            "1.0.0" | "1.0" => Some(VERSION_1_0),
+            "2.0.0" | "2.0" => Some(VERSION_2_0),
+            v if v.starts_with("x_1.") => Some(VERSION_1_0),
+            v if v.starts_with("x_2.") => Some(VERSION_2_0),
+            _ => None,
+        }
+    }
+
+    /// Order of the known language versions, oldest first.
+    fn version_rank(version: &str) -> Option<u8> {
+        match version {
+            VERSION_1_0 => Some(1),
+            VERSION_2_0 => Some(2),
+            _ => None,
         }
     }
 
@@ -108,9 +124,15 @@ impl VersionManager {
         self.feature_map.contains(&feature_key.to_string())
     }
 
-    /// Check if current version is compatible with target version
+    /// True if this manager can read files declared at `target_version`: any
+    /// known version up to and including the current one.
     pub fn is_compatible_with(&self, target_version: &str) -> bool {
-        self.version_hierarchy.contains(&target_version.to_string())
+        let current = Self::version_rank(&self.current_version);
+        let target = Self::normalize_version(target_version).and_then(|v| Self::version_rank(v));
+        match (current, target) {
+            (Some(current), Some(target)) => target <= current,
+            _ => false,
+        }
     }
 
     /// Check if token type is valid for current version
@@ -210,19 +232,32 @@ impl VersionManager {
     pub fn get_version_info(&self) -> std::collections::HashMap<String, String> {
         let mut info = std::collections::HashMap::new();
         info.insert("CurrentVersion".to_string(), self.current_version.clone());
-        info.insert("SupportedVersions".to_string(), VERSION_1_0.to_string());
+        let is_v2 = self.current_version == VERSION_2_0;
+        info.insert("SupportedVersions".to_string(), format!("{}, {}", VERSION_1_0, VERSION_2_0));
         info.insert("FeatureCount".to_string(), self.feature_map.len().to_string());
-        info.insert("CompatibilityMode".to_string(), "v1.0.0 Foundation".to_string());
-        info.insert("BackwardCompatibility".to_string(), "None (foundation version)".to_string());
+        info.insert(
+            "CompatibilityMode".to_string(),
+            if is_v2 { "v2.0.0" } else { "v1.0.0 Foundation" }.to_string(),
+        );
+        info.insert(
+            "BackwardCompatibility".to_string(),
+            if is_v2 {
+                "Reads v1.0.0 files; DCompressor.bzip2 and DCompressor.lzma were removed"
+            } else {
+                "None (foundation version)"
+            }
+            .to_string(),
+        );
         info.insert("ForwardCompatibility".to_string(), "Limited (unknown features handled gracefully)".to_string());
         info.insert("SupportsImports".to_string(), self.supports_feature("imports_section").to_string());
         info
     }
 
-    /// Initialize feature set for v1.0.0
+    /// Feature set for a language version. 1.0.0 and 2.0.0 share everything
+    /// except the DLM codec keys at the end.
     /// Called ONCE during singleton construction (or on version change)
     fn initialize_features_for_version(version: &str) -> HashSet<String> {
-        if version != VERSION_1_0 {
+        if version != VERSION_1_0 && version != VERSION_2_0 {
             return HashSet::new();
         }
 
@@ -336,6 +371,13 @@ impl VersionManager {
         features.insert("scope_validation".to_string());
         features.insert("built_in_validation".to_string());
 
+        // DLM codecs: gzip is in every version, bzip2 and lzma only in 1.0.0.
+        features.insert("dlm_codec_gzip".to_string());
+        if version == VERSION_1_0 {
+            features.insert("dlm_codec_bzip2".to_string());
+            features.insert("dlm_codec_lzma".to_string());
+        }
+
         features
     }
 }
@@ -385,6 +427,61 @@ mod tests {
         assert!(manager.supports_section_type("CONFIG"));
         assert!(manager.supports_section_type("IMPORTS"));
         assert!(manager.supports_section_type("QUICKFUNCS"));
+    }
+
+    // The tests below build their own `VersionManager` and call the pure helpers,
+    // never `VersionManager::initialize`, so they cannot race with other tests
+    // over the global singleton.
+    #[test]
+    fn test_normalize_version() {
+        assert_eq!(VersionManager::normalize_version("1.0.0"), Some(VERSION_1_0));
+        assert_eq!(VersionManager::normalize_version("1.0"), Some(VERSION_1_0));
+        assert_eq!(VersionManager::normalize_version("2.0.0"), Some(VERSION_2_0));
+        assert_eq!(VersionManager::normalize_version("2.0"), Some(VERSION_2_0));
+        assert_eq!(VersionManager::normalize_version("x_1.5"), Some(VERSION_1_0));
+        assert_eq!(VersionManager::normalize_version("x_2.1"), Some(VERSION_2_0));
+        assert_eq!(VersionManager::normalize_version("3.0.0"), None);
+        assert_eq!(VersionManager::normalize_version(""), None);
+        assert_eq!(VersionManager::validate_version_static("3.0.0"), DEFAULT_VERSION);
+        assert_eq!(VersionManager::validate_version_static("2.0.0"), VERSION_2_0);
+    }
+
+    #[test]
+    fn test_codec_features_by_version() {
+        let v1 = VersionManager::initialize_features_for_version(VERSION_1_0);
+        let v2 = VersionManager::initialize_features_for_version(VERSION_2_0);
+        assert!(v1.contains("dlm_codec_gzip") && v2.contains("dlm_codec_gzip"));
+        assert!(v1.contains("dlm_codec_bzip2") && v1.contains("dlm_codec_lzma"));
+        assert!(!v2.contains("dlm_codec_bzip2") && !v2.contains("dlm_codec_lzma"));
+
+        // Apart from the codec keys the two versions are the same language.
+        let without_codecs = |set: &HashSet<String>| -> HashSet<String> {
+            set.iter().filter(|f| !f.starts_with("dlm_codec_")).cloned().collect()
+        };
+        assert_eq!(without_codecs(&v1), without_codecs(&v2));
+        assert!(VersionManager::initialize_features_for_version("9.9.9").is_empty());
+    }
+
+    #[test]
+    fn test_compatibility_is_up_to_current_version() {
+        let v2 = VersionManager::new(VERSION_2_0);
+        assert_eq!(v2.current_version(), VERSION_2_0);
+        assert!(v2.is_compatible_with("1.0.0"));
+        assert!(v2.is_compatible_with("2.0.0"));
+        assert!(v2.is_compatible_with("2.0"));
+        assert!(!v2.is_compatible_with("3.0.0"));
+
+        let v1 = VersionManager::new(VERSION_1_0);
+        assert!(v1.is_compatible_with("1.0.0"));
+        assert!(!v1.is_compatible_with("2.0.0"));
+    }
+
+    #[test]
+    fn test_version_info_for_2_0() {
+        let info = VersionManager::new(VERSION_2_0).get_version_info();
+        assert_eq!(info["CurrentVersion"], VERSION_2_0);
+        assert!(info["SupportedVersions"].contains("1.0.0") && info["SupportedVersions"].contains("2.0.0"));
+        assert!(info["BackwardCompatibility"].contains("bzip2"));
     }
 
     #[test]

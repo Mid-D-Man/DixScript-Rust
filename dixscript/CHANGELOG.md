@@ -12,7 +12,9 @@ bindings, and per-language wrappers (WASM/Python/C#/Go/Java/Lua/PHP) are
 separate, independently-versioned packages in this same workspace with
 their own release history.
 
-## [Unreleased]
+## [2.0.0] — Unreleased
+
+Breaking release.
 
 ### Removed
 
@@ -21,11 +23,21 @@ their own release history.
   (10 fewer crates in the default build). A file that names either codec
   now fails analysis with a `DLM004` "no longer supported" error, and a key
   file that records one fails to decompress with the same kind of message.
-  The `bzip2-support` and `xz-support` features remain as empty stubs so
-  existing `features = [...]` lists still resolve, and they are no longer in
-  `default`. Files written by 1.0.0 with these codecs can still be read with
-  1.0.0.
+  The `bzip2-support` and `xz-support` Cargo features are removed too, so a
+  `features = [...]` list that names either one no longer resolves. Files
+  written by 1.0.0 with these codecs can still be read with 1.0.0.
 - `binary_serialization_benchmark` compares gzip only.
+
+### Changed
+
+- **Language version 2.0.0.** `@CONFIG` `version -> "2.0.0"` is now a recognized
+  language version. Before, the version manager accepted the string but treated the
+  file as 1.0.0. 1.0.0 files still load. The two versions differ only in the DLM
+  codecs: bzip2 and lzma are valid in 1.0.0 and invalid in 2.0.0, where the version
+  check says they were removed. `VersionManager::is_compatible_with` now means "can
+  read files up to that version", and `get_version_constraints` gains a
+  `RemovedDLMModules` entry. The defaults (`OperationalSettings`, the config schema
+  and the manager's fallback) stay at 1.0.0 for now.
 
 ## [1.0.0] — 2026-07-21
 

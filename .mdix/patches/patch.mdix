@@ -1,19 +1,14 @@
-// Deletes the two codec source files that the codec-removal drop stops compiling.
+// Cleans up after the first codec-removal drop.
+//
+// 1. ROOT_README.md is a stray file. The first drop packed the repo-root README as
+//    ROOT_README.md and relied on a manifest override to land it as README.md, but the
+//    manifest in .mdix/replacements/ was the older one with no override, so the file
+//    was created under its own name. It is deleted here.
+// 2. The one-line README.md change the stray file was meant to carry is applied
+//    in place instead.
 //
 // Put this at .mdix/patches/patch.mdix and run "Apply Surgical Patch" (dry_run = true
-// first; it lists what it would delete). This replaces the template that is there now,
-// the Unity-mirror cleanup. That folder (com.midmanstudio.mdix/Editor/dixscript) no
-// longer exists in the repo, so that cleanup has already been applied.
-//
-// Run it AFTER the replacements drop. Once Compressor/mod.rs no longer declares these
-// modules, the files are dead code, so deleting them is safe. Only files are listed;
-// the delete pass removes files, not directories, and the Compressor folder keeps
-// gzip_compressor.rs, compressor_trait.rs and mod.rs.
-//
-// mdix_files/tests/dlm/02_bzip2.mdix and 03_lzma.mdix are NOT deleted here on purpose.
-// The edge-case runner uses the mdix binary built from the published dixscript 1.0.0,
-// which still has both codecs, so those two fixtures still pass today. Retire them
-// when mdix-cli moves to the release that carries this change.
+// first). Run it after the replacements drop. It deletes one file and edits one line.
 @CONFIG(
   version    -> "1.0.0"
   features   -> "quickfuncs,data"
@@ -22,10 +17,15 @@
 
 @QUICKFUNCS(
   ~delete_file<object>(path) { return { path = path } }
+  ~patch_replace_text<object>(path, anchor, content) {
+    return { path = path, op = "replace_text", anchor = anchor, content = content }
+  }
 )
 
 @DATA(
   delete_files::
-    delete_file("dixscript/src/Compiler/DLM/Compressor/bzip2_compressor.rs")
-    delete_file("dixscript/src/Compiler/DLM/Compressor/lzma_compressor.rs")
+    delete_file("ROOT_README.md")
+
+  patch_files::
+    patch_replace_text("README.md", "(gzip/bzip2/lzma)", "(gzip)")
 )

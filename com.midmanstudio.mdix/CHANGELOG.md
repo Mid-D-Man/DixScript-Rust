@@ -41,9 +41,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (members without data, keys nothing reads, members Unity would not store),
   refuses a bake that would put defaults where the data had a value, and
   updates an existing asset in place so references to it survive.
-- Bake binder (`Editor/Bake/MdixBinder.cs`): fills public fields,
+- Bake binder (`Runtime/MdixBinder.cs`): fills public fields,
   `[SerializeField]` fields and writable properties, lists, arrays, nested
   classes and enums to any depth.
+- `MdixAsset.Bind<T>(dataPath)` and `MdixBinder.Create<T>(db, dataPath)`: the
+  binder at runtime. Builds a plain class or struct and fills it, lists and
+  arrays included, which `LoadAs<T>` cannot do. It fails only when data exists
+  but cannot be converted. `MdixBinder.Create<T>(db, path, out report)` also
+  returns a `MdixBindReport` (members without data, keys nothing reads), and
+  `report.Describe()` prints it. The binder moved from the Editor assembly to
+  Runtime, and `MdixBinder` and `MdixBindReport` are now public.
 
 ### Fixed
 

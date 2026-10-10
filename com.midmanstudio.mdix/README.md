@@ -86,6 +86,35 @@ var enemies = _enemyData
     .UnwrapOr(new List<EnemyConfig>());
 ```
 
+`LoadAs` maps public properties only and cannot fill a `List` or array member of a class.
+For classes with public fields or lists, use `Bind<T>`, which reads fields, `[SerializeField]`
+fields and writable properties, and fills lists, arrays, nested classes and enums to any depth:
+```csharp
+[System.Serializable]
+public class EnemyConfig { public string Name; public int Health; }
+
+public class EnemyTable
+{
+    public int SpawnCap;
+    public List<EnemyConfig> Enemies;
+}
+
+var result = _enemyData.Bind<EnemyTable>();          // whole file; Bind<T>("server") for one object
+if (result.IsSuccess) Debug.Log(result.SuccessResult.Enemies.Count);
+else                  Debug.LogError(result.Error.Message);
+```
+A key such as `spawn_cap` is read by a member called `SpawnCap`, `spawnCap` or `spawn_cap`. `Bind<T>`
+fails only when data exists but cannot be converted; a member with no data keeps the value its
+constructor gave it. For a report of members without data and keys nothing reads, call
+`MdixBinder.Create<T>(db, "", out var report)` on a database you loaded yourself and print
+`report.Describe()`. `T` must be a plain class or struct; for a ScriptableObject use
+`ScriptableObject.CreateInstance` and `MdixBinder.Bind(db, instance, "")`.
+
+`Bind<T>` works by reflection. On IL2CPP builds (iOS, Android, WebGL, consoles) keep your data
+classes from being stripped: mark them `[UnityEngine.Scripting.Preserve]`, or add their assembly to
+a `link.xml` in your project (`<assembly fullname="YourAssembly" preserve="all"/>`). The package's
+own `link.xml` already preserves the Mdix assemblies.
+
 ---
 
 ## Save System

@@ -4,7 +4,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/dixscript.svg)](https://crates.io/crates/dixscript)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 [![CI](https://github.com/Mid-D-Man/DixScript-Rust/actions/workflows/dixscript-publish.yml/badge.svg)](https://github.com/Mid-D-Man/DixScript-Rust/actions)
 
 DixScript is a data interchange format with compile-time functions,
@@ -784,9 +784,11 @@ dixscript 1.0.0 can still be read with 1.0.0.
 
 ## MSRV
 
-Rust **1.85** or later (the declared `rust-version`). The bzip2 and
-`lzma-rust2` crates that used to set this floor are gone; see
-`docs/dixscript/features.md` for what still holds it up.
+Rust **1.75** or later (the declared `rust-version`). That holds for builds that
+use this repository's `Cargo.lock`, which pins a few dependencies below their
+newest versions. A project that depends on `dixscript` from crates.io resolves its
+own dependencies and may need a newer Rust; see the "Minimum Rust version" section
+of `docs/dixscript/features.md`.
 
 ---
 

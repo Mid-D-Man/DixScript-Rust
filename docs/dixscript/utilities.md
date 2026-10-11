@@ -155,18 +155,22 @@ turn the macro exports into crate-private `pub(crate) use`, keep the upstream
 
 ### `Utilities/LazyStatic/lazy_static_macro.rs`
 
-A `lazy_static!` macro expanding to
-`static NAME: std::sync::LazyLock<T> = LazyLock::new(|| expr);`.
+A `lazy_static!` macro expanding each `static ref NAME: T = expr;` to
+`static NAME: Lazy<T> = Lazy::new(|| expr);`. `Lazy` is a small type in the same file:
+a `std::sync::OnceLock<T>` plus a plain `fn() -> T` that fills it on first access,
+with `Deref` to the inner value.
 
-- Barely hand-rolling: `LazyLock` (stable since Rust 1.80; `rust-version` is
-  1.85) already does what `lazy_static` exists for. The macro only preserves
-  the existing `static ref NAME: Type = expr;` syntax so the 18 items don't
-  change.
+- Why not `std::sync::LazyLock`: it is stable only since Rust 1.80 and the crate's
+  floor is 1.75. `OnceLock` (1.70) is enough. The closure passed to `Lazy::new`
+  captures nothing, so it coerces to the `fn() -> T` the type stores.
+- The macro preserves the existing `static ref NAME: Type = expr;` syntax so the 18
+  items don't change. `VersionControl/version_manager.rs` uses `Lazy` directly for its
+  singleton.
 - Only the macro is used across the crate — no `lazy_static::initialize()`, no
   `pub static ref` — but visibility and a final item with no trailing semicolon
   are supported for parity with the real grammar.
 - One real difference: the real macro generates a distinct hidden type per
-  static; `LazyLock<T>` is one std type. Every use is `NAME.method()` or
+  static; `Lazy<T>` is one crate type. Every use is `NAME.method()` or
   `&*NAME`, both fine either way.
 - Not public API: every static is private.
 
@@ -179,7 +183,7 @@ A `lazy_static!` macro expanding to
   inner call is now `$crate::Utilities::LazyStatic::lazy_static!`.
 - *The swap exposed two dead statics.* The real macro wraps each static in a
   hidden type carrying `#[allow(dead_code)]`, so an unused `static ref` never
-  warned; a bare `LazyLock` static does. Wiring it in raised the crate's warning
+  warned; a bare `Lazy` static does. Wiring it in raised the crate's warning
   count from 129 to 131 — `INTERP_METHOD_CALL_RE` and `INTERP_PROPERTY_RE` in
   `quickfuncs_section_parser.rs` are never used and had been invisible. The macro
   now adds `#[allow(dead_code)]` to every static it generates so the swap changes
@@ -187,10 +191,9 @@ A `lazy_static!` macro expanding to
   candidate**, not deleted here: they look like leftovers of the interpolation
   code that already produces `parse_interpolated_expression is never used`.
 
-**Verified against the real `LazyLock`:** the earlier gap (sandbox rustc 1.75
-could not compile `LazyLock`) is closed. The macro's four tests and every wired
-static now run in the real crate on Rust 1.85.1, the crate's declared
-`rust-version`.
+**Verified:** the macro's four tests and every wired static run in the real crate on
+Rust 1.75.0, the crate's declared `rust-version` (545 unit tests and 160 integration
+tests pass). An earlier version of this macro was built on `LazyLock` and needed 1.80.
 
 ### `Utilities/RustcHash` — two hashers, one default
 

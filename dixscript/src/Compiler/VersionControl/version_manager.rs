@@ -4,11 +4,12 @@
 // ============================================================================
 //! Version Manager - Manages DixScript version features and compatibility
 //!
-//! SINGLETON PATTERN using LazyLock (thread-safe, zero-cost after first access)
+//! SINGLETON PATTERN using the crate's `Lazy` (thread-safe, one lock-free read after first access)
 
 use std::collections::HashSet;
 use crate::Compiler::Core::Tokenizer::TokenType;
-use std::sync::{LazyLock, RwLock};
+use std::sync::RwLock;
+use crate::Utilities::LazyStatic::Lazy;
 
 /// Language versions a `.mdix` file can declare with `@CONFIG` `version`.
 pub const VERSION_1_0: &str = "1.0.0";
@@ -25,7 +26,7 @@ pub struct VersionManager {
 }
 
 /// Global singleton instance (thread-safe, lazy-initialized)
-static VERSION_MANAGER: LazyLock<RwLock<VersionManager>> = LazyLock::new(|| {
+static VERSION_MANAGER: Lazy<RwLock<VersionManager>> = Lazy::new(|| {
     RwLock::new(VersionManager::new(DEFAULT_VERSION))
 });
 

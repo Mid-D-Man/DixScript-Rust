@@ -316,6 +316,8 @@ except for the DLM codecs: bzip2 and lzma are valid in 1.0.0 and invalid in 2.0.
   missing `"raw_section"`. Same class of problem as above, one layer
   down: without it, `@RAW` would never be considered a supported feature
   of version 1.0.0 at all, regardless of a file's own `@CONFIG`.
+- The singleton was a `std::sync::LazyLock`, which needs Rust 1.80. It is now the
+  crate's own `Lazy` (see [utilities.md](utilities.md)), so the manager builds on 1.75.
 - A file that declared `version -> "2.0.0"` was accepted by the config schema (its
   version regex allows any `N.N.N`) but the manager silently treated it as 1.0.0, and
   `initialize_singletons` logged a version mismatch. 2.0.0 is now a real version.
@@ -395,3 +397,23 @@ except for the DLM codecs: bzip2 and lzma are valid in 1.0.0 and invalid in 2.0.
 - `mdix merge` does not merge `@SCHEMA` (same gap as `@RAW`).
 - Editor support for `@SCHEMA` (VS Code grammar, LSP hover/semantic tokens)
   is not done.
+
+### `Compiler/Utilities/identifier_pattern_analyzer.rs`
+
+**What it does:** Looks ahead in the token stream to recognise identifier patterns
+(for example whether a name is followed by a call).
+
+**Fixes and Problems:**
+- Two lookahead checks used `Option::is_none_or`, stable only since Rust 1.82. They are
+  now `map_or(true, ..)`, which means the same thing and builds on 1.75.
+
+### `Compiler/ImportsResolution/imports_resolver.rs`
+
+**What it does:** Resolves `@IMPORTS` entries recursively, with cycle detection and
+cloud download.
+
+**Fixes and Problems:**
+- The cloud-import error path used `Result::inspect_err` (Rust 1.76). It is now
+  `map_err` with the same side effect that returns the error unchanged, which builds
+  on 1.75.
+

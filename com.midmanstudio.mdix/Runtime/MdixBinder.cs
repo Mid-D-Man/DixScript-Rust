@@ -211,7 +211,7 @@ namespace MidManStudio.Mdix.Unity
             const BindingFlags flags =
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
 
-            for (var t = type; t != null && t != typeof(object) && !IsUnityType(t); t = t.BaseType)
+            for (var t = type; t != null && t != typeof(object) && (t == type || !IsUnityType(t)); t = t.BaseType)
             {
                 foreach (var f in t.GetFields(flags))
                 {
@@ -368,9 +368,13 @@ namespace MidManStudio.Mdix.Unity
             var members  = GetMembers(type);
             var consumed = new HashSet<string>(StringComparer.Ordinal);
 
+            // Vector3, Quaternion and the other engine structs carry computed properties with setters
+            // (Quaternion.eulerAngles) that data never holds; those are not reported as missing.
+            var engineType = IsUnityType(type);
+
             foreach (var m in members)
             {
-                ctx.Report.MembersSeen++;
+                if (!engineType) ctx.Report.MembersSeen++;
 
                 var    result = Read.Missing;
                 object value  = null;
@@ -384,12 +388,15 @@ namespace MidManStudio.Mdix.Unity
 
                 if (result == Read.Missing)
                 {
+                    if (engineType) continue;
+
                     var looked = string.Join(", ", m.Candidates, 0, Math.Min(3, m.Candidates.Length));
                     AddUnique(ctx.Report.MissingMembers, type.Name + "." + m.Name + " (looked for: " + looked + ")");
                     continue;
                 }
 
                 consumed.Add(FirstSegment(usedKey));
+                if (engineType) ctx.Report.MembersSeen++;
 
                 if (result != Read.Ok) continue;           // found, but could not be converted: already reported
 

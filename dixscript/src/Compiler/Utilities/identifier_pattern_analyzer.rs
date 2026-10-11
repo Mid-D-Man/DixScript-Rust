@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Utilities/identifier_pattern_analyzer.rs"
+// ============================================================================
 
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::AST::Position;
@@ -292,7 +296,7 @@ impl IdentifierPatternAnalyzer {
                             let after_third = Self::peek_ahead(tokens, current_position, 5);
 
                             // Make sure it's NOT followed by '('
-                            let is_not_call = after_third.is_none_or(|t| {
+                            let is_not_call = after_third.map_or(true, |t| {
                                 !matches!(&t.token_type, TokenType::Symbol(s) if *s == '(')
                             });
 
@@ -319,7 +323,7 @@ impl IdentifierPatternAnalyzer {
         }
 
         // LOCAL ENUM: EnumName.VALUE (2 parts, no parens)
-        let is_not_call = after_second.is_none_or(|t| {
+        let is_not_call = after_second.map_or(true, |t| {
             !matches!(&t.token_type, TokenType::Symbol(s) if *s == '(')
         });
 

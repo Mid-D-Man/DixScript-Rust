@@ -94,11 +94,11 @@ binary_serialization_benchmark`.
 
 ## Verification
 
-- Static review only. Nothing was compiled: the environment that made this change
-  has no Rust 1.85 toolchain. A search of `dixscript/src` finds no remaining
-  reference to the two compressor types or the two features.
-- Still to run in CI: `cargo test -p dixscript`, the same with
-  `--no-default-features`, `cargo check --all-targets`, and the wasm32 build.
+- Built and tested on Rust 1.75.0: `cargo check -p dixscript --all-targets` (also with
+  `--no-default-features`) and `cargo test -p dixscript`, which passes 545 unit tests,
+  160 integration tests and 2 doc tests, including the four version-manager tests.
+- Not run here: the wasm32 build, the fuzz job and the other workspace members. Those
+  stay with CI.
 
 ## Fixes and Problems
 

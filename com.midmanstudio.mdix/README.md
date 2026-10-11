@@ -103,7 +103,9 @@ var result = _enemyData.Bind<EnemyTable>();          // whole file; Bind<T>("ser
 if (result.IsSuccess) Debug.Log(result.SuccessResult.Enemies.Count);
 else                  Debug.LogError(result.Error.Message);
 ```
-A key such as `spawn_cap` is read by a member called `SpawnCap`, `spawnCap` or `spawn_cap`. `Bind<T>`
+A key such as `spawn_cap` is read by a member called `SpawnCap`, `spawnCap` or `spawn_cap`. Unity's
+`Vector2`, `Vector3`, `Vector4`, `Vector3Int`, `Quaternion`, `Matrix4x4` and `Color32` are read from
+objects such as `{ x = 1.0, y = 2.0, z = 3.0 }`, and `Color` from a hex colour such as `#FF8000FF`. `Bind<T>`
 fails only when data exists but cannot be converted; a member with no data keeps the value its
 constructor gave it. For a report of members without data and keys nothing reads, call
 `MdixBinder.Create<T>(db, "", out var report)` on a database you loaded yourself and print

@@ -6,7 +6,7 @@
 name = "dixscript"
 version = "1.0.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.75"
 authors = ["MidManStudio"]
 description = "Config, code, and encryption in one file — a data interchange format with compile-time functions, AES-256/ChaCha20 built-in, and cross-platform FFI"
 license = "MIT"

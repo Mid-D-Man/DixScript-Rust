@@ -167,3 +167,43 @@ now). With that, `cargo check -p dixscript
 **Decided:** a declared-but-unavailable module fails the whole load rather than being
 skipped (skipping would drop a compression, encryption or audit step the author asked
 for), and encryption is split per algorithm.
+
+## Minimum Rust version
+
+`rust-version` is **1.75**. It was 1.85 while `lzma-rust2` was a dependency.
+
+**How it was checked:** the crate was built and tested on Rust 1.75.0 itself.
+`cargo check -p dixscript --all-targets` and the same with `--no-default-features`
+finish without errors, and `cargo test -p dixscript` passes (545 unit tests, 160
+integration tests, 2 doc tests). Ubuntu 24.04 ships that toolchain
+(`apt-get install rustc cargo`).
+
+**What sat above 1.75 and what replaced it**
+
+| Where | Was | Now |
+|---|---|---|
+| Crate code | `std::sync::LazyLock` (1.80) | `Lazy<T>` on `OnceLock` (1.70), see [utilities.md](utilities.md) |
+| Crate code | `Option::is_none_or` (1.82), two calls | `map_or(true, ..)` |
+| Crate code | `Result::inspect_err` (1.76) | `map_err` that returns the error |
+| Crate code | a borrowed temporary in an `if`/`else` (accepted from 1.79) | the `String` is declared before the `if` |
+| `Cargo.lock` | `base64ct` 1.8.3 (edition 2024, cargo before 1.85 cannot read it) | 1.6.0 |
+| `Cargo.lock` | `idna_adapter` 1.2.1 (pulls the ICU crates) | 1.1.0, which removes 20 packages (the ICU family and its helpers) and adds 5 smaller ones |
+| `Cargo.lock` | `indexmap` 2.13.0 (1.82) | 2.11.4 |
+| `Cargo.lock` | `rayon` 1.11.0, `rayon-core` 1.13.0 (1.80) | 1.10.0, 1.12.1 |
+| `Cargo.lock`, dev only | `rmp-serde` 1.3.1, `rmp` 0.8.15 (1.85), `half` 2.7.1 (1.81) | 1.3.0, 0.8.14, 2.4.1 |
+
+**The pins live in `Cargo.lock`, not in `Cargo.toml`.** A library must not pin
+other crates for the people who depend on it. The cost is that the 1.75 floor holds
+for builds that use this repository's lockfile. A project that depends on
+`dixscript` from crates.io resolves its own dependencies and can pick newer crates
+that need a newer Rust.
+
+- The `msrv` job in `a-validate.yml` builds and tests on 1.75.0 with the lockfile, so
+  a new dependency or an upgrade that crosses the floor shows up there.
+- Do not run Sync Cargo.lock with `packages` blank. That runs a full
+  `cargo generate-lockfile` and re-resolves everything to the newest versions, which
+  undoes every pin. Naming a package only re-resolves that package.
+- Only `dixscript` was checked against the pinned lockfile. The other workspace
+  members share the same lock, so these downgrades apply to them too, and they were
+  not built.
+

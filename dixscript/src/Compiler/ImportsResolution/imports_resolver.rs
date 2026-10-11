@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/ImportsResolution/imports_resolver.rs"
+// ============================================================================
 //! Recursive import resolution with cycle detection and cloud download.
 
 
@@ -801,7 +805,7 @@ impl<'a> ImportsResolver<'a> {
 
         let provider =
             CloudProviderFactory::get_provider(cloud_url, &self.error_manager)
-                .inspect_err(|e| {
+                .map_err(|e| {
                     self.error_manager.add_imports_resolution_error(
                         ImportsResolutionErrorType::CloudImportNotSupported,
                         e.clone(),
@@ -810,6 +814,7 @@ impl<'a> ImportsResolver<'a> {
                         Some(cloud_url.to_string()),
                         None, 0, 0, None,
                     );
+                    e
                 })?;
 
         let content = tokio::runtime::Runtime::new()

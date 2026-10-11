@@ -30,6 +30,7 @@ as not yet documented rather than assumed undocumented-on-purpose.
   what each costs in crates, and what a build without one does
 - [DLM](dixscript/dlm.md) — the compressor module, the pipeline and reverse
   executors, the DLM analyzer, and the removal of the bzip2 and lzma codecs
+- [Runtime](dixscript/runtime.md) — `format_options.rs`
 - [Arena AST scoping](dixscript/arena-ast.md) — measurements and blast radius for
   an arena-allocated AST: how much of a compile the AST is (under 4% of allocations),
   where compile time goes, the arena benchmark, the parser over-reservation and

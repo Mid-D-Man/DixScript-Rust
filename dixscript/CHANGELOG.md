@@ -38,6 +38,13 @@ Breaking release.
   read files up to that version", and `get_version_constraints` gains a
   `RemovedDLMModules` entry. The defaults (`OperationalSettings`, the config schema
   and the manager's fallback) stay at 1.0.0 for now.
+- **Minimum supported Rust version is 1.75** (was 1.85). The crate and its tests build
+  and pass on Rust 1.75.0. Four code changes made that possible: `std::sync::LazyLock`
+  is replaced by a small `Lazy` type on `OnceLock`, two `Option::is_none_or` calls
+  became `map_or(true, ..)`, one `Result::inspect_err` became `map_err`, and a
+  temporary-lifetime pattern in `Runtime/format_options.rs` that only Rust 1.79 and
+  later accepts was rewritten. The repository's `Cargo.lock` pins seven dependencies
+  below their newest versions to stay inside 1.75.
 
 ## [1.0.0] — 2026-07-21
 

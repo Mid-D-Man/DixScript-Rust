@@ -51,6 +51,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   returns a `MdixBindReport` (members without data, keys nothing reads), and
   `report.Describe()` prints it. The binder moved from the Editor assembly to
   Runtime, and `MdixBinder` and `MdixBindReport` are now public.
+- The binder reads Unity's `Vector2`, `Vector3`, `Vector4`, `Vector3Int`,
+  `Quaternion`, `Matrix4x4` and `Color32` from objects (`{ x = 1, y = 2, z = 3 }`)
+  and `Color` from a hex colour.
 
 ### Fixed
 

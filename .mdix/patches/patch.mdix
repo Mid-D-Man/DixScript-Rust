@@ -1,14 +1,12 @@
-// Cleans up after the first codec-removal drop.
+// Updates the Rust version badge in the repo-root README.md from 1.85+ to 1.75+.
 //
-// 1. ROOT_README.md is a stray file. The first drop packed the repo-root README as
-//    ROOT_README.md and relied on a manifest override to land it as README.md, but the
-//    manifest in .mdix/replacements/ was the older one with no override, so the file
-//    was created under its own name. It is deleted here.
-// 2. The one-line README.md change the stray file was meant to carry is applied
-//    in place instead.
+// Why this is a patch and not part of the replacements archive: the root README.md
+// would be a flat archive member, and "README.md" matches many files in this repo,
+// so it needs a manifest override. A one-line edit does not justify that.
 //
 // Put this at .mdix/patches/patch.mdix and run "Apply Surgical Patch" (dry_run = true
-// first). Run it after the replacements drop. It deletes one file and edits one line.
+// first). It touches one line and deletes nothing. The other README (dixscript/README.md)
+// is already updated by the replacements archive.
 @CONFIG(
   version    -> "1.0.0"
   features   -> "quickfuncs,data"
@@ -16,16 +14,12 @@
 )
 
 @QUICKFUNCS(
-  ~delete_file<object>(path) { return { path = path } }
   ~patch_replace_text<object>(path, anchor, content) {
     return { path = path, op = "replace_text", anchor = anchor, content = content }
   }
 )
 
 @DATA(
-  delete_files::
-    delete_file("ROOT_README.md")
-
   patch_files::
-    patch_replace_text("README.md", "(gzip/bzip2/lzma)", "(gzip)")
+    patch_replace_text("README.md", "rust-1.85+", "rust-1.75+")
 )

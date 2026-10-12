@@ -417,3 +417,57 @@ cloud download.
   `map_err` with the same side effect that returns the error unchanged, which builds
   on 1.75.
 
+### `Utilities/parser_collection_helper.rs`
+
+**What it does:** Up-front capacities for the vectors the section parsers build.
+`section_estimate` sizes the one vector that holds a whole section and is not capped.
+`bounded_estimate` and the four `estimate_*_count` helpers size vectors inside a
+construct and are capped at `MAX_RESERVED_ELEMENTS` (16).
+
+**Decisions:**
+- A parser knows the length of its whole token stream, not the size of the construct it
+  is parsing. Sizing every vector from the stream length reserved thousands of elements
+  for each call argument list, array, object and statement block. Compiling the 445 KB
+  `elements_database.mdix` requested 7.50 GB. With the cap it requests 159 MB.
+- The four `parse_section` sites (data entries, quickfuncs functions, DLM modules, enum
+  declarations) keep the uncapped estimate. There the stream length is a fair guide and
+  the reservation happens once per section.
+- 16 comes from the experiment in `arena-ast.md`. No other value was measured.
+
+**Tests:** `cargo test -p dixscript --lib parser_collection_helper`, and the allocation
+budget test below.
+
+### `Compiler/Core/SectionParsers/` (data, dlm, enums, quickfuncs)
+
+**What it does:** One parser per section: `data_section_parser.rs` for `@DATA`,
+`quickfuncs_section_parser.rs` for `@QUICKFUNCS`, `dlm_section_parser.rs` for `@DLM` and
+`enums_section_parser.rs` for `@ENUMS`.
+
+**Decisions:**
+- Every token-length-derived reservation goes through the shared helper above.
+  `parse_section` uses `section_estimate`, nested constructs use the capped estimates.
+  This is the only change in these files, so the parsing logic is untouched.
+
+### `tests/parser_alloc_budget.rs`
+
+**What it does:** Counts the bytes one compile of `tests/fixtures/alloc_budget.mdix` asks
+the allocator for, and fails above 20 MB.
+
+**Decisions:**
+- It counts requested bytes because that figure is deterministic and wall time is not.
+- The binary holds one test. The counter is process-wide, so a second test running in
+  parallel would be counted too.
+- The fixture is a copy of `mdix_files/advanced/FullFunctionTest.mdix` kept inside the
+  crate, so the test also runs from the published package.
+- The budget sits between 13.2 MB (with the cap) and 88.0 MB (without it). Both figures
+  were measured by running this test.
+
+**Tests:** `cargo test -p dixscript --test parser_alloc_budget`
+
+### Fixes and Problems: parser reservations
+
+- The module comment of `parser_collection_helper.rs` said pre-allocation cut allocations
+  by 15 to 20 percent. The allocation count does not change with the cap (92,794 before
+  and after for `FullFunctionTest`). What changes is the bytes requested, and with them
+  the parse time.
+

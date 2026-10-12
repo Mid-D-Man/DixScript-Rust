@@ -1,0 +1,1748 @@
+ @CONFIG(
+    version -> "1.0.0",
+    encoding -> "UTF-8",
+    author -> "DixScript_QuickFunctions_Complete_Test",
+    features -> "advanced",
+    created -> "2025-01-08T14:00:00Z",
+    debug_mode -> "verbose",
+    error_handling -> "halt"
+)
+
+@ENUMS(
+    Status {
+        Active = 1,
+        Inactive = 2,
+        Pending = 3
+    }
+    Priority {
+        Low,
+        Medium,
+        High,
+        Critical
+    }
+    Color {
+        Red,
+        Green,
+        Blue
+    }
+)
+
+@QUICKFUNCS(
+    // ============================================================
+    // BASIC RETURN TYPES AND PARAMETERS
+    // ============================================================
+
+    ~getConstant<int> => global() {
+        return 42;
+    }
+
+    ~doubletest<int> => global(x<int>) {
+        return x * 2;
+    }
+
+    ~add<int> => global(a<int>, b<int>) {
+        return a + b;
+    }
+
+    ~formatData<string> => global(id<int>, name<string>, active<bool>) {
+        let result = "formatted";
+        return result;
+    }
+
+    ~greet<string> => global(name<string> = "Guest", greeting<string> = "Hello") {
+        return greeting;
+    }
+
+    ~processArray<int> => global(items<array>) {
+        let count = 5;
+        return count;
+    }
+
+    ~processObject<string> => global(data<object>) {
+        let status = "processed";
+        return status;
+    }
+
+    ~calculateFloat<float> => global(x<float>, y<float>) {
+        return x + y;
+    }
+
+    ~isPositive<bool> => global(num<int>) {
+        return num > 0;
+    }
+
+    // ============================================================
+    // SCOPE DECLARATIONS
+    // ============================================================
+
+    ~globalFunction<int> => global() {
+        return 100;
+    }
+
+    ~userOperation<int> => users(id<int>) {
+        return id * 2;
+    }
+
+    ~sharedCalculation<float> => orders, invoices(amount<float>) {
+        return amount * 1.1;
+    }
+
+    ~deepScopeFunction<int> => data.users.profiles(value<int>) {
+        return value + 10;
+    }
+
+    // ============================================================
+    // ARITHMETIC OPERATORS
+    // ============================================================
+
+    ~testAdd<int> => global(a<int>, b<int>) {
+        return a + b;
+    }
+
+    ~testSubtract<int> => global(a<int>, b<int>) {
+        return a - b;
+    }
+
+    ~testMultiply<int> => global(a<int>, b<int>) {
+        return a * b;
+    }
+
+    ~testDivide<float> => global(a<float>, b<float>) {
+        return a / b;
+    }
+
+    ~testModulo<int> => global(a<int>, b<int>) {
+        return a % b;
+    }
+
+    ~testPower<int> => global(base<int>, exp<int>) {
+        return base ^ exp;
+    }
+
+    ~testPrecedence<int> => global(a<int>, b<int>, c<int>) {
+        return a + b * c - (a + b) / 2;
+    }
+
+    ~testChained<int> => global(x<int>) {
+        let result = x + 5 * 2 - 3 / 1 + 10;
+        return result;
+    }
+
+    // ============================================================
+    // COMPARISON OPERATORS
+    // ============================================================
+
+    ~testGreater<bool> => global(a<int>, b<int>) {
+        return a > b;
+    }
+
+    ~testLess<bool> => global(a<int>, b<int>) {
+        return a < b;
+    }
+
+    ~testGreaterEqual<bool> => global(a<int>, b<int>) {
+        return a >= b;
+    }
+
+    ~testLessEqual<bool> => global(a<int>, b<int>) {
+        return a <= b;
+    }
+
+    ~testEqual<bool> => global(a<int>, b<int>) {
+        return a == b;
+    }
+
+    ~testNotEqual<bool> => global(a<int>, b<int>) {
+        return a != b;
+    }
+
+    ~testComplexComparison<bool> => global(x<int>, y<int>, z<int>) {
+        return x < y && y < z;
+    }
+
+    // ============================================================
+    // LOGICAL OPERATORS
+    // ============================================================
+
+    ~testAnd<bool> => global(a<bool>, b<bool>) {
+        return a && b;
+    }
+
+    ~testOr<bool> => global(a<bool>, b<bool>) {
+        return a || b;
+    }
+
+    ~testAndWord<bool> => global(a<bool>, b<bool>) {
+        return a and b;
+    }
+
+    ~testOrWord<bool> => global(a<bool>, b<bool>) {
+        return a or b;
+    }
+
+    ~testNot<bool> => global(flag<bool>) {
+        return !flag;
+    }
+
+    ~testNotWord<bool> => global(flag<bool>) {
+        return not flag;
+    }
+
+    ~testComplexLogic<bool> => global(a<bool>, b<bool>, c<bool>) {
+        return (a && b) || (!c && (a || b));
+    }
+
+    ~testShortCircuit<bool> => global(x<int>, y<int>) {
+        return x > 0 && y < 100 || x == 0;
+    }
+
+    // ============================================================
+    // UNARY OPERATORS
+    // ============================================================
+
+    ~testUnaryMinus<int> => global(x<int>) {
+        return -x;
+    }
+
+    ~testUnaryPlus<int> => global(x<int>) {
+        return +x;
+    }
+
+    ~testDoubleUnary<int> => global(x<int>) {
+        return --x;
+    }
+
+    ~testUnaryExpr<int> => global(a<int>, b<int>) {
+        return -(a + b);
+    }
+
+    ~testNotComparison<bool> => global(x<int>) {
+        return !(x > 10);
+    }
+
+    // ============================================================
+    // SINGLE-LINE IF STATEMENTS
+    // ============================================================
+
+    ~singleLineIfReturn<int> => global(x<int>) {
+        if: x > 0 then return 1;
+        return 0;
+    }
+
+    ~singleLineIfAssign<int> => global(x<int>) {
+        let mut result = 0;
+        if: x > 10 then result = 100;
+        return result;
+    }
+
+    ~singleLineIfElseReturn<int> => global(x<int>) {
+        if: x > 0 then return 1;
+        else  return -1;
+    }
+
+    ~singleLineIfElseAssign<int> => global(x<int>) {
+        let mut result = 0;
+        if: x > 0 then result = 10;
+        else result = -10;
+        return result;
+    }
+
+    ~multipleSingleLineIf<int> => global(score<int>) {
+        let mut bonus = 0;
+        if: score > 90 then bonus = 50;
+        if: score > 80 then bonus = 30;
+        if: score > 70 then bonus = 10;
+        return bonus;
+    }
+
+    ~singleLineIfComplex<bool> => global(a<int>, b<int>) {
+        if: a > 0 && b > 0 then return true;
+        return false;
+    }
+
+    ~singleLineIfArithmetic<int> => global(x<int>) {
+        let mut total = 0;
+        if: x > 5 then total += 100;
+        return total;
+    }
+
+    ~singleLineIfLog<int> => global(x<int>) {
+        if: x > 0 then log: "Positive value";
+        return x;
+    }
+
+    // ============================================================
+    // MULTI-LINE IF STATEMENTS
+    // ============================================================
+
+    ~multiLineIf<int> => global(x<int>) {
+        if: x > 0 {
+            return 1;
+        }
+        return 0;
+    }
+
+    ~multiLineIfElse<int> => global(x<int>) {
+        if: x > 0 {
+            return 1;
+        } else {
+            return -1;
+        }
+    }
+
+    ~ifElifElse<string> => global(score<int>) {
+        if: score >= 90 {
+            return "A";
+        } elif: score >= 80 {
+            return "B";
+        } elif: score >= 70 {
+            return "C";
+        } elif: score >= 60 {
+            return "D";
+        } else {
+            return "F";
+        }
+    }
+
+    ~multipleElif<int> => global(value<int>) {
+        if: value == 1 {
+            return 10;
+        } elif: value == 2 {
+            return 20;
+        } elif: value == 3 {
+            return 30;
+        } elif: value == 4 {
+            return 40;
+        } elif: value == 5 {
+            return 50;
+        } else {
+            return 0;
+        }
+    }
+
+    ~ifMultipleStatements<int> => global(x<int>) {
+        if: x > 0 {
+            let temp = x * 2;
+            let result = temp + 10;
+            return result;
+        }
+        return 0;
+    }
+
+    // ============================================================
+    // NESTED IF STATEMENTS
+    // ============================================================
+
+    ~nestedIfLevel1<int> => global(x<int>, y<int>) {
+        if: x > 0 {
+            if: y > 0 {
+                return 1;
+            } else {
+                return 2;
+            }
+        } else {
+            return 3;
+        }
+    }
+
+    ~nestedIfLevel2<int> => global(a<int>, b<int>, c<int>) {
+        if: a > 0 {
+            if: b > 0 {
+                if: c > 0 {
+                    return 1;
+                } else {
+                    return 2;
+                }
+            } else {
+                return 3;
+            }
+        } else {
+            return 4;
+        }
+    }
+
+    ~nestedIfLevel3<int> => global(w<int>, x<int>, y<int>, z<int>) {
+        if: w > 0 {
+            if: x > 0 {
+                if: y > 0 {
+                    if: z > 0 {
+                        return 1;
+                    } else {
+                        return 2;
+                    }
+                } else {
+                    return 3;
+                }
+            } else {
+                return 4;
+            }
+        } else {
+            return 5;
+        }
+    }
+
+    ~nestedIfElif<int> => global(x<int>, y<int>) {
+        if: x > 0 {
+            if: y > 10 {
+                return 1;
+            } elif: y > 5 {
+                return 2;
+            } else {
+                return 3;
+            }
+        } else {
+            return 0;
+        }
+    }
+
+    ~mixedIfStyle<int> => global(a<int>, b<int>) {
+        if: a > 0 {
+            if: b > 0 then return 100;
+            return 50;
+        }
+        return 0;
+    }
+
+    // ============================================================
+    // SINGLE-LINE SWITCH (CHK) STATEMENTS
+    // ============================================================
+
+    ~singleLineSwitchThenReturn<string> => global(value<int>) {
+        chk: value {
+            -> 1 then return "One";
+            -> 2 then return "Two";
+            -> 3 then return "Three";
+            -> miss then return "Unknown";
+        }
+    }
+
+    ~singleLineSwitchArrowReturn<string> => global(value<int>) {
+        chk: value {
+            -> 1 => return "One";
+            -> 2 => return "Two";
+            -> 3 => return "Three";
+            -> miss => return "Unknown";
+        }
+    }
+
+    ~singleLineSwitchThenAssign<int> => global(status<string>) {
+        let mut result = 0;
+        chk: status {
+            -> "active" then result = 1;
+            -> "inactive" then result = -1;
+            -> "pending" then result = 0;
+            -> miss then result = -999;
+        }
+        return result;
+    }
+
+    ~singleLineSwitchArrowAssign<int> => global(status<string>) {
+        let mut result = 0;
+        chk: status {
+            -> "active" => result = 1;
+            -> "inactive" => result = -1;
+            -> "pending" => result = 0;
+            -> miss => result = -999;
+        }
+        return result;
+    }
+
+    ~singleLineSwitchArithmetic<int> => global(op<string>) {
+        let mut total = 10;
+        chk: op {
+            -> "add" then total += 5;
+            -> "sub" then total -= 3;
+            -> "mul" then total *= 2;
+            -> "div" then total /= 2;
+            -> miss then total = 0;
+        }
+        return total;
+    }
+
+    ~singleLineSwitchLog<int> => global(level<int>) {
+        chk: level {
+            -> 1 then log: "Level 1";
+            -> 2 then log: "Level 2";
+            -> 3 then log: "Level 3";
+            -> miss then log: "Unknown level";
+        }
+        return level;
+    }
+
+    ~singleLineSwitchMixed<int> => global(value<int>) {
+        let mut result = 0;
+        chk: value {
+            -> 1 then result = 10;
+            -> 2 => result = 20;
+            -> 3 then result = 30;
+            -> 4 => result = 40;
+            -> miss then result = 0;
+        }
+        return result;
+    }
+
+    // ============================================================
+    // MULTI-LINE SWITCH (CHK) STATEMENTS
+    // ============================================================
+
+    ~multiLineSwitch<int> => global(value<int>) {
+        chk: value {
+            -> 1 {
+                return 100;
+            }
+            -> 2 {
+                return 200;
+            }
+            -> 3 {
+                return 300;
+            }
+            -> miss {
+                return 0;
+            }
+        }
+    }
+
+    ~switchString<int> => global(cmd<string>) {
+        chk: cmd {
+            -> "start" {
+                return 1;
+            }
+            -> "stop" {
+                return 0;
+            }
+            -> "pause" {
+                return -1;
+            }
+            -> miss {
+                return -999;
+            }
+        }
+    }
+
+    ~switchEnum<int> => global(priority<int>) {
+        chk: priority {
+            -> Priority.Low {
+                return 1;
+            }
+            -> Priority.Medium {
+                return 5;
+            }
+            -> Priority.High {
+                return 10;
+            }
+            -> Priority.Critical {
+                return 20;
+            }
+            -> miss {
+                return 0;
+            }
+        }
+    }
+
+    ~switchNoDefault<int> => global(x<int>) {
+        chk: x {
+            -> 1 {
+                return 10;
+            }
+            -> 2 {
+                return 20;
+            }
+        } return 0;
+    }
+
+    ~switchMultiStatements<int> => global(action<string>) {
+        chk: action {
+            -> "calculate" {
+                let x = 10;
+                let y = 20;
+                let result = x + y;
+                return result;
+            }
+            -> "process" {
+                let mut data = 100;
+                data *= 2;
+                return data;
+            }
+            -> miss {
+                return 0;
+            }
+        }
+    }
+
+    ~switchExpression<string> => global(x<int>, y<int>) {
+        chk: x + y {
+            -> 10 {
+                return "Ten";
+            }
+            -> 20 {
+                return "Twenty";
+            }
+            -> 30 {
+                return "Thirty";
+            }
+            -> miss {
+                return "Other";
+            }
+        }
+    }
+
+    // ============================================================
+    // NESTED SWITCH STATEMENTS
+    // ============================================================
+
+    ~nestedSwitchLevel1<int> => global(typeStr<string>, value<int>) {
+        chk: typeStr {
+            -> "number" {
+                chk: value {
+                    -> 1 {
+                        return 10;
+                    }
+                    -> 2 {
+                        return 20;
+                    }
+                    -> miss {
+                        return 0;
+                    }
+                }
+            }
+            -> "other" {
+                return -1;
+            }
+            -> miss {
+                return -999;
+            }
+        }
+    }
+
+    ~nestedSwitchLevel2<int> => global(cat<string>, sub<string>, val<int>) {
+        chk: cat {
+            -> "A" {
+                chk: sub {
+                    -> "X" {
+                        chk: val {
+                            -> 1 then return 100;
+                            -> 2 then return 200;
+                            -> miss then return 0;
+                        }
+                    }
+                    -> "Y" {
+                        return 50;
+                    }
+                    -> miss {
+                        return 10;
+                    }
+                }
+            }
+            -> "B" {
+                return 5;
+            }
+            -> miss {
+                return 0;
+            }
+        }
+    }
+
+    ~mixedSwitchStyle<int> => global(x<int>, y<int>) {
+        chk: x {
+            -> 1 {
+                chk: y {
+                    -> 10 then return 110;
+                    -> 20 => return 120;
+                    -> miss then return 100;
+                }
+            }
+            -> 2 then return 200;
+            -> miss => return 0;
+        }
+    }
+
+    // ============================================================
+    // MIXED CONTROL FLOW
+    // ============================================================
+
+    ~ifInsideSwitch<int> => global(category<string>, value<int>) {
+        chk: category {
+            -> "numbers" {
+                if: value > 100 {
+                    return 1;
+                } else {
+                    return 2;
+                }
+            }
+            -> "letters" {
+                if: value == 0 then return 3;
+                return 4;
+            }
+            -> miss {
+                return 0;
+            }
+        }
+    }
+
+    ~switchInsideIf<int> => global(enabled<bool>, status<string>) {
+        if: enabled {
+            chk: status {
+                -> "ready" then return 1;
+                -> "pending" => return 2;
+                -> miss then return 3;
+            }
+        } else {
+            return 0;
+        }
+    }
+
+    ~complexNesting1<int> => global(a<bool>, b<string>, c<int>) {
+        if: a {
+            chk: b {
+                -> "test" {
+                    if: c > 0 then return 100;
+                    else return 50;
+                }
+                -> miss then return 0;
+            }
+        }
+        return -1;
+    }
+
+    ~complexNesting2<int> => global(x<int>, y<bool>, z<string>) {
+        chk: x {
+            -> 1 {
+                if: y {
+                    chk: z {
+                        -> "a" then return 1000;
+                        -> "b" => return 2000;
+                        -> miss then return 500;
+                    }
+                } else {
+                    return 100;
+                }
+            }
+            -> 2 then return 50;
+            -> miss => return 0;
+        }
+    }
+
+    // ============================================================
+    // VARIABLE ASSIGNMENTS
+    // ============================================================
+
+    ~simpleAssignment<int> => global(x<int>) {
+        let y = x;
+        return y;
+    }
+
+    ~assignmentExpression<int> => global(a<int>, b<int>) {
+        let result = a + b * 2;
+        return result;
+    }
+
+    ~multipleAssignments<int> => global(x<int>) {
+        let a = x;
+        let b = a * 2;
+        let c = b + 10;
+        return c;
+    }
+
+    ~reassignment<int> => global(x<int>) {
+        let mut y = x;
+        y = y + 10;
+        y = y * 2;
+        return y;
+    }
+
+    ~assignmentInControl<int> => global(flag<bool>) {
+        let mut result = 0;
+        if: flag {
+            result = 100;
+        } else {
+            result = -100;
+        }
+        return result;
+    }
+
+    // ============================================================
+    // ARITHMETIC ASSIGNMENT OPERATORS
+    // ============================================================
+
+    ~addAssign<int> => global(x<int>) {
+        let mut y = 10;
+        y += x;
+        return y;
+    }
+
+    ~subtractAssign<int> => global(x<int>) {
+        let mut y = 100;
+        y -= x;
+        return y;
+    }
+
+    ~multiplyAssign<int> => global(x<int>) {
+        let mut y = 5;
+        y *= x;
+        return y;
+    }
+
+    ~divideAssign<float> => global(x<float>) {
+        let mut y = 100.0;
+        y /= x;
+        return y;
+    }
+
+    ~moduloAssign<int> => global(x<int>) {
+        let mut y = 100;
+        y %= x;
+        return y;
+    }
+
+    ~chainedArithAssign<int> => global(x<int>) {
+        let mut y = 10;
+        y += 5;
+        y *= 2;
+        y -= 3;
+        y /= 2;
+        return y;
+    }
+
+    // ============================================================
+    // OBJECT CREATION
+    // ============================================================
+
+    ~createSimpleObject<object> => global() {
+        let obj = {
+            id = 1,
+            name = "Test"
+        };
+        return obj;
+    }
+
+    ~createComplexObject<object> => global(userId<int>, active<bool>) {
+        let user = {
+            id = userId,
+            name = "User",
+            active = active,
+            score = 95.5,
+            suka = {
+             diablo =419,
+             in = false
+             }
+        };
+        let sss = user.suka.in;
+        user.add("suz", sss);
+        return user;
+    }
+
+    ~createNestedObject<object> => global() {
+        let data = {
+            user = {
+                id = 1,
+                name = "John"
+            },
+            settings = {
+                theme = "dark"
+            }
+        };
+        return data;
+    }
+
+    ~objectWithArrays<object> => global() {
+        let obj = {
+            numbers = [1, 2, 3],
+            names = ["Alice", "Bob"]
+        };
+        return obj;
+    }
+
+    ~emptyObject<object> => global() {
+        let obj = {};
+        return obj;
+    }
+
+    // ============================================================
+    // ARRAY LITERALS
+    // ============================================================
+
+    ~simpleArray<array> => global() {
+        let arr = [1, 2, 3, 4, 5];
+        return arr;
+    }
+
+
+    ~arrayWithExpressions<array> => global(x<int>) {
+        let arr = [x, x + 1, x * 2, x ^ 2];
+        return arr;
+    }
+
+    ~nestedArrays<array> => global() {
+        let arr = [
+            [1, 2, 3],
+            [4, 5, 6],
+            [7, 8, 9]
+        ];
+        return arr;
+    }
+
+    ~emptyArray<array> => global() {
+        let arr = [];
+        return arr;
+    }
+
+    // ============================================================
+    // OBJECT LITERALS IN EXPRESSIONS
+    // ============================================================
+
+    ~returnObjectLiteral<object> => global() {
+        return {
+            id = 1,
+            value = "data"
+        };
+    }
+
+    ~objectAllTypes<object> => global() {
+        return {
+            intVal = 42,
+            floatVal = 3.14,
+            stringVal = "hello",
+            boolVal = true
+        };
+    }
+
+    ~objectNested<object> => global() {
+        return {
+            data = {
+                items = [1, 2, 3],
+                count = 3
+            },
+            meta = {
+                version = "1.0"
+            }
+        };
+    }
+
+    ~objectWithExpressions<object> => global(x<int>, y<int>) {
+        return {
+            sum = x + y,
+            product = x * y,
+            difference = y - x + 3
+        };
+    }
+
+    // ============================================================
+    // PREFIXED CONSTRUCTORS
+    // ============================================================
+
+    ~tuple2<tuple> => global(x<int>, y<int>) {
+        return t:(x, y);
+    }
+
+    ~tuple3<tuple> => global(x<int>, y<int>, z<int>) {
+        return t:(x, y, z);
+    }
+
+    ~tuple4<tuple> => global(a<int>, b<int>, c<int>, d<int>) {
+        return t:(a, b, c, d);
+    }
+
+    ~tupleMixed<tuple> => global() {
+        return t:(1, "text", true, 3.14);
+    }
+
+    ~tupleExpressions<tuple> => global(x<int>, y<int>) {
+        return t:(x + y, x * y, x - y);
+    }
+
+    ~blobCreate<blob> => global(blobData<string>) {
+        return b:(blobData);
+    }
+
+    ~regexCreate<regex> => global(pattern<string>) {
+        return r:(pattern);
+    }
+
+    // ============================================================
+    // PARENTHESIZED EXPRESSIONS
+    // ============================================================
+
+    ~simpleParens<int> => global(a<int>, b<int>) {
+        return (a + b);
+    }
+
+    ~nestedParens<int> => global(a<int>, b<int>, c<int>) {
+        return ((a + b) * c);
+    }
+
+    ~precedenceParens<int> => global(x<int>) {
+        return (x + 5) * (x - 3);
+    }
+
+    ~complexParens<int> => global(a<int>, b<int>, c<int>, d<int>) {
+        return ((a + b) * (c - d)) / 2;
+    }
+
+    // ============================================================
+    // LOG STATEMENTS
+    // ============================================================
+
+    ~simpleLog<int> => global(x<int>) {
+        log: x;
+        return x;
+    }
+
+    ~logExpression<int> => global(a<int>, b<int>) {
+        log: a + b;
+        return a + b;
+    }
+
+    ~logString<string> => global() {
+        log: "Processing";
+        return "Done";
+    }
+
+    ~multipleLogs<int> => global(x<int>) {
+        log: "Start";
+        log: x;
+        log: "End";
+        return x;
+    }
+
+    ~logInControl<int> => global(flag<bool>) {
+        if: flag {
+            log: "Flag is true";
+        } else {
+            log: "Flag is false";
+        }
+        return 0;
+    }
+
+    // ============================================================
+    // TERNARY CONDITIONAL OPERATOR
+    // ============================================================
+
+    ~simpleTernary<int> => global(x<int>) {
+        return x > 0 ? 1 : -1;
+    }
+
+    ~ternaryExpressions<int> => global(a<int>, b<int>) {
+        return a > b ? a * 2 : b * 2;
+    }
+
+    ~nestedTernary<string> => global(score<int>) {
+        return score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : "F";
+    }
+
+    ~ternaryAssignment<int> => global(flag<bool>) {
+        let result = flag ? 100 : -100;
+        return result;
+    }
+
+    ~complexTernary<int> => global(x<int>, y<int>, z<int>) {
+        return x > y ? (y > z ? x : z) : (x > z ? y : z);
+    }
+
+    // ============================================================
+    // STRING INTERPOLATION
+    // ============================================================
+
+    ~simpleInterpolation<string> => global(name<string>) {
+        return $"Hello, {name}!";
+    }
+
+    ~multipleInterpolations<string> => global(first<string>, last<string>) {
+        return $"Name: {first} {last}";
+    }
+
+    ~interpolationExpressions<string> => global(x<int>, y<int>) {
+        return $"Sum: {x + y}, Product: {x * y}";
+    }
+
+    ~interpolationMethods<string> => global(text<string>) {
+        return $"Upper: {text.toUpper()}, Lower: {text.toLower()}";
+    }
+
+    ~complexInterpolation<string> => global(name<string>, age<int>, active<bool>) {
+        let status = active ? "Active" : "Inactive";
+        return $"User: {name}, Age: {age}, Status: {status}";
+    }
+
+    // ============================================================
+    // STATIC OBJECT METHOD CALLS
+    // ============================================================
+
+    ~mathMethods<int> => global(a<int>, b<int>) {
+        let maximum = Math.max(a, b);
+        let minimum = Math.min(a, b);
+        let power = Math.pow(2, 8);
+        let rounded = Math.round(3.7);
+        return maximum;
+    }
+
+    ~dateTimeMethods<string> => global() {
+        let now = DateTime.now();
+        let today = DateTime.today();
+        let formatted = now.format("yyyy-MM-dd");
+        return formatted;
+    }
+
+    ~arrayStaticMethods<array> => global() {
+        let range = Array.range(1, 10);
+        let filled = Array.fill("test", 5);
+        return range;
+    }
+
+    ~randomMethods<int> => global() {
+        let rand_int = Random.range(1, 100);
+        let rand_bool = Random.nextBool();
+        return rand_int;
+    }
+
+    // ============================================================
+    // INSTANCE METHOD CALLS
+    // ============================================================
+
+    ~stringInstanceMethods<string> => global(text<string>) {
+        let upper = text.toUpper();
+        let lower = text.toLower();
+        let trimmed = text.trim();
+        let sub = text.substring(0, 5);
+        return upper;
+    }
+
+    ~arrayInstanceMethods<int> => global(numbers<array>) {
+        let length = numbers.length();
+        let contains = numbers.contains(5);
+        let joined = numbers.join(", ");
+        return length;
+    }
+
+    ~numericInstanceMethods<int> => global(value<float>) {
+        let rounded = value.round(0);
+
+        let floored = value.floor();
+        let ceiled = value.ceil();
+        let absolute = value.abs();
+        return rounded;
+    }
+
+    // ============================================================
+    // METHOD CHAINING
+    // ============================================================
+
+    ~stringChaining<string> => global(text<string>) {
+        return text.trim().toUpper().substring(0, 10);
+    }
+
+    ~arrayChaining<string> => global(numbers<array>) {
+        return numbers.reverse().slice(0, 5).join("-");
+    }
+
+    ~complexChaining<string> => global(input<string>) {
+        return input.trim().split(" ").join("-").toUpper();
+    }
+
+    ~dateTimeChaining<string> => global() {
+        return DateTime.now().addDays(7).addHours(2).format("yyyy-MM-dd HH:mm:ss");
+    }
+
+    // ============================================================
+    // LAMBDA EXPRESSIONS (ANONYMOUS FUNCTIONS)
+    // ============================================================
+
+    ~simpleLambda<int> => global() {
+        let func = () => 42;
+        return func();
+    }
+
+    ~lambdaSingleParam<int> => global(x<int>) {
+        let _double = (n) => n * 2;
+        return _double(x);
+    }
+
+    ~lambdaMultiParams<int> => global(a<int>, b<int>) {
+        let addFn = (x, y) => x + y;
+        return addFn(a, b);
+    }
+
+    ~lambdaTypedParams<int> => global(x<int>, y<int>) {
+        let multiply = (a<int>, b<int>) => a * b;
+        return multiply(x, y);
+    }
+
+    ~lambdaBlockBody<int> => global(x<int>) {
+        let calculate = (n<int>) => {
+            let temp = n * 2;
+            let result = temp + 10;
+            return result;
+        };
+        return calculate(x);
+    }
+
+    ~lambdaInVariable<int> => global(x<int>) {
+        let processor = (value<int>) => value * 3 + 5;
+        let result = processor(x);
+        return result;
+    }
+
+    ~lambdaAsExpression<int> => global(x<int>) {
+        let apply = (n<int>, fn) => fn(n);
+        let result = apply(x, (v) => v * 2);
+        return result;
+    }
+
+    ~lambdaWithConditional<int> => global(x<int>) {
+        let check = (n<int>) => n > 0 ? n : -n;
+        return check(x);
+    }
+
+    ~lambdaReturnObject<object> => global(id<int>, name<string>) {
+        let createUser = (userId<int>, userName<string>) => {
+            id = userId,
+            name = userName,
+            active = true
+        };
+        return createUser(id, name);
+    }
+
+    ~lambdaReturnArray<array> => global(size<int>) {
+        let createRange = (n<int>) => Array.range(1, n);
+        return createRange(size);
+    }
+
+    // ============================================================
+    // NESTED LAMBDAS
+    // ============================================================
+
+    ~nestedLambda1<int> => global(x<int>) {
+        let outer = (a<int>) => {
+            let inner = (b<int>) => a + b;
+            return inner;
+        };
+        let addFive = outer(5);
+        return addFive(x);
+    }
+
+    ~nestedLambda2<int> => global(x<int>) {
+        let outer = (a<int>) => (b<int>) => a * b;
+        let multiplyByTen = outer(10);
+        return multiplyByTen(x);
+    }
+
+    ~nestedLambda3<int> => global(x<int>) {
+        let level1 = (a<int>) => (b<int>) => (c<int>) => a + b * c;
+        let level2 = level1(10);
+        let level3 = level2(5);
+        return level3(x);
+    }
+
+    ~nestedLambdaClosure<int> => global(base<int>) {
+        let multiplier = 3;
+        let outer = (x<int>) => {
+            let inner = (y<int>) => x * y * multiplier;
+            return inner;
+        };
+        let func = outer(base);
+        return func(2);
+    }
+
+    ~nestedLambdaConditional<int> => global(x<int>) {
+        let outer = (n<int>) => {
+            let inner = (m<int>) => n > 0 ? n + m : n - m;
+            return inner;
+        };
+        let process = outer(x);
+        return process(10);
+    }
+
+    ~nestedLambdaComplex<int> => global(a<int>, b<int>) {
+        let calculator = (op<string>) => {
+            let executor = (x<int>, y<int>) => {
+                chk: op {
+                    -> "add" then return x + y;
+                    -> "sub" then return x - y;
+                    -> "mul" then return x * y;
+                    -> "div" then return x / y;
+                    -> miss then return 0;
+                }
+            };
+            return executor;
+        };
+        let adder = calculator("add");
+        return adder(a, b);
+    }
+
+    ~nestedLambdaInControl<int> => global(flag<bool>, x<int>) {
+        if: flag {
+            let positive = (n<int>) => {
+                let _double = (m<int>) => m * 2;
+                return _double(n);
+            };
+            return positive(x);
+        } else {
+            let negative = (n<int>) => {
+                let half = (m<int>) => m / 2;
+                return half(n);
+            };
+            return negative(x);
+        }
+    }
+
+    // ============================================================
+    // LAMBDA WITH METHOD CHAINING
+    // ============================================================
+
+    ~lambdaStringChaining<string> => global(text<string>) {
+        let process = (s<string>) => s.trim().toUpper().substring(0, 5);
+        return process(text);
+    }
+
+    ~lambdaArrayChaining<string> => global(numbers<array>) {
+        let format = (arr<array>) => arr.reverse().slice(0, 3).join(", ");
+        return format(numbers);
+    }
+
+    ~lambdaComplexChaining<string> => global(input<string>) {
+        let transform = (s<string>) => s.trim().split(" ").join("-").toLower();
+        return transform(input);
+    }
+
+    // ============================================================
+    // LAMBDA IN COLLECTIONS
+    // ============================================================
+
+    ~lambdaArray<int> => global(x<int>) {
+        let operations = [
+            (n<int>) => n + 10,
+            (n<int>) => n * 2,
+            (n<int>) => n - 5
+        ];
+        let result<any> = operations[0](x);
+        return result;
+    }
+
+    ~lambdaInObject<int> => global(x<int>) {
+        let calculator = {
+            add = (a<int>, b<int>) => a + b,
+            subtract = (a<int>, b<int>) => a - b,
+            multiply = (a<int>, b<int>) => a * b
+        };
+        return calculator.add(x, 10);
+    }
+
+    // ============================================================
+    // PROPERTY AND ARRAY ACCESS
+    // ============================================================
+
+    ~objectPropertyAccess<string> => global() {
+        let user = {
+            name = "Alice",
+            age = 30,
+            email = "alice@example.com"
+        };
+        return user.name;
+    }
+
+    ~nestedPropertyAccess<string> => global() {
+        let config = {
+            server = {
+                database = {
+                    host = "localhost"
+                }
+            }
+        };
+        return config.server.database.host;
+    }
+
+    ~arrayElementAccess<int> => global() {
+        let numbers = [10, 20, 30, 40, 50];
+        return numbers[2];
+    }
+
+    ~arrayObjectAccess<string> => global() {
+        let users = [
+            { name = "Alice", age = 30 },
+            { name = "Bob", age = 25 }
+        ];
+
+        return users[0].name;
+    }
+
+    ~complexAccessChain<int> => global() {
+        let data = {
+            levels = [
+                { values = [1, 2, 3] },
+                { values = [4, 5, 6] }
+            ]
+        };
+
+        return data.levels[1].values[2];
+    }
+
+    // ============================================================
+    // ENUM ACCESS
+    // ============================================================
+
+    ~simpleEnumAccess<int> => global() {
+        return Status.Active;
+    }
+
+    ~enumInComparison<bool> => global(status<int>) {
+        return status == Status.Active;
+    }
+
+    ~enumInSwitch<string> => global(priority<int>) {
+        chk: priority {
+            -> Priority.Low then return "Low priority";
+            -> Priority.High then return "High priority";
+            -> Priority.Critical then return "Critical!";
+            -> miss then return "Unknown";
+        }
+    }
+
+    ~multipleEnumUsage<int> => global() {
+        let status_val = Status.Active;
+        let priority_val = Priority.High;
+        let color_val = Color.Red;
+        return status_val + priority_val;
+    }
+
+    // ============================================================
+    // COMPREHENSIVE EXPRESSION MIXING
+    // ============================================================
+
+    ~allOperatorsCombined<int> => global(a<int>, b<int>, c<int>) {
+        let result = (a + b) * c - (a / 2) + (b % 3) ^ 2;
+        return result;
+    }
+
+    ~complexBooleanLogic<bool> => global(x<int>, y<int>, z<int>) {
+        return (x > 0 && y > 0) || (z > 0 && (x == y || y == z));
+    }
+
+    ~mixedControlAndExpression<int> => global(a<int>, b<int>) {
+        let mut result = 0;
+        if: a > b {
+            chk: a - b {
+                -> 1 then result = 10;
+                -> 2 then result = 20;
+                -> miss then result = a * 2;
+            }
+        } else {
+            result = b * 3;
+        }
+        return result;
+    }
+
+    ~kitchenSink<string> => global(x<int>, flag<bool>) {
+        let processor = (n<int>) => {
+            let inner = (m<int>) => m * 2;
+            return inner(n);
+        };
+
+        let processed = processor(x);
+
+        let text = flag ? "positive" : "negative";
+        let formatted = text.toUpper().substring(0, 3);
+
+        let mut message = $"Value: {processed}, Status: {formatted}";
+
+        if: processed > 10 {
+            log: "High value";
+            chk: formatted {
+                -> "POS" then message = $"{message} - Confirmed";
+                -> miss then message = $"{message} - Unknown";
+            }
+        }
+
+        return message;
+    }
+)
+
+@DATA(
+    test_name = "FullFunctionTest Compilation Suite",
+    version = "1.0.0",
+    total_functions = 100,
+    compile_target = "All QuickFuncs"
+
+    // ── Basic return types ──────────────────────────────────────────────────
+    test.basic:
+        constant        = getConstant(),
+        doubled         = doubletest(5),
+        sum             = add(10, 20),
+        formatted       = formatData(1, "Alice", true),
+        greeting        = greet("World", "Hi"),
+        arr_count       = processArray([1, 2, 3, 4, 5]),
+        obj_status      = processObject({ id = 1, name = "test" }),
+        float_sum       = calculateFloat(3.14, 2.72),
+        is_positive     = isPositive(42)
+
+    // ── Scope declarations ──────────────────────────────────────────────────
+    test.scope:
+        global_val      = globalFunction(),
+        user_val        = userOperation(5),
+        shared_val      = sharedCalculation(100.0),
+        deep_val        = deepScopeFunction(15)
+
+    // ── Arithmetic operators ────────────────────────────────────────────────
+    test.arithmetic:
+        added           = testAdd(10, 5),
+        subtracted      = testSubtract(10, 5),
+        multiplied      = testMultiply(10, 5),
+        divided         = testDivide(10.0, 4.0),
+        modded          = testModulo(10, 3),
+        powered         = testPower(2, 8),
+        precedence      = testPrecedence(5, 3, 2),
+        chained         = testChained(5)
+
+    // ── Comparison operators ────────────────────────────────────────────────
+    test.comparison:
+        greater         = testGreater(10, 5),
+        less            = testLess(5, 10),
+        greater_eq      = testGreaterEqual(5, 5),
+        less_eq         = testLessEqual(5, 5),
+        equal           = testEqual(5, 5),
+        not_equal       = testNotEqual(5, 10),
+        complex_cmp     = testComplexComparison(1, 2, 3)
+
+    // ── Logical operators ───────────────────────────────────────────────────
+    test.logic:
+        and_result      = testAnd(true, true),
+        or_result       = testOr(false, true),
+        and_word        = testAndWord(true, true),
+        or_word         = testOrWord(false, true),
+        not_result      = testNot(false),
+        not_word        = testNotWord(false),
+        complex_logic   = testComplexLogic(true, false, true),
+        short_circuit   = testShortCircuit(5, 50)
+
+    // ── Unary operators ─────────────────────────────────────────────────────
+    test.unary:
+        unary_minus     = testUnaryMinus(10),
+        unary_plus      = testUnaryPlus(5),
+        double_unary    = testDoubleUnary(5),
+        unary_expr      = testUnaryExpr(3, 4),
+        not_cmp         = testNotComparison(5)
+
+    // ── Single-line if (Fix 2 exercises these) ──────────────────────────────
+    test.singleif:
+        if_ret          = singleLineIfReturn(5),
+        if_assign       = singleLineIfAssign(15),
+        if_else_ret     = singleLineIfElseReturn(5),
+        if_else_assign  = singleLineIfElseAssign(5),
+        multi_if        = multipleSingleLineIf(85),
+        if_complex      = singleLineIfComplex(3, 4),
+        if_arith        = singleLineIfArithmetic(10),
+        if_log          = singleLineIfLog(5)
+
+    // ── Multi-line if ───────────────────────────────────────────────────────
+    test.multiif:
+        multi           = multiLineIf(5),
+        multi_else      = multiLineIfElse(5),
+        elif_chain      = ifElifElse(85),
+        multi_elif      = multipleElif(3),
+        multi_stmts     = ifMultipleStatements(5)
+
+    // ── Nested if ───────────────────────────────────────────────────────────
+    test.nestedif:
+        nested_l1       = nestedIfLevel1(5, 5),
+        nested_l2       = nestedIfLevel2(5, 5, 5),
+        nested_l3       = nestedIfLevel3(5, 5, 5, 5),
+        nested_elif     = nestedIfElif(5, 8),
+        mixed_style     = mixedIfStyle(5, 5)
+
+    // ── Single-line switch ──────────────────────────────────────────────────
+    test.singleswitch:
+        sw_then         = singleLineSwitchThenReturn(1),
+        sw_arrow        = singleLineSwitchArrowReturn(2),
+        sw_assign       = singleLineSwitchThenAssign("active"),
+        sw_arr_assign   = singleLineSwitchArrowAssign("pending"),
+        sw_arith        = singleLineSwitchArithmetic("add"),
+        sw_log          = singleLineSwitchLog(2),
+        sw_mixed        = singleLineSwitchMixed(3)
+
+    // ── Multi-line switch ───────────────────────────────────────────────────
+    test.multiswitch:
+        multi_sw        = multiLineSwitch(2),
+        sw_string       = switchString("start"),
+        sw_enum         = switchEnum(2)
+
+    // ── Nested switch ───────────────────────────────────────────────────────
+    test.nestedswitch:
+        nested_sw1      = nestedSwitchLevel1("number", 1),
+        nested_sw2      = nestedSwitchLevel2("A", "X", 1),
+        mixed_sw        = mixedSwitchStyle(1, 10)
+
+    // ── Mixed control flow ──────────────────────────────────────────────────
+    test.mixedcontrol:
+        if_in_sw        = ifInsideSwitch("numbers", 150),
+        sw_in_if        = switchInsideIf(true, "ready"),
+        complex1        = complexNesting1(true, "test", 5),
+        complex2        = complexNesting2(1, true, "a")
+
+    // ── Variables ───────────────────────────────────────────────────────────
+    test.variables:
+        simple          = simpleAssignment(42),
+        expr_assign     = assignmentExpression(5, 3),
+        multi           = multipleAssignments(5),
+        reassign        = reassignment(5),
+        ctrl_assign     = assignmentInControl(true)
+
+    // ── Arithmetic assignment ───────────────────────────────────────────────
+    test.arithassign:
+        add_asgn        = addAssign(5),
+        sub_asgn        = subtractAssign(20),
+        mul_asgn        = multiplyAssign(4),
+        div_asgn        = divideAssign(4.0),
+        mod_asgn        = moduloAssign(7),
+        chain_asgn      = chainedArithAssign(0)
+
+    // ── Object creation ─────────────────────────────────────────────────────
+    test.objects:
+        simple_obj      = createSimpleObject(),
+        complex_obj     = createComplexObject(1, true),
+        nested_obj      = createNestedObject(),
+        obj_arrays      = objectWithArrays(),
+        empty_obj       = emptyObject()
+
+    // ── Array literals ──────────────────────────────────────────────────────
+    test.arrays:
+        simple_arr      = simpleArray(),
+        expr_arr        = arrayWithExpressions(5),
+        nested_arrs     = nestedArrays(),
+        empty_arr       = emptyArray()
+
+    // ── Object literals ─────────────────────────────────────────────────────
+    test.objliterals:
+        ret_obj         = returnObjectLiteral(),
+        all_types       = objectAllTypes(),
+        obj_nested      = objectNested(),
+        obj_exprs       = objectWithExpressions(3, 4)
+
+    // ── Prefixed constructors ───────────────────────────────────────────────
+    test.constructors:
+        tup2            = tuple2(1, 2),
+        tup3            = tuple3(1, 2, 3),
+        tup4            = tuple4(1, 2, 3, 4),
+        tup_mixed       = tupleMixed(),
+        tup_exprs       = tupleExpressions(3, 4),
+        blob_val        = blobCreate("SGVsbG8="),
+        regex_val       = regexCreate("[a-z]+")
+
+    // ── Parenthesized expressions ───────────────────────────────────────────
+    test.parens:
+        simple_p        = simpleParens(3, 4),
+        nested_p        = nestedParens(3, 4, 5),
+        prec_p          = precedenceParens(5),
+        complex_p       = complexParens(2, 3, 4, 5)
+
+    // ── Log statements ──────────────────────────────────────────────────────
+    test.logs:
+        log_val         = simpleLog(42),
+        log_expr        = logExpression(5, 3),
+        log_str         = logString(),
+        multi_log       = multipleLogs(10),
+        log_ctrl        = logInControl(true)
+
+    // ── Ternary ─────────────────────────────────────────────────────────────
+    test.ternary:
+        simple_tern     = simpleTernary(5),
+        tern_exprs      = ternaryExpressions(10, 5),
+        nested_tern     = nestedTernary(85),
+        tern_assign     = ternaryAssignment(true),
+        complex_tern    = complexTernary(5, 3, 4)
+
+    // ── String interpolation ────────────────────────────────────────────────
+    test.interpolation:
+        simple_interp   = simpleInterpolation("World"),
+        multi_interp    = multipleInterpolations("John", "Doe"),
+        interp_exprs    = interpolationExpressions(10, 5),
+        interp_methods  = interpolationMethods("Hello"),
+        complex_interp  = complexInterpolation("Alice", 30, true)
+
+    // ── Static object methods ───────────────────────────────────────────────
+    test.staticmethods:
+        math_result     = mathMethods(10, 5),
+        arr_static      = arrayStaticMethods(),
+        rand_int        = randomMethods()
+
+    // ── Instance methods ────────────────────────────────────────────────────
+    test.instancemethods:
+        str_methods     = stringInstanceMethods("  Hello World  "),
+        arr_methods     = arrayInstanceMethods([1, 2, 3, 4, 5]),
+        num_methods     = numericInstanceMethods(3.7f)
+
+    // ── Method chains (Fix 1 exercises these) ───────────────────────────────
+    test.chains:
+        str_chain       = stringChaining("  hello world  "),
+        arr_chain       = arrayChaining([5, 4, 3, 2, 1]),
+        complex_chain   = complexChaining("hello world")
+      dt_chain        = dateTimeChaining()
+
+    // ── Lambdas ─────────────────────────────────────────────────────────────
+    test.lambdas:
+        simple_lam      = simpleLambda(),
+        lam_single      = lambdaSingleParam(5),
+        lam_multi       = lambdaMultiParams(3, 4),
+        lam_typed       = lambdaTypedParams(3, 4),
+        lam_block       = lambdaBlockBody(5),
+        lam_in_var      = lambdaInVariable(5),
+        lam_as_expr     = lambdaAsExpression(5),
+        lam_cond        = lambdaWithConditional(-5),
+        lam_obj         = lambdaReturnObject(1, "Alice"),
+        lam_arr         = lambdaReturnArray(5)
+
+    // ── Nested lambdas ──────────────────────────────────────────────────────
+    test.nestedlambdas:
+        nested_lam1     = nestedLambda1(10),
+        nested_lam2     = nestedLambda2(5),
+        nested_lam3     = nestedLambda3(3),
+        nested_closure  = nestedLambdaClosure(2),
+        nested_cond     = nestedLambdaConditional(5),
+        nested_complex  = nestedLambdaComplex(10, 5),
+        nested_ctrl     = nestedLambdaInControl(true, 8)
+
+    // ── Lambda + method chains ──────────────────────────────────────────────
+    test.lambdachains:
+        lam_str_chain   = lambdaStringChaining("  Hello  "),
+        lam_arr_chain   = lambdaArrayChaining([5, 4, 3, 2, 1]),
+        lam_cx_chain    = lambdaComplexChaining("hello world")
+
+    // ── Lambdas in collections ──────────────────────────────────────────────
+    test.lambdacollections:
+        lam_array       = lambdaArray(5),
+        lam_obj_test    = lambdaInObject(5)
+
+    // ── Property and array access ───────────────────────────────────────────
+    test.access:
+        obj_prop        = objectPropertyAccess(),
+        nested_prop     = nestedPropertyAccess(),
+        arr_elem        = arrayElementAccess(),
+        arr_obj         = arrayObjectAccess(),
+        complex_acc     = complexAccessChain()
+
+    // ── Enum access ─────────────────────────────────────────────────────────
+    test.enumaccess:
+        enum_val        = simpleEnumAccess(),
+        enum_cmp        = enumInComparison(1),
+        enum_switch     = enumInSwitch(3),
+        multi_enum      = multipleEnumUsage()
+
+    // ── Comprehensive ───────────────────────────────────────────────────────
+    test.comprehensive:
+        all_ops         = allOperatorsCombined(5, 3, 2),
+        complex_bool    = complexBooleanLogic(1, 2, 3),
+        mixed_ctrl_expr = mixedControlAndExpression(10, 5),
+        kitchen_sink    = kitchenSink(15, true)
+
+    // ── Results tracking ────────────────────────────────────────────────────
+    test.results:
+        passed  = 0,
+        failed  = 0,
+        skipped = 0
+
+    test.categories::
+        "Basic Functions",
+        "Control Flow",
+        "Operators",
+        "Lambdas",
+        "Method Chaining",
+        "Enums",
+        "Comprehensive"
+)

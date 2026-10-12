@@ -28,6 +28,15 @@ Breaking release.
   written by 1.0.0 with these codecs can still be read with 1.0.0.
 - `binary_serialization_benchmark` compares gzip only.
 
+### Performance
+
+- **Parser reservations are capped.** The section parsers sized the Vec for every nested
+  call argument list, array, object and statement block from the length of the whole token
+  stream. Those reservations are now capped at 16 elements; the one vector that holds a
+  whole section keeps its full estimate. Compiling `elements_database.mdix` (445 KB)
+  requests 159 MB instead of 7.50 GB, and its parse stage takes about 30 to 45 percent
+  less time. Output is unchanged. A new test, `parser_alloc_budget`, guards the figure.
+
 ### Changed
 
 - **Language version 2.0.0.** `@CONFIG` `version -> "2.0.0"` is now a recognized

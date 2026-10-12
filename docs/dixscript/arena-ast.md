@@ -352,3 +352,55 @@ synthetic input.
 - Option B's speed, and the arena in the real pipeline.
 - Whether the value-resolution suspect above is the cause.
 - Non-Linux, 32-bit and wasm32 behaviour.
+
+## Progress
+
+Work done against the recommended sequence. Every step runs the loop: baseline, one
+change, correctness gate, repeated measurement, promotion. The measurements below come
+from a single-core Linux sandbox, Rust 1.75.0, `--release`, `default-features = false`.
+Sub-millisecond timings move by about 10 percent between sessions there, so only the
+larger files and the byte counts are used to judge a change.
+
+### Step 2 done: parser reservations capped
+
+Medians of four interleaved rounds (before, cap-all, final), each round the best of five
+runs per file. "Final" is what shipped: nested vectors capped at 16, the four
+whole-section vectors uncapped.
+
+| File | Requested bytes before | After | Parse stage before | After | Total before | After |
+|---|---|---|---|---|---|---|
+| CompleteFeature (2.5 KB) | 642,976 | 624,816 (-2.8%) | 0.123 ms | 0.125 ms (noise) | 0.636 ms | 0.655 ms (noise) |
+| ComplexData (3.8 KB) | 981,672 | 732,720 (-25.4%) | 0.058 ms | 0.053 ms | 0.634 ms | 0.582 ms |
+| ComplexFull (17 KB) | 14,255,465 | 8,839,569 (-38.0%) | 0.829 ms | 0.735 ms (-11.4%) | 5.185 ms | 5.206 ms |
+| FullFunctionTest (53 KB) | 87,960,472 | 13,156,162 (-85.0%) | 2.628 ms | 2.090 ms (-20.5%) | 9.943 ms | 9.318 ms (-6.3%) |
+| elements_database (445 KB) | 7,501,904,105 | 159,365,102 (-97.9%) | 19.73 ms | 14.16 ms (-28.3%) | 341.2 ms | 311.8 ms (-8.6%) |
+
+- An earlier three-round run of the cap-all variant measured the 445 KB parse stage at
+  23.7 ms to 13.0 ms (-45%) and the total at -6.6%. The parse-stage gain on that file is
+  therefore somewhere between 28% and 45%, the total between 6% and 9%.
+- Allocation counts did not move (at most 6 more reallocations), which is why this is a
+  bytes and time win and not an allocation-count win.
+- Cap-all (every site at 16) and the shipped variant are within noise of each other. The
+  shipped one keeps the full estimate where the stream length is a good guide.
+- Correctness gate: every `.mdix` file under `mdix_files` (84 files) compiles to the same
+  result before and after. 80 are compared by an order-insensitive fingerprint, 17 of
+  those also by a strict one, and 4 whose output contains random or time-based values
+  are compared by compile status only. The gate is `others/arena_scope_probes/golden_main.rs`.
+- `cargo test -p dixscript` passes (710 tests), and a new allocation-budget test fails at
+  88.0 MB without the cap and passes at 13.2 MB with it.
+
+### Finding: compile output is not deterministic
+
+The gate had to be order-insensitive because the compiler's own output changes from run
+to run. Two compiles of the same file in two processes differ in the order of the `@CONFIG`
+entries (every file) and in the order of object properties (for example
+`ComparisonFiles/MDIX/AdvancedTest.mdix` and `Unholy.mdix`), apart from the wall-clock
+`created` timestamp. That points at a `std::collections::HashMap` being iterated, whose
+order is randomized per process. It matters for the arena work in two ways: a golden
+comparison cannot be strict, and the binary packer will produce different bytes for the
+same source. It was not investigated further.
+
+### Not done yet
+
+- Step 1, value resolution scaling (36% to 91% of a compile): not profiled yet.
+- Steps 3 to 6 (operator enum, whole-tree clones, the index-arena prototype, migration).

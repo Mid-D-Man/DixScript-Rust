@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using MidManStudio.Mdix.Core;
@@ -116,8 +117,8 @@ namespace MidManStudio.Mdix.Unity
         /// cannot be converted (a text where a number is expected, a number that does not fit, ...);
         /// members without data keep the values their constructor gave them. Use the overload with a
         /// report to see what was missing or unused.
-        /// Not for ScriptableObject types: make those with ScriptableObject.CreateInstance and pass
-        /// the instance to <see cref="Bind"/>.
+        /// A ScriptableObject type is made with ScriptableObject.CreateInstance; to fill one you already
+        /// have, use <see cref="Bind"/>.
         /// </summary>
         public static MdixResult<T> Create<T>(MdixDatabase db, string dataPath = "") where T : new()
         {
@@ -129,30 +130,99 @@ namespace MidManStudio.Mdix.Unity
         public static MdixResult<T> Create<T>(MdixDatabase db, string dataPath, out MdixBindReport report)
             where T : new()
         {
+            return ReadAs<T>(db, dataPath, out report);
+        }
+
+        /// <summary>
+        /// Like <see cref="Create{T}(MdixDatabase, string)"/> but T needs no parameterless constructor
+        /// (a positional record works), and <paramref name="dataPath"/> may name any value: a list, a
+        /// dictionary, a number. An empty path reads the file root, which must then be a class or struct.
+        /// </summary>
+        public static MdixResult<T> ReadAs<T>(MdixDatabase db, string dataPath = "")
+        {
+            MdixBindReport report;
+            return ReadAs<T>(db, dataPath, out report);
+        }
+
+        /// <inheritdoc cref="ReadAs{T}(MdixDatabase, string)"/>
+        public static MdixResult<T> ReadAs<T>(MdixDatabase db, string dataPath, out MdixBindReport report)
+        {
             report = null;
             if (db == null) return MdixResult<T>.Err(MdixError.NullHandle());
 
-            object boxed;
-            try { boxed = new T(); }
+            var type = typeof(T);
+            var path = dataPath ?? string.Empty;
+            var ctx  = new Ctx(db, new MdixBindReport(), apply: true);
+            object value = null;
+
+            try
+            {
+                if (path.Length == 0)
+                {
+                    if (!IsRootObject(type))
+                        return MdixResult<T>.Err(MdixError.SchemaError(
+                            type.Name + " cannot be read from the file root: use a class or struct, or give the path of the value."));
+
+                    value = MakeInstance(type);
+                    BindObject(ctx, value, type, string.Empty, 0);
+                }
+                else
+                {
+                    var r = ReadValue(ctx, path, type, 0, out value);
+                    if (r == Read.Missing)
+                        return MdixResult<T>.Err(MdixError.SchemaError("Nothing is stored at \"" + path + "\"."));
+                }
+            }
             catch (Exception ex)
             {
+                report = ctx.Report;
                 return MdixResult<T>.Err(MdixError.NativeError(
-                    "MdixBinder.Create: could not create " + typeof(T).Name + " (" + ex.Message + ")"));
+                    "MdixBinder.ReadAs: " + type.Name + " failed (" + ex.Message + ")"));
             }
 
-            try { report = Bind(db, boxed, dataPath); }
-            catch (Exception ex)
-            {
-                return MdixResult<T>.Err(MdixError.NativeError(
-                    "MdixBinder.Create: " + typeof(T).Name + " failed (" + ex.Message + ")"));
-            }
-
-            if (report.Problems.Count > 0)
+            report = ctx.Report;
+            if (ctx.Report.Problems.Count > 0)
                 return MdixResult<T>.Err(MdixError.SchemaError(
-                    "Data does not fit " + typeof(T).Name + ".\n" + report.Describe(5)));
+                    "Data does not fit " + type.Name + ".\n" + ctx.Report.Describe(5)));
 
-            // Boxed so that a struct T is filled too, not a copy of it.
-            return MdixResult<T>.Ok((T)boxed);
+            // Boxed along the way, so a struct T is filled too, not a copy of it.
+            return MdixResult<T>.Ok((T)value);
+        }
+
+        /// <summary>The prefix to use: the one given, else the one on the class's [MdixObject], else none.</summary>
+        internal static string EffectivePrefix(Type type, string prefix)
+        {
+            if (prefix != null) return prefix;
+            var attr = type.GetCustomAttribute<MdixObjectAttribute>(true);
+            return attr != null && !string.IsNullOrEmpty(attr.Prefix) ? attr.Prefix : string.Empty;
+        }
+
+        internal static bool IsRootObject(Type type)
+        {
+            Type k, v, e; bool arr, set;
+            return IsObjectLike(type) && !IsScalarLike(type) &&
+                   (!DerivesFromUnityObject(type) || typeof(UnityEngine.ScriptableObject).IsAssignableFrom(type)) &&
+                   !TryGetDictionary(type, out k, out v) && !TryGetCollection(type, out e, out arr, out set);
+        }
+
+        private static bool IsScalarLike(Type t) =>
+            t == typeof(string) || t == typeof(bool) || t == typeof(char) || t.IsEnum || IsNumber(t) || IsColorLike(t) ||
+            t == typeof(Guid) || t == typeof(DateTime) || t == typeof(DateTimeOffset) || t == typeof(TimeSpan) ||
+            t == typeof(MdixDate) || t == typeof(MdixTimestamp);
+
+        /// <summary>A new instance; a class without a parameterless constructor (positional record) gets an empty shell.</summary>
+        private static object MakeInstance(Type type)
+        {
+            // Unity does not allow "new" on a ScriptableObject.
+            if (typeof(UnityEngine.ScriptableObject).IsAssignableFrom(type))
+                return UnityEngine.ScriptableObject.CreateInstance(type);
+
+            try { return Activator.CreateInstance(type, true); }
+            catch (MissingMethodException)
+            {
+                if (type.IsValueType) throw;
+                return RuntimeHelpers.GetUninitializedObject(type);
+            }
         }
 
         /// <summary>
@@ -183,13 +253,18 @@ namespace MidManStudio.Mdix.Unity
 
         // ── Members ───────────────────────────────────────────────────────────
 
-        private sealed class BindMember
+        internal sealed class BindMember
         {
             public string     Name;
             public Type       Type;
             public FieldInfo  Field;
             public PropertyInfo Property;
             public string[]   Candidates;
+            public string     Key;                 // the name the writer stores it under
+
+            public bool CanGet => Field != null || (Property != null && Property.GetGetMethod(false) != null);
+
+            public object Get(object target) => Field != null ? Field.GetValue(target) : Property.GetValue(target);
 
             public void Set(object target, object value)
             {
@@ -198,7 +273,7 @@ namespace MidManStudio.Mdix.Unity
             }
         }
 
-        private static List<BindMember> GetMembers(Type type)
+        internal static List<BindMember> GetMembers(Type type)
         {
             List<BindMember> cached;
             lock (MemberCache)
@@ -227,13 +302,15 @@ namespace MidManStudio.Mdix.Unity
                         Type       = f.FieldType,
                         Field      = f,
                         Candidates = BuildCandidates(f, f.Name),
+                        Key        = MakeKey(f, f.Name),
                     });
                 }
 
                 foreach (var p in t.GetProperties(flags))
                 {
                     if (p.GetIndexParameters().Length > 0) continue;
-                    if (p.GetSetMethod(false) == null) continue;                  // public setter only
+                    // A setter of any visibility ({ get; private set; } is the usual save-data shape) and a public getter.
+                    if (p.GetSetMethod(true) == null || p.GetGetMethod(false) == null) continue;
                     if (p.IsDefined(typeof(MdixIgnoreAttribute), true)) continue;
                     if (!names.Add(p.Name)) continue;
 
@@ -243,6 +320,7 @@ namespace MidManStudio.Mdix.Unity
                         Type       = p.PropertyType,
                         Property   = p,
                         Candidates = BuildCandidates(p, p.Name),
+                        Key        = MakeKey(p, p.Name),
                     });
                 }
             }
@@ -258,14 +336,14 @@ namespace MidManStudio.Mdix.Unity
             return false;
         }
 
-        private static bool IsUnityType(Type t)
+        internal static bool IsUnityType(Type t)
         {
             var ns = t.Namespace;
             return ns != null && (ns == "UnityEngine" || ns.StartsWith("UnityEngine.", StringComparison.Ordinal) ||
                                   ns == "UnityEditor" || ns.StartsWith("UnityEditor.", StringComparison.Ordinal));
         }
 
-        private static bool DerivesFromUnityObject(Type t) =>
+        internal static bool DerivesFromUnityObject(Type t) =>
             typeof(UnityEngine.Object).IsAssignableFrom(t);
 
         // ── Names ─────────────────────────────────────────────────────────────
@@ -289,10 +367,46 @@ namespace MidManStudio.Mdix.Unity
             AddUnique(list, bare);
             AddUnique(list, ToSnakeCase(bare));
             AddUnique(list, ToSnakeCaseSmart(bare));
+            AddUnique(list, KeyFor(name));
             AddUnique(list, LowerFirst(bare));
             AddUnique(list, bare.ToLowerInvariant());
 
             return list.ToArray();
+        }
+
+        private static readonly HashSet<string> ReservedKeys = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "if", "else", "return", "const", "let", "null", "true", "false", "and", "or", "not", "from",
+        };
+
+        /// <summary>The key a member is stored under: snake_case, with an underscore added to words DixScript reserves.</summary>
+        internal static string KeyFor(string name)
+        {
+            var key = ToSnakeCaseSmart(StripPrefix(name));
+            return ReservedKeys.Contains(key) ? key + "_" : key;
+        }
+
+        /// <summary>True for a name DixScript accepts as a key: letters, digits and underscores, not starting with a digit, not reserved.</summary>
+        internal static bool IsPlainKey(string key)
+        {
+            if (string.IsNullOrEmpty(key) || ReservedKeys.Contains(key)) return false;
+            for (int i = 0; i < key.Length; i++)
+            {
+                var c = key[i];
+                var ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || (i > 0 && c >= '0' && c <= '9');
+                if (!ok) return false;
+            }
+            return true;
+        }
+
+        private static string MakeKey(MemberInfo member, string name)
+        {
+            if (member is PropertyInfo)
+            {
+                var path = member.GetCustomAttribute<MdixPropertyAttribute>(true);
+                if (path != null && IsPlainKey(path.Path)) return path.Path;
+            }
+            return KeyFor(name);
         }
 
         private static void AddUnique(List<string> list, string value)
@@ -446,16 +560,25 @@ namespace MidManStudio.Mdix.Unity
                 return Read.Ok;
             }
 
-            // Lists and arrays
-            Type element; bool isArray;
-            if (TryGetCollection(type, out element, out isArray))
-                return ReadCollection(ctx, path, vt, type, element, isArray, depth, out value);
+            // Dictionaries, then lists, arrays and sets
+            Type keyType, valueType;
+            if (TryGetDictionary(type, out keyType, out valueType))
+                return ReadDictionary(ctx, path, vt, type, keyType, valueType, depth, out value);
+
+            Type element; bool isArray, isSet;
+            if (TryGetCollection(type, out element, out isArray, out isSet))
+                return ReadCollection(ctx, path, vt, type, element, isArray, isSet, depth, out value);
 
             if (type == typeof(string))  return ReadString(ctx, path, vt, out value);
+            if (type == typeof(char))    return ReadChar(ctx, path, vt, out value);
             if (type == typeof(bool))    return ReadBool(ctx, path, vt, out value);
             if (type.IsEnum)             return ReadEnum(ctx, path, vt, type, out value);
+            if (type == typeof(Guid))    return ReadGuid(ctx, path, vt, out value);
+            if (type == typeof(DateTime) || type == typeof(DateTimeOffset))
+                return ReadDateTime(ctx, path, vt, type, out value);
+            if (type == typeof(TimeSpan)) return ReadTimeSpan(ctx, path, vt, out value);
             if (IsNumber(type))          return ReadNumber(ctx, path, vt, type, out value);
-            if (IsColorLike(type))       return ReadColor(ctx, path, vt, type, out value);
+            if (IsColorLike(type))       return ReadColor(ctx, path, vt, type, depth, out value);
 
             if (type == typeof(MdixDate))
             {
@@ -492,10 +615,10 @@ namespace MidManStudio.Mdix.Unity
             object instance = null;
             if (ctx.Apply)
             {
-                try { instance = Activator.CreateInstance(type, true); }
+                try { instance = MakeInstance(type); }
                 catch (Exception ex)
                 {
-                    return Fail(ctx, path, type.Name + " needs a parameterless constructor (" + ex.Message + ")");
+                    return Fail(ctx, path, type.Name + " cannot be created (" + ex.Message + ")");
                 }
             }
 
@@ -506,10 +629,21 @@ namespace MidManStudio.Mdix.Unity
         }
 
         private static Read ReadCollection(
-            Ctx ctx, string path, MdixValueType vt, Type declared, Type element, bool isArray, int depth,
+            Ctx ctx, string path, MdixValueType vt, Type declared, Type element, bool isArray, bool isSet, int depth,
             out object value)
         {
             value = null;
+
+            // A byte array is stored as one base64 text.
+            if (isArray && element == typeof(byte) && vt == MdixValueType.String)
+            {
+                var text = ctx.Db.GetString(path);
+                if (text.IsFailure) return Fail(ctx, path, text.Error.Message);
+                try { value = Convert.FromBase64String(text.SuccessResult); }
+                catch (FormatException) { return Fail(ctx, path, "the text is not valid base64"); }
+                ctx.Report.BoundValues++;
+                return Read.Ok;
+            }
 
             if (vt != MdixValueType.Array)
                 return Fail(ctx, path, "expected an array but the data holds " + vt);
@@ -540,6 +674,10 @@ namespace MidManStudio.Mdix.Unity
                     for (int i = 0; i < items.Count; i++) array.SetValue(items[i], i);
                     value = array;
                 }
+                else if (isSet)
+                {
+                    value = BuildSet(declared, element, items);
+                }
                 else
                 {
                     var list = CreateList(declared, element);
@@ -566,9 +704,27 @@ namespace MidManStudio.Mdix.Unity
             return (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(element));
         }
 
+        private static object BuildSet(Type declared, Type element, List<object> items)
+        {
+            object set = null;
+            if (!declared.IsInterface && !declared.IsAbstract) set = Activator.CreateInstance(declared, true);
+            if (set == null) set = Activator.CreateInstance(typeof(HashSet<>).MakeGenericType(element));
+
+            var add  = set.GetType().GetMethod("Add", new[] { element });
+            var args = new object[1];
+            foreach (var item in items) { args[0] = item; add.Invoke(set, args); }
+            return set;
+        }
+
         private static bool TryGetCollection(Type type, out Type element, out bool isArray)
         {
-            element = null; isArray = false;
+            bool isSet;
+            return TryGetCollection(type, out element, out isArray, out isSet);
+        }
+
+        internal static bool TryGetCollection(Type type, out Type element, out bool isArray, out bool isSet)
+        {
+            element = null; isArray = false; isSet = false;
 
             if (type.IsArray)
             {
@@ -587,10 +743,136 @@ namespace MidManStudio.Mdix.Unity
                 element = type.GetGenericArguments()[0];
                 return true;
             }
+
+            if (def == typeof(HashSet<>) || def == typeof(ISet<>))
+            {
+                element = type.GetGenericArguments()[0];
+                isSet = true;
+                return true;
+            }
             return false;
         }
 
-        private static bool IsObjectLike(Type type)
+        internal static bool TryGetDictionary(Type type, out Type key, out Type value)
+        {
+            key = null; value = null;
+            if (!type.IsGenericType) return false;
+
+            var def = type.GetGenericTypeDefinition();
+            if (def == typeof(Dictionary<,>) || def == typeof(IDictionary<,>) || def == typeof(IReadOnlyDictionary<,>))
+            {
+                var args = type.GetGenericArguments();
+                key = args[0]; value = args[1];
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// A dictionary is stored as a list of { key = ..., value = ... } entries, which works for any key type.
+        /// A hand-written object { name = value } is read too, for string, enum and whole-number keys.
+        /// </summary>
+        private static Read ReadDictionary(
+            Ctx ctx, string path, MdixValueType vt, Type declared, Type keyType, Type valueType, int depth,
+            out object value)
+        {
+            value = null;
+            var pairs = new List<KeyValuePair<object, object>>();
+
+            if (vt == MdixValueType.Array)
+            {
+                var length = ctx.Db.GetArrayLength(path);
+                if (length.IsFailure) return Fail(ctx, path, length.Error.Message);
+
+                var count = length.SuccessResult;
+                var limit = ctx.Apply ? count : Math.Min(count, ProbeItemLimit);
+
+                for (int i = 0; i < limit; i++)
+                {
+                    var itemPath = path + "[" + i + "]";
+                    object k, v;
+                    var rk = ReadValue(ctx, itemPath + ".key",   keyType,   depth + 1, out k);
+                    var rv = ReadValue(ctx, itemPath + ".value", valueType, depth + 1, out v);
+
+                    if (rk == Read.Missing) { ctx.Problem(itemPath, "the entry has no key");   continue; }
+                    if (rv == Read.Missing) { ctx.Problem(itemPath, "the entry has no value"); continue; }
+                    if (rk != Read.Ok || rv != Read.Ok) continue;                          // already reported
+
+                    pairs.Add(new KeyValuePair<object, object>(k, v));
+                }
+            }
+            else if (vt == MdixValueType.Object)
+            {
+                var keys = ctx.Db.GetKeys(path);
+                if (keys.IsFailure) return Fail(ctx, path, keys.Error.Message);
+
+                var names = new List<string>();
+                foreach (var key in keys.SuccessResult)
+                {
+                    if (key.IndexOf('[') >= 0 || key.IndexOf('.') >= 0) continue;
+                    names.Add(key);
+                }
+                names.Sort(StringComparer.Ordinal);
+
+                foreach (var name in names)
+                {
+                    object k;
+                    if (!TryKeyFromName(name, keyType, out k))
+                    {
+                        ctx.Problem(Join(path, name), "the name cannot be used as a " + keyType.Name + " key");
+                        continue;
+                    }
+
+                    object v;
+                    var rv = ReadValue(ctx, Join(path, name), valueType, depth + 1, out v);
+                    if (rv == Read.Ok) pairs.Add(new KeyValuePair<object, object>(k, v));
+                }
+            }
+            else
+            {
+                return Fail(ctx, path, "expected a list of key/value entries or an object but the data holds " + vt);
+            }
+
+            if (ctx.Apply)
+            {
+                IDictionary dict = null;
+                if (!declared.IsInterface && !declared.IsAbstract) dict = Activator.CreateInstance(declared, true) as IDictionary;
+                if (dict == null)
+                    dict = (IDictionary)Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(keyType, valueType));
+
+                foreach (var pair in pairs)
+                {
+                    if (pair.Key == null) { ctx.Problem(path, "an entry has a null key"); continue; }
+                    dict[pair.Key] = pair.Value;
+                }
+                value = dict;
+            }
+
+            ctx.Report.BoundValues++;
+            return Read.Ok;
+        }
+
+        private static bool TryKeyFromName(string name, Type keyType, out object key)
+        {
+            key = null;
+            try
+            {
+                var type = Nullable.GetUnderlyingType(keyType) ?? keyType;
+                if (type == typeof(string)) { key = name; return true; }
+                if (type.IsEnum)            { key = Enum.Parse(type, name, true); return true; }
+                if (type == typeof(Guid))   { Guid g; if (!Guid.TryParse(name, out g)) return false; key = g; return true; }
+                if (type == typeof(char))   { if (name.Length != 1) return false; key = name[0]; return true; }
+                if (IsNumber(type) && type != typeof(float) && type != typeof(double) && type != typeof(decimal))
+                {
+                    key = Convert.ChangeType(long.Parse(name, NumberStyles.Integer, CultureInfo.InvariantCulture), type, CultureInfo.InvariantCulture);
+                    return true;
+                }
+            }
+            catch (Exception) { }
+            return false;
+        }
+
+        internal static bool IsObjectLike(Type type)
         {
             if (type.IsPrimitive || type.IsEnum || type == typeof(string)) return false;
             if (type.IsAbstract || type.IsInterface || type.IsGenericTypeDefinition) return false;
@@ -719,9 +1001,36 @@ namespace MidManStudio.Mdix.Unity
             }
         }
 
+        /// <summary>A number stored as text: NaN and infinities, a decimal, or a ulong beyond the long range.</summary>
+        private static Read ReadNumberFromText(Ctx ctx, string path, Type type, out object value)
+        {
+            value = null;
+
+            var s = ctx.Db.GetString(path);
+            if (s.IsFailure) return Fail(ctx, path, s.Error.Message);
+
+            var text = s.SuccessResult.Trim();
+            var inv  = CultureInfo.InvariantCulture;
+            try
+            {
+                if (type == typeof(double))       value = double.Parse(text, NumberStyles.Float, inv);
+                else if (type == typeof(float))   value = float.Parse(text, NumberStyles.Float, inv);
+                else if (type == typeof(decimal)) value = decimal.Parse(text, NumberStyles.Float, inv);
+                else if (type == typeof(ulong))   value = ulong.Parse(text, NumberStyles.Integer, inv);
+                else value = Convert.ChangeType(long.Parse(text, NumberStyles.Integer, inv), type, inv);
+            }
+            catch (FormatException)   { value = null; return Fail(ctx, path, "\"" + text + "\" is not a number"); }
+            catch (OverflowException) { value = null; return Fail(ctx, path, "the value does not fit " + type.Name); }
+
+            ctx.Report.BoundValues++;
+            return Read.Ok;
+        }
+
         private static Read ReadNumber(Ctx ctx, string path, MdixValueType vt, Type type, out object value)
         {
             value = null;
+
+            if (vt == MdixValueType.String) return ReadNumberFromText(ctx, path, type, out value);
 
             bool integral; long whole; double real; string error;
             if (!TryReadNumeric(ctx, path, vt, out integral, out whole, out real, out error))
@@ -802,12 +1111,148 @@ namespace MidManStudio.Mdix.Unity
             return Read.Ok;
         }
 
-        private static bool IsColorLike(Type t) =>
-            t == typeof(MdixHexColor) || t == typeof(UnityEngine.Color);
-
-        private static Read ReadColor(Ctx ctx, string path, MdixValueType vt, Type type, out object value)
+        private static Read ReadChar(Ctx ctx, string path, MdixValueType vt, out object value)
         {
             value = null;
+
+            if (vt == MdixValueType.String)
+            {
+                var s = ctx.Db.GetString(path);
+                if (s.IsFailure) return Fail(ctx, path, s.Error.Message);
+                value = s.SuccessResult.Length == 0 ? '\0' : s.SuccessResult[0];
+            }
+            else if (vt == MdixValueType.Int)
+            {
+                var n = ctx.Db.GetInt(path);
+                if (n.IsFailure) return Fail(ctx, path, n.Error.Message);
+                if (n.SuccessResult < 0 || n.SuccessResult > 65535) return Fail(ctx, path, "the number does not fit a char");
+                value = (char)n.SuccessResult;
+            }
+            else return Fail(ctx, path, "expected a character but the data holds " + vt);
+
+            ctx.Report.BoundValues++;
+            return Read.Ok;
+        }
+
+        private static Read ReadGuid(Ctx ctx, string path, MdixValueType vt, out object value)
+        {
+            value = null;
+            if (vt != MdixValueType.String) return Fail(ctx, path, "expected a guid text but the data holds " + vt);
+
+            var s = ctx.Db.GetString(path);
+            if (s.IsFailure) return Fail(ctx, path, s.Error.Message);
+
+            Guid g;
+            if (!Guid.TryParse(s.SuccessResult, out g)) return Fail(ctx, path, "\"" + s.SuccessResult + "\" is not a guid");
+
+            value = g;
+            ctx.Report.BoundValues++;
+            return Read.Ok;
+        }
+
+        private static Read ReadTimeSpan(Ctx ctx, string path, MdixValueType vt, out object value)
+        {
+            value = null;
+
+            if (vt == MdixValueType.Long || vt == MdixValueType.Int)
+            {
+                bool integral; long whole; double real; string error;
+                if (!TryReadNumeric(ctx, path, vt, out integral, out whole, out real, out error)) return Fail(ctx, path, error);
+                value = TimeSpan.FromTicks(whole);
+            }
+            else if (vt == MdixValueType.String)
+            {
+                var s = ctx.Db.GetString(path);
+                if (s.IsFailure) return Fail(ctx, path, s.Error.Message);
+
+                TimeSpan ts;
+                if (!TimeSpan.TryParse(s.SuccessResult, CultureInfo.InvariantCulture, out ts))
+                    return Fail(ctx, path, "\"" + s.SuccessResult + "\" is not a time span");
+                value = ts;
+            }
+            else return Fail(ctx, path, "expected a time span (ticks) but the data holds " + vt);
+
+            ctx.Report.BoundValues++;
+            return Read.Ok;
+        }
+
+        /// <summary>A date or timestamp literal, or a round-trip text ("o" format), into DateTime or DateTimeOffset.</summary>
+        private static Read ReadDateTime(Ctx ctx, string path, MdixValueType vt, Type type, out object value)
+        {
+            value = null;
+            var wantOffset = type == typeof(DateTimeOffset);
+
+            if (vt == MdixValueType.Timestamp)
+            {
+                var r = ctx.Db.GetTimestamp(path);
+                if (r.IsFailure) return Fail(ctx, path, r.Error.Message);
+                if (!FromRaw((object)r.SuccessResult.Value, wantOffset, out value))
+                    return Fail(ctx, path, "the timestamp could not be converted");
+            }
+            else if (vt == MdixValueType.Date)
+            {
+                var r = ctx.Db.GetDate(path);
+                if (r.IsFailure) return Fail(ctx, path, r.Error.Message);
+                if (!FromRaw((object)r.SuccessResult.Value, wantOffset, out value))
+                    return Fail(ctx, path, "the date could not be converted");
+            }
+            else if (vt == MdixValueType.String)
+            {
+                var s = ctx.Db.GetString(path);
+                if (s.IsFailure) return Fail(ctx, path, s.Error.Message);
+
+                var inv = CultureInfo.InvariantCulture;
+                if (wantOffset)
+                {
+                    DateTimeOffset dto;
+                    if (!DateTimeOffset.TryParse(s.SuccessResult, inv, DateTimeStyles.RoundtripKind, out dto))
+                        return Fail(ctx, path, "\"" + s.SuccessResult + "\" is not a date and time");
+                    value = dto;
+                }
+                else
+                {
+                    DateTime dt;
+                    if (!DateTime.TryParse(s.SuccessResult, inv, DateTimeStyles.RoundtripKind, out dt))
+                        return Fail(ctx, path, "\"" + s.SuccessResult + "\" is not a date and time");
+                    value = dt;
+                }
+            }
+            else return Fail(ctx, path, "expected a date and time but the data holds " + vt);
+
+            ctx.Report.BoundValues++;
+            return Read.Ok;
+        }
+
+        private static bool FromRaw(object raw, bool wantOffset, out object value)
+        {
+            value = null;
+            if (raw is DateTimeOffset)
+            {
+                var dto = (DateTimeOffset)raw;
+                value = wantOffset ? (object)dto : (dto.Offset == TimeSpan.Zero ? dto.UtcDateTime : dto.LocalDateTime);
+                return true;
+            }
+            if (raw is DateTime)
+            {
+                var dt = (DateTime)raw;
+                value = wantOffset
+                    ? (object)new DateTimeOffset(DateTime.SpecifyKind(dt, dt.Kind == DateTimeKind.Unspecified ? DateTimeKind.Utc : dt.Kind))
+                    : dt;
+                return true;
+            }
+            return false;
+        }
+
+        private static bool IsColorLike(Type t) =>
+            t == typeof(MdixHexColor) || t == typeof(UnityEngine.Color) || t == typeof(UnityEngine.Color32);
+
+        private static Read ReadColor(Ctx ctx, string path, MdixValueType vt, Type type, int depth, out object value)
+        {
+            value = null;
+
+            // A Color or Color32 stored as { r = ..., g = ..., b = ..., a = ... } is read like any other object.
+            if (vt == MdixValueType.Object && type != typeof(MdixHexColor))
+                return ReadObject(ctx, path, vt, type, depth, out value);
 
             if (vt != MdixValueType.HexColor)
                 return Fail(ctx, path, "expected a hex colour but the data holds " + vt);
@@ -818,14 +1263,17 @@ namespace MidManStudio.Mdix.Unity
             if (ctx.Apply)
             {
                 var c = r.SuccessResult;
-                value = type == typeof(MdixHexColor)
-                    ? (object)c
-                    : new UnityEngine.Color(c.R, c.G, c.B, c.A);
+                if (type == typeof(MdixHexColor))      value = c;
+                else if (type == typeof(UnityEngine.Color)) value = new UnityEngine.Color(c.R, c.G, c.B, c.A);
+                else value = new UnityEngine.Color32(ToByte(c.R), ToByte(c.G), ToByte(c.B), ToByte(c.A));
             }
 
             ctx.Report.BoundValues++;
             return Read.Ok;
         }
+
+        private static byte ToByte(float channel) =>
+            (byte)Math.Max(0, Math.Min(255, (int)Math.Round(channel * 255f)));
 
         // ── Small helpers ─────────────────────────────────────────────────────
 

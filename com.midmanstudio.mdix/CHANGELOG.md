@@ -54,8 +54,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - The binder reads Unity's `Vector2`, `Vector3`, `Vector4`, `Vector3Int`,
   `Quaternion`, `Matrix4x4` and `Color32` from objects (`{ x = 1, y = 2, z = 3 }`)
   and `Color` from a hex colour.
+- `MdixWriter.ToText(value, prefix)` and `MdixWriteReport`: the save side of the binder. Writes any class,
+  struct or record as DixScript text: public fields, `[SerializeField]` fields and properties; every
+  integer type, floats, decimal, char, enums (by name), `Guid`, `DateTime`, `DateTimeOffset`, `TimeSpan`;
+  arrays, lists, sets and dictionaries of anything storable; and Unity's `Vector2/3/4`, `Vector2Int/3Int`,
+  `Quaternion`, `Matrix4x4`, `Rect`, `RectInt`, `Bounds`, `BoundsInt`, `Color` and `Color32`. Members it
+  cannot store (Unity object references, delegates, `object`, interfaces) are left out and listed in the
+  report. The text is read back and checked before it is returned.
+- The binder reads what the writer writes: dictionaries (as key/value entries, or a hand-written object),
+  `HashSet<T>`, `byte[]` (base64), `char`, `Guid`, `DateTime`, `DateTimeOffset`, `TimeSpan`, `decimal`,
+  NaN and infinities, `Rect` and `Bounds`, `Color` from `{ r, g, b, a }`, and `Color32` from a hex colour.
+  Properties with a private setter are bound. Classes without a parameterless constructor (positional
+  records) are created without running a constructor. `MdixBinder.ReadAs<T>(db, path)` reads any type,
+  a list or dictionary included.
+
+### Changed
+
+- `MdixUnityExtensions.Save`, `LoadSave`, `SaveConfig` and `LoadConfig`, and `MdixAsset.LoadAs`, now use the
+  writer and binder instead of the library serializer. Files written by earlier versions still load.
+- Saves are written to `name.mdix.tmp` and swapped in, with the previous file kept as `name.mdix.bak`.
+  `LoadSave` falls back to the backup when the file is missing, cut off or damaged, and `DeleteSave` removes
+  both. A cut-off save is detected by its missing closing bracket; the engine itself would load the part
+  that is there.
 
 ### Fixed
+
+- Saving silently lost data: lists, arrays, sets and dictionaries were written as their type name
+  (`System.Collections.Generic.List`1[System.Int32]`) and loaded back empty, public fields were ignored,
+  `uint`, `ulong`, `char` and `DateTimeOffset` came back wrong, `Guid` was not written, and a derived-class
+  member was dropped. Saving any type with an indexer (every Unity `Vector`, `Quaternion`, `Matrix4x4` and
+  `Color`) failed with "Parameter count mismatch". All of these now round-trip.
 
 - **Generate ScriptableObject** left every list or array member empty, because
   the serializer it used cannot fill them, and it built the ScriptableObject

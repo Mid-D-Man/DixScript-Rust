@@ -54,8 +54,9 @@ file under a directory and prints one line per file: OK or ERR, the length, an
 order-insensitive fingerprint (`multiset=`) and a strict one (`strict=`). Build it in a probe
 crate like the others (`[[bin]] name = "golden"`), run it on a build before and after a
 change, and diff the lines. The compiler's config-entry and object-property order varies
-from run to run, so run the baseline three times first: only files whose fingerprint is the
-same all three times can be compared (80 of 84 for `multiset`, 17 of 84 for `strict`).
+from run to run, so run the baseline twelve times first (three runs are not enough: a
+file with few config entries can repeat an order by luck): only files whose fingerprint is the
+same in all twelve runs can be compared (80 of 84 for `multiset`, 17 of 84 for `strict`).
 Set `GOLDEN_DUMP=<dir>` to write each file's redacted Debug text there.
 
 ## ab.py
@@ -63,4 +64,20 @@ Set `GOLDEN_DUMP=<dir>` to write each file's redacted Debug text there.
 Interleaved timing of several stage probe builds, so machine drift lands on every build
 equally. See the docstring for usage. Timings under about a millisecond are not
 trustworthy on a shared machine; judge a change by the larger files and by the byte counts.
+
+## prof_once.rs and make_scaled.py
+
+`prof_once.rs` compiles one file twice in a process, a warm-up that is not measured and then
+one compile inside a function named `measured`. Profile it with callgrind, which counts
+instructions and so is exact where timing is not:
+
+    valgrind --tool=callgrind --toggle-collect='prof_once::measured' \
+        --callgrind-out-file=cg.out ./prof_once FILE.mdix
+    callgrind_annotate --inclusive=yes cg.out | head -60
+    callgrind_annotate --tree=calling --inclusive=yes cg.out    # callees of each function
+
+Build the probe crate with `[profile.release] debug = 1` for line information. To find what
+grows faster than linearly, profile two input sizes from `make_scaled.py` (for example 4x and
+16x) and compare each function's inclusive cost: a function whose cost grows by about 16 when
+the input grows by 4 is quadratic. That is how `replace_in_value` was found.
 

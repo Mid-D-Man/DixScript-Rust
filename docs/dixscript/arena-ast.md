@@ -400,7 +400,67 @@ order is randomized per process. It matters for the arena work in two ways: a go
 comparison cannot be strict, and the binary packer will produce different bytes for the
 same source. It was not investigated further.
 
+### Step 1 done: value resolution scaling
+
+The cause was not the suspect in this document. It was the write-back of each resolved call
+into the data tree: `replace_value_in_ast_by_location` searched every entry, depth first, for
+the node at the call's position, once per call. N calls in a tree of N nodes is N squared. It
+was found by profiling a 4x and a 16x scaled input under callgrind (instruction counts, so no
+timing noise) and comparing each function's inclusive cost between the two:
+
+| Function | 4x input | 16x input | Growth for 4x more input |
+|---|---|---|---|
+| `ValueResolver::replace_in_value` | 50.8M instructions | 802.1M | 15.8x (quadratic) |
+| `format!` (`alloc::fmt::format_inner`) | 24.5M | 97.3M | 4.0x (linear) |
+| `String::clone` | 20.7M | 69.7M | 3.4x (linear) |
+| Whole compile | 200.5M | 1,373.8M | 6.9x |
+
+Positions are now indexed once before phase 4 and a result is written back by path. Same
+sandbox, debug mode off in the inputs, release build, one run per figure from one
+interleaved invocation (so read the percentages, not the absolute milliseconds):
+
+| Input | Total before | Total after | Value resolution before | After |
+|---|---|---|---|---|
+| 4x scaled | 27.0 ms | 20.9 ms (-23%) | 18.6 ms | 12.6 ms |
+| 16x scaled | 221.3 ms | 81.4 ms (-63%) | 196.3 ms | 52.9 ms |
+| 32x scaled | 1,108 ms | 189 ms (-83%) | 1,049 ms | 135 ms |
+| `elements_database` (445 KB) | 320.6 ms | 104.2 ms (-67%) | 289.7 ms | 74.2 ms |
+
+Callgrind at 16x: 1,374M to 502M instructions (-63%); parsing (50.4M) and semantic analysis
+(53.8M) did not change, so the whole gain is in value resolution.
+
+- Correctness gate: the same 84-file comparison as above passes against the original
+  baseline (80 files by content, 17 also by a strict hash, 4 by compile status only). The
+  strict set is now taken from 12 baseline runs, since three can agree by luck.
+- `cargo test -p dixscript` passes, including `value_resolution_scaling`, which fails with
+  the old behavior (ratio 10.0 against a limit of 7) and passes with the fix (ratio 4.3).
+- Value resolution is still 62 to 72 percent of a compile at these sizes. What is left in
+  it: `format!` is 19.4 percent of all instructions at 16x (arguments and locations are
+  formatted into strings for every resolved call), and `String` and `Vec` clones another 13.6
+  and 14.4 percent. Those are the next targets, and the clones are what an arena changes.
+
+### Where an arena helps, and where it does not
+
+A callgrind profile of one `FullFunctionTest` compile (59.8M instructions, debug mode as
+written in the file) gives the shares: value resolution 30.8 percent, parsing 23.6 percent,
+semantic analysis 20.5 percent. Allocation and deallocation together are about 38 percent of
+all instructions.
+
+- **Semantic analysis only reads the AST,** so an arena speeds it up very little. Its cost is
+  in the analyzers' own work: the quickfuncs analyzer is 80 percent of it (16.3 percent of the
+  compile), of which call-graph validation is 8.2 percent (5.5 percent is
+  `CallGraph::get_statistics`, which only runs when `debug_mode` is regular or verbose) and
+  `Keywords::is_reserved_in_context` is 2.4 percent (it allocates a lowercase and an
+  uppercase `String` per call). `String` clones in the whole stage were 0.27 percent.
+- **The benchmark corpus runs with debug output on.** Every file in the benchmark set sets
+  `debug_mode` to verbose or regular, and only 5 of the 32 corpus files set it to off. With it
+  forced off the same files compile 17 to 21 percent faster and make 10 to 16 percent fewer
+  allocations. The stage shares barely change. Use debug mode off for performance work.
+- **Cloning is where an arena pays.** In value resolution, `DixScript::clone` is 2.2 percent
+  of that profile, `QuickFunction::clone` 1.3 percent (342 calls) and a `Vec` clone 0.9.
+
 ### Not done yet
 
-- Step 1, value resolution scaling (36% to 91% of a compile): not profiled yet.
+- Step 2 follow-ups inside value resolution: the `format!` per resolved call, and the clones.
+- Cheap semantic analysis fixes: the keyword check's allocations.
 - Steps 3 to 6 (operator enum, whole-tree clones, the index-arena prototype, migration).

@@ -471,3 +471,44 @@ the allocator for, and fails above 20 MB.
   and after for `FullFunctionTest`). What changes is the bytes requested, and with them
   the parse time.
 
+### `Compiler/Core/ValueResolution/value_resolver.rs`
+
+**What it does:** Resolves values at compile time in five phases: enum pre-resolution, the
+initial data context, discovery of quickfunction calls, iterative execution of those calls
+with the result written back into the AST (phase 4), and the remaining identifier
+references.
+
+**Decisions:**
+- Phase 4 finds where every call sits in the data tree once, before its loop, as a path of
+  child indices per call position. Writing a result back then costs the depth of the node.
+  The path is checked against the node's position before it is used, and if an earlier
+  write-back changed the tree under the index the old search runs instead, so the result is
+  the same as searching every time. A position that was not in the tree when the index was
+  built is left alone, which is what the old search would also have done.
+- Only the positions of the calls being resolved are indexed, so the index costs one small
+  vector per call and not one per node.
+
+**Tests:** `cargo test -p dixscript --test value_resolution_scaling`, and the whole suite.
+
+### `tests/value_resolution_scaling.rs`
+
+**What it does:** Compiles a generated source of 400 resolved calls and one of 1,600 and
+requires the larger to take less than 7 times as long.
+
+**Decisions:**
+- It compares two timings from the same process, so machine speed cancels out. Linear
+  growth gives about 4.3 and a search of the whole tree per call gives about 10; the limit
+  of 7 sits between them. Each size is timed three times and the fastest is used.
+- Each call follows a data entry of 100 values, so a whole-tree search per call has a lot to
+  walk past. With 20 values the old behavior only reached 7.6 and the test passed it.
+
+**Tests:** `cargo test -p dixscript --test value_resolution_scaling`
+
+### Fixes and Problems: value resolution
+
+- **Quadratic write-back.** `replace_value_in_ast_by_location` searched the whole data tree
+  for the node at each resolved call's position, depth first, and ignored its `location`
+  argument. With N calls in a tree of N nodes that is N squared. A 4x larger input took 16x
+  as long in that function. The suspect in `arena-ast.md` (the formatting and timestamp in the
+  loop) was not the cause. Found by comparing callgrind profiles of a 4x and a 16x input.
+

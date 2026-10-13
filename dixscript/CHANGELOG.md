@@ -37,6 +37,13 @@ Breaking release.
   requests 159 MB instead of 7.50 GB, and its parse stage takes about 30 to 45 percent
   less time. Output is unchanged. A new test, `parser_alloc_budget`, guards the figure.
 
+- **Value resolution is linear in the number of resolved calls.** Writing each resolved
+  call back into the data tree searched the whole tree for the call's position, so a 4x
+  larger input took 16x as long in that step. Positions are now indexed once. Compiling
+  `elements_database.mdix` (445 KB, debug mode off) takes about a third of the time it did,
+  and a 32x scaled input takes about a sixth. Output is unchanged. A new test,
+  `value_resolution_scaling`, guards the growth rate.
+
 ### Changed
 
 - **Language version 2.0.0.** `@CONFIG` `version -> "2.0.0"` is now a recognized

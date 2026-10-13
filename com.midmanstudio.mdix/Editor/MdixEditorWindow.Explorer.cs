@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 using MidManStudio.Mdix.Core;
@@ -19,6 +20,14 @@ namespace MidManStudio.Mdix.Unity.Editor
     /// The engine lists array items again as extra keys ("enemies[0]") next to the array itself, and
     /// returns keys in no fixed order, so names are reduced to their first segment and sorted here.
     /// Large data is capped (items per array, rows overall, depth) and says so when it is.
+    ///
+    /// Inline editing: a value that is a plain literal in the file (a number, text, true/false or colour that
+    /// is written out, not computed) can be clicked and changed here. Enter edits the text in the Editor tab
+    /// and compiles it, Esc or clicking away cancels. The new text is compiled first and refused unless the
+    /// value reads back exactly as entered and the data keeps the same paths; values computed from the edited
+    /// one are allowed to change, and the status bar says which. Values produced by function calls, enum
+    /// members, expressions, `raw` strings and dates are not literals and stay read-only. Nothing is written to
+    /// disk until Save.
     /// </summary>
     public sealed partial class MdixEditorWindow
     {
@@ -36,6 +45,13 @@ namespace MidManStudio.Mdix.Unity.Editor
         private readonly List<ExplorerSection> _sections       = new List<ExplorerSection>();
 
         private int _explorerRowBudget;
+
+        // Inline editing. The spans say where each plain literal sits in _sourceText; one field is open at most.
+        private Dictionary<string, MdixValueSpan>? _valueSpans;
+        private bool                               _keepExplorerScroll;
+        private TextField?                         _editField;
+        private Label?                             _editLabel;
+        private string                             _editOldLiteral = string.Empty;
 
         private readonly struct ExplorerSection
         {
@@ -61,9 +77,18 @@ namespace MidManStudio.Mdix.Unity.Editor
         {
             if (_panelExplorer == null) return;
 
+            // After an edit the list stays where it was, instead of jumping back to the top.
+            var scrollBefore = Vector2.zero;
+            var previous     = _keepExplorerScroll ? _panelExplorer.Q<ScrollView>() : null;
+            if (previous != null) scrollBefore = previous.scrollOffset;
+
             _panelExplorer.Clear();
             _sections.Clear();
             _explorerRowBudget = MaxExplorerRows;
+
+            _editField = null;                                   // the old elements are gone with the old tree
+            _editLabel = null;
+            _valueSpans = MdixSourceMap.Build(_sourceText);
 
             var scroll = new ScrollView(ScrollViewMode.Vertical) { style = { flexGrow = 1 } };
 
@@ -83,7 +108,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 foreach (var name in flat)
                 {
                     if (!TakeExplorerRow(flatBody)) break;
-                    flatBody.Add(MakeKeyValueRow(db, name));
+                    flatBody.Add(Editable(db, MakeKeyValueRow(db, name), name));
                 }
 
                 AddSection(scroll, "#flat", "FLAT PROPERTIES", flatBody, defaultFolded: false, nested: false);
@@ -104,7 +129,20 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             _panelExplorer.Add(scroll);
 
+            if (_keepExplorerScroll)
+            {
+                _keepExplorerScroll = false;
+                if (scrollBefore != Vector2.zero) RestoreExplorerScroll(scroll, scrollBefore);
+            }
+
             RefreshFoldAllButton();
+        }
+
+        /// <summary>Puts the scroll position back once the new rows have been laid out.</summary>
+        private static void RestoreExplorerScroll(ScrollView scroll, Vector2 offset)
+        {
+            scroll.schedule.Execute(() => scroll.scrollOffset = offset).ExecuteLater(30);
+            scroll.schedule.Execute(() => scroll.scrollOffset = offset).ExecuteLater(160);
         }
 
         private VisualElement BuildObjectBody(MdixDatabase db, string path, int depth)
@@ -124,7 +162,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 else if (type != MdixValueType.Unknown)
                 {
                     if (!TakeExplorerRow(body)) return body;
-                    body.Add(MakeKeyValueRow(db, childPath, labelOverride: child));
+                    body.Add(Editable(db, MakeKeyValueRow(db, childPath, labelOverride: child), childPath));
                 }
             }
 
@@ -161,7 +199,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                     for (int i = 0; i < shown; i++)
                     {
                         if (!TakeExplorerRow(body)) break;
-                        body.Add(MakeKeyValueRow(db, path + "[" + i + "]", labelOverride: "[" + i + "]"));
+                        body.Add(Editable(db, MakeKeyValueRow(db, path + "[" + i + "]", labelOverride: "[" + i + "]"), path + "[" + i + "]"));
                     }
                     break;
 
@@ -180,7 +218,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                         }
                         else if (type != MdixValueType.Unknown)
                         {
-                            body.Add(MakeKeyValueRow(db, itemPath, labelOverride: "[" + i + "]"));
+                            body.Add(Editable(db, MakeKeyValueRow(db, itemPath, labelOverride: "[" + i + "]"), itemPath));
                         }
                     }
                     break;
@@ -328,6 +366,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                         ? string.Empty
                         : GetValueDisplayString(db, colPath, colType));
                     cell.AddToClassList("mdix-table__cell");
+                    if (colType != MdixValueType.Unknown) MakeEditable(db, cell, colPath);
 
                     if (colType == MdixValueType.Enum &&
                         db.GetEnumField(colPath).UnwrapOr(string.Empty).Equals("BOSS", StringComparison.OrdinalIgnoreCase))
@@ -359,6 +398,152 @@ namespace MidManStudio.Mdix.Unity.Editor
                 return "  " + text;
             }
             return string.Empty;
+        }
+
+        // ── Inline editing ────────────────────────────────────────────────────
+
+        /// <summary>Makes the value of a key/value row clickable when it is a plain literal in the file.</summary>
+        private VisualElement Editable(MdixDatabase db, VisualElement row, string path)
+        {
+            var label = row.Q<Label>(className: "mdix-kv__value");
+            if (label != null) MakeEditable(db, label, path);
+            return row;
+        }
+
+        private void MakeEditable(MdixDatabase db, Label label, string path)
+        {
+            MdixValueSpan span;
+            if (_valueSpans == null || !_valueSpans.TryGetValue(path, out span)) return;
+
+            // The span comes from a quick reading of the text; it only counts when the compiled value agrees.
+            if (!MdixSourceMap.Matches(db, path, span, _sourceText)) return;
+
+            var initial    = MdixLiteralEdit.EditText(db, path, span, _sourceText);
+            var oldLiteral = span.TextIn(_sourceText);
+
+            label.tooltip = "Click to edit. Enter applies the change to the text, Esc cancels.";
+            label.AddToClassList("mdix-kv__value--editable");
+
+            label.RegisterCallback<PointerEnterEvent>(_ =>
+                label.style.backgroundColor = new StyleColor(new Color(0.12f, 0.18f, 0.30f)));
+            label.RegisterCallback<PointerLeaveEvent>(_ =>
+                label.style.backgroundColor = StyleKeyword.Null);
+
+            label.RegisterCallback<ClickEvent>(evt =>
+            {
+                evt.StopPropagation();
+                BeginExplorerEdit(label, initial, path, oldLiteral);
+            });
+        }
+
+        private void BeginExplorerEdit(Label label, string initial, string path, string oldLiteral)
+        {
+            EndExplorerEdit();                                    // one field at a time
+
+            var host = label.parent;
+            if (host == null) return;
+
+            var field = new TextField { value = initial };
+            field.style.flexGrow = 1;
+            field.style.minWidth = 80;
+
+            host.Insert(host.IndexOf(label), field);
+            label.style.display = new StyleEnum<DisplayStyle>(DisplayStyle.None);
+
+            _editField      = field;
+            _editLabel      = label;
+            _editOldLiteral = oldLiteral;
+
+            field.RegisterCallback<KeyDownEvent>(evt => OnExplorerEditKey(evt, field, path), TrickleDown.TrickleDown);
+            field.RegisterCallback<FocusOutEvent>(_ =>
+            {
+                if (ReferenceEquals(_editField, field)) EditorApplication.delayCall += EndExplorerEdit;
+            });
+
+            field.schedule.Execute(() => field.Focus()).ExecuteLater(10);
+        }
+
+        private void OnExplorerEditKey(KeyDownEvent evt, TextField field, string path)
+        {
+            if (!ReferenceEquals(_editField, field)) return;
+
+            if (evt.keyCode == KeyCode.Return || evt.keyCode == KeyCode.KeypadEnter)
+            {
+                evt.StopImmediatePropagation();
+                var text = field.value;
+                EditorApplication.delayCall += () => CommitExplorerEdit(field, path, text);
+            }
+            else if (evt.keyCode == KeyCode.Escape)
+            {
+                evt.StopImmediatePropagation();
+                EditorApplication.delayCall += EndExplorerEdit;
+            }
+        }
+
+        /// <summary>Closes the open edit field and shows the value label again.</summary>
+        private void EndExplorerEdit()
+        {
+            var field = _editField;
+            var label = _editLabel;
+            _editField = null;
+            _editLabel = null;
+
+            field?.RemoveFromHierarchy();
+            if (label != null) label.style.display = new StyleEnum<DisplayStyle>(DisplayStyle.Flex);
+        }
+
+        private void CommitExplorerEdit(TextField field, string path, string text)
+        {
+            if (!ReferenceEquals(_editField, field)) return;      // already closed
+
+            var result = MdixLiteralEdit.Apply(_sourceText, path, text);
+
+            if (!result.Ok)
+            {
+                SetStatus("✗  " + result.Error, error: true);     // the field stays open, to be corrected
+                return;
+            }
+
+            // The text may have changed since the Explorer was drawn (typing in the Editor tab).
+            if (result.OldText != _editOldLiteral)
+            {
+                EndExplorerEdit();
+                SetStatus("✗  The file changed since this value was shown, so nothing was applied.", error: true);
+                RebuildExplorer();
+                return;
+            }
+
+            EndExplorerEdit();
+
+            if (result.Unchanged)
+            {
+                SetStatus("✓  " + path + " is already " + result.NewText, error: false);
+                return;
+            }
+
+            _keepExplorerScroll = true;
+
+            // Going through the code field keeps everything else in step: the dirty flag, the language server.
+            if (_codeField != null)
+            {
+                _codeField.value = result.NewSource;
+            }
+            else
+            {
+                _sourceText = result.NewSource;
+                _isDirty    = true;
+            }
+
+            Compile();
+
+            var message = "✓  " + path + ":  " + result.OldText + "  →  " + result.NewText + "   (not saved yet)";
+            if (result.AlsoChangedCount > 0)
+            {
+                message += "   ·   also changed: " + string.Join(", ", result.AlsoChanged);
+                if (result.AlsoChangedCount > result.AlsoChanged.Count)
+                    message += " and " + (result.AlsoChangedCount - result.AlsoChanged.Count) + " more";
+            }
+            SetStatus(message, error: false);
         }
 
         // ── Names ─────────────────────────────────────────────────────────────

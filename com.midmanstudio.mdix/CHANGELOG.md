@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- MDIX Studio Explorer: edit plain values in place. Click a number, text, true/false or colour that
+  is written out in the file, type, and press Enter (Esc cancels). The change is made in the
+  Editor tab's text and compiled; the type is kept (`L`, `f`, a double stays a double), text is
+  escaped, and the edit is refused unless the compiled value is exactly what was entered and the
+  data keeps the same paths. Values calculated from the edited one may change and are named in
+  the status bar. The list keeps its scroll position. Values from function calls, enum
+  members, expressions, `raw` strings, dates and hex/binary numbers stay read-only.
+  (`Editor/MdixSourceMap.cs`, `Editor/MdixLiteralEdit.cs`.)
 - MDIX Studio language-server support, powered by the bundled `mdix-lsp`
   (`Editor/Bin/<platform>/`). In the Editor tab:
   - Live diagnostics: problem underlines after a short typing pause, and a

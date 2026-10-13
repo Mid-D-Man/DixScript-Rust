@@ -306,6 +306,20 @@ choose **MDIX → Open in MDIX Studio**.
   objects is a table with typed columns. Objects and arrays nest to any depth; each one folds when
   you click its header, and **Fold All** / **Unfold All** does every one at once. Large data is
   capped (200 items per array) and says so.
+
+  **Editing values in place.** A value written out in the file as a plain number, text, `true` /
+  `false` or colour is highlighted when you hover it. Click it, type, and press Enter: the change
+  is made in the text of the Editor tab and compiled, and Esc (or clicking away) cancels. A number
+  keeps its type (a `Long` keeps its `L`, a `Float` its `f`, a `Double` stays a double), and text is
+  escaped for you. The new text is compiled before it is accepted, and the edit is refused unless
+  the value reads back exactly as entered and the data keeps the same paths. Values calculated
+  from the one you changed are allowed to move, and the status bar names them. Nothing is written to
+  disk until **Save**.
+
+  Only plain literals can be edited: a value produced by a function call (the `createEnemy("Goblin",
+  50, ...)` kind), an enum member, an expression, a `raw` string, a date, `null` or a hex or binary
+  number stays read-only, because there is no single piece of text behind it. Change those in the
+  Editor tab, where a function argument is the thing to edit.
 - **Editor tab** — source text editor with live compile status, syntax highlighting and
   language-server features (diagnostics, completion, hover — see below). **Save** on an
   unsaved scratch document asks where to put it.
@@ -399,6 +413,9 @@ com.midmanstudio.mdix/
 │   ├── MdixAssetEditor.cs                    ← inside MdixImporter.cs
 │   ├── MdixBakeWizard.cs
 │   ├── MdixEditorWindow.cs
+│   ├── MdixEditorWindow.Explorer.cs          ← tree view, folding, in-place editing
+│   ├── MdixSourceMap.cs                      ← where each plain literal sits in the text
+│   ├── MdixLiteralEdit.cs                    ← formats, applies and checks one edit
 │   ├── CreateMdixMenuItems.cs
 │   └── UI/
 │       ├── MdixEditorWindow.uxml

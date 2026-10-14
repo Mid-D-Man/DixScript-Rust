@@ -34,7 +34,8 @@ which design options exist, and what has to be decided before any code moves.
 - **The arena for the real `Value` family exists** (`Compiler/AST/arena`, step 6 started).
   Nodes are 40, 48 and 48 bytes against 144, 160 and 384 for the owned `Value`,
   `Expression` and `QuickFuncStatement`, and a corpus round trip through the real compiler
-  returns equal trees. Nothing in the compiler uses it yet.
+  returns equal trees. Handles that pair a node with its arena print and compare exactly
+  like the owned types. Nothing in the compiler uses it yet.
 
 ## How this was measured
 
@@ -636,7 +637,8 @@ and `SwitchCase`) are one mutually recursive family, so they move together: a `V
 both. They also hold most of a compile's allocations. The new `Compiler/AST/arena` module
 stores the family in one owned `Arena` and copies trees in and out losslessly, so consumers can
 move over one at a time. A round trip through the real compiler over the whole `mdix_files`
-corpus returns equal trees. See the sections "Compiler/AST/arena" and "tests/arena_roundtrip.rs"
+corpus returns equal trees, and handles that pair a node with its arena print and compare
+exactly like the owned types. See the sections "Compiler/AST/arena" and "tests/arena_roundtrip.rs"
 at the end of this document.
 
 ### Where an arena helps, and where it does not
@@ -664,10 +666,8 @@ all instructions.
 - Step 2 follow-ups inside value resolution: the `format!` per resolved call, and the clones.
 - Cheap semantic analysis fixes: the keyword check's allocations.
 - Steps 3 and 4 (operator enum, whole-tree clones, re-measure).
-- The rest of step 6. Planned drops, each compiling with the tests intact:
-  1. Arena-aware `Display`, `Debug` and equality for nodes (a handle that pairs an id with
-     its `&Arena`), because the owned types are formatted and compared with `{}` and `==` all
-     over the compiler and the nodes cannot do either on their own.
+- The rest of step 6. Done: arena-aware `Display`, `Debug` and equality through handles
+  (`ValueRef`, `ExprRef`, `StmtRef`). Planned drops, each compiling with the tests intact:
   2. An arena-resident `DixScript`: the section structs hold ids into one owned arena, with
      import and export for the whole file and the same corpus round trip.
   3. Parser constructors that build into the arena (with scratch stacks for lists, since child
@@ -693,6 +693,12 @@ original owned types. `export(import(x)) == x` for every tree. That pair is the 
 seam: a consumer that has moved reads the arena, and one that has not gets the owned tree it
 expects. The module is `pub mod arena` in `Compiler/AST/mod.rs`, which is the only existing
 file it touches. It is reached as `Compiler::AST::arena`, not re-exported flat.
+
+A bare id cannot be printed or compared, so `Arena::value_ref`, `expr_ref` and `stmt_ref`
+return `Copy` handles (`ValueRef`, `ExprRef`, `StmtRef`) that hold an id and its `&Arena`. They
+implement `Display`, `Debug` and `PartialEq` the way the owned types do: `Display` prints the same
+text, `Debug` prints the same text as the owned derived `Debug`, and `==` is structural and works
+across two different arenas.
 
 Layout, measured with `size_of` on Rust 1.75, x86_64:
 
@@ -732,18 +738,28 @@ types were 72 and 136 bytes.
   adding a variant to an owned type fails to compile until the arena handles it.
 - **Ids are `u32`.** An arena that would exceed about 4.29 billion nodes, list entries or bytes
   of text panics with a clear message instead of wrapping.
-
+- **`Display` and equality are written natively, not by exporting.** Converting to the owned
+  tree to print or compare would allocate the whole tree, and the compiler formats call
+  arguments for every resolved call. The wording and the comparison rules are copied from the
+  owned types and gated by tests that compare the two.
+- **`Debug` delegates to the owned type's `Debug`** by exporting the node, so its output is
+  identical (including `{:#?}`). It allocates, so it is for diagnostics only.
+- **Equality follows the owned rules.** Same variant, equal fields, children, text and
+  positions, with floats compared as IEEE numbers, so a tree holding `NaN` is not equal to
+  itself, exactly as with the owned types.
+- **The node types do not implement `PartialEq`.** Their children are ids, so a derived `==`
+  would compare ids and say two equal trees in different arenas differ. Trees are compared
+  through the handles.
 ### Tests
 
 `tests/arena_roundtrip.rs`; see its section below.
 
 ### Fixes and Problems
 
-- **Nodes cannot be formatted or compared on their own.** The owned types implement `Display`
-  and `PartialEq` over their contents. Node `Debug` shows ids and spans, not text, and node
-  `PartialEq` compares ids, so two equal trees in different arenas compare unequal. Every
-  consumer that formats or compares a tree needs an arena-aware handle first. That is the first
-  planned drop under "Not done yet".
+- **Bare nodes still cannot be printed with their text.** A node's own `Debug` shows ids and
+  spans. Consumers print and compare through the handles; a consumer that holds only a node
+  must be given the arena.
+- **`Debug` on a handle allocates**, because it exports the node first.
 - **Importing copies.** Import and export each copy the tree, so using them at a boundary adds a
   copy. They are a migration tool, not the end state.
 
@@ -751,14 +767,17 @@ types were 72 and 136 bytes.
 
 ### What it does
 
-Proves the arena holds the family completely. Hand-built samples cover every variant of
+Proves the arena holds the family completely, and that its handles print and compare like the
+owned types. Hand-built samples cover every variant of
 `Value` (25), `Expression` (24) and `QuickFuncStatement` (9), plus edge cases: `None` against an
 empty list, a switch with and without a default, an `else` that is `None` against empty, empty
 arrays, objects and lambdas, and each `CompatibilityResult` variant inside `Unknown`. The same
 samples are imported three times into one arena to catch ids or spans that collide. Then every
 `.mdix` file under `mdix_files/` is compiled with the real compiler and every `Value`,
 `Expression` and statement reachable from its `@DATA`, `@RAW`, `@SECURITY`, `@SCHEMA` and
-`@QUICKFUNCS` sections is imported into one arena per file and exported again.
+`@QUICKFUNCS` sections is imported into one arena per file and exported again; its `Display`
+output is compared with the owned type's, and it is compared with a second copy imported into a
+different arena in reverse order, so the same tree has different ids there.
 
 ### Decisions
 
@@ -769,15 +788,29 @@ samples are imported three times into one arena to catch ids or spans that colli
 - Every root of a file is imported before any is exported, so interleaved ids and spans are
   exercised on data the compiler really produces.
 - A static assertion checks that `Arena` is `Send + Sync + Clone + 'static`.
+- Equality is checked three ways, because each catches what the others miss: every ordered
+  pair of samples across two arenas must agree with the owned `==`; 125 hand-built
+  pairs that differ in exactly one field must compare unequal (the all-pairs check cannot
+  prove a field is compared when only one sample uses it, which a deliberate bug confirmed);
+  and neighbouring corpus roots must agree with the owned answer.
+- Special floats (whole, negative zero, `NaN`, infinity, very large and very small) are
+  included because `Display` and equality treat them specially.
 
 ### Tests
 
-Ten tests, all passing on Rust 1.75: the sample-coverage check, one round trip each for values,
-expressions and statements, `None` against an empty list, everything imported into one arena,
-a cloned arena, readable positions, node size against owned size, and the corpus. In the
+Sixteen tests, all passing on Rust 1.75: the sample-coverage check, one round trip each for
+values, expressions and statements, `None` against an empty list, everything imported into one
+arena, a cloned arena, readable positions, `Display` against owned `Display`, `Debug` against
+owned `Debug`, equality against owned equality for every pair, every compared field, `NaN`,
+trees that differ in one leaf, node size against owned size, and the corpus. In the
 sandbox the corpus has 84 files, of which 70 compile, and the test round-trips 5,993 values,
 1,173 expressions and 1,712 statements (41,651 arena nodes including nested ones). The suite
-passes: 547 unit tests, 172 integration tests including these ten, and 2 doc tests.
+passes: 547 unit tests, 178 integration tests including these sixteen, and 2 doc tests.
+
+A mutation check confirmed the tests are not vacuous: with `Boolean` equality ignoring its value,
+`is_mutable` left out of the statement comparison, and `as<` changed in `Display`, the
+every-compared-field test and the `Display` test failed, while the all-pairs test missed the
+`Boolean` bug. The files were restored afterwards.
 
 ### Fixes and Problems
 
@@ -788,5 +821,8 @@ passes: 547 unit tests, 172 integration tests including these ten, and 2 doc tes
   or fail analysis for their own reasons (`EnumsWithStuffImported`, `all_datatypes_test`,
   `datetime_static_test`, `random_static_test`, `FullDataTestNoFunc`, `01_basic_import`). The
   test skips them.
+- **The corpus contains no `TypeCast` expressions**, so `Display` and equality for that variant
+  are covered by the samples only. The mutation check above showed the corpus test does not
+  notice a `Display` change there.
 - **Only section values are roots.** `@CONFIG` values use their own `ConfigValue` type and are
   not part of this family, so they are not exercised.

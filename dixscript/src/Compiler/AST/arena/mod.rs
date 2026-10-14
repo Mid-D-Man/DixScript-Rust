@@ -16,12 +16,20 @@
 //! friends copy an owned tree in, and [`Arena::export_value`] and friends copy a tree back
 //! out as the original owned types, losslessly. That pair is what lets consumers move over
 //! one at a time while the rest keeps using the owned tree.
+//!
+//! A bare id cannot be printed or compared. [`Arena::value_ref`], [`Arena::expr_ref`] and
+//! [`Arena::stmt_ref`] return handles that pair an id with its arena and implement `Display`,
+//! `Debug` and `PartialEq` with the same output and rules as the owned types.
 
+mod display;
+mod equality;
 mod export;
 mod import;
 mod nodes;
+mod view;
 
 pub use nodes::{ExprNode, ObjectPropNode, StmtNode, SwitchCaseNode, UnknownData, ValueNode};
+pub use view::{ExprRef, StmtRef, ValueRef};
 
 use std::ops::Range;
 

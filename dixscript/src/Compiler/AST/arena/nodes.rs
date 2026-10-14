@@ -6,6 +6,10 @@
 //! the same field names; children are ids and lists are spans (see `mod.rs`). Every node
 //! is `Copy`.
 //!
+//! The node types deliberately do not implement `PartialEq`: their children are ids, so a
+//! derived `==` would compare ids, not trees. Compare trees through the handles
+//! (`Arena::value_ref` and friends), which compare structurally.
+//!
 //! `DataType`, `DeclarationType` and `Position` are already `Copy` and are stored inline.
 //! `Unknown` values carry a `CompatibilityResult` that owns strings, so they live in a side
 //! pool and the node holds an id; that keeps every other `ValueNode` small.
@@ -18,7 +22,7 @@ use crate::Compiler::AST::{DataType, DeclarationType, Position};
 use crate::Compiler::VersionControl::CompatibilityResult;
 
 /// Arena form of `Value`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub enum ValueNode {
     Integer { value: i32, position: Position },
     Long { value: i64, position: Position },
@@ -80,7 +84,7 @@ impl ValueNode {
 }
 
 /// Arena form of `Expression`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub enum ExprNode {
     Identifier { name: Str, position: Position },
     QualifiedIdentifier { parts: StrList, arguments: Option<ExprList>, position: Position },
@@ -140,7 +144,7 @@ impl ExprNode {
 }
 
 /// Arena form of `QuickFuncStatement`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub enum StmtNode {
     Return { value: ExprId, position: Position },
     If { condition: ExprId, then_branch: StmtList, else_branch: Option<StmtList>, position: Position },
@@ -177,7 +181,7 @@ impl StmtNode {
 }
 
 /// Arena form of `ObjectProperty`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct ObjectPropNode {
     pub key: Str,
     pub value: ValueId,
@@ -185,7 +189,7 @@ pub struct ObjectPropNode {
 }
 
 /// Arena form of `SwitchCase`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct SwitchCaseNode {
     pub case_value: ValueId,
     pub statements: StmtList,

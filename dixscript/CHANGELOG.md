@@ -21,9 +21,11 @@ Breaking release.
 - **`Compiler::AST::arena`**, an index arena for the `Value`, `Expression` and
   `QuickFuncStatement` family: `Arena`, the node types `ValueNode`, `ExprNode` and `StmtNode`
   (40, 48 and 48 bytes, against 144, 160 and 384 for the owned types), and lossless
-  `import_*` and `export_*` between an owned tree and the arena. Nothing in the compiler uses
-  it yet; it is the first piece of the arena AST described in
-  `docs/dixscript/arena-ast.md`.
+  `import_*` and `export_*` between an owned tree and the arena, and the handles `ValueRef`,
+  `ExprRef` and `StmtRef` (`Arena::value_ref` and friends) whose `Display` and `Debug` print
+  exactly what the owned types print and whose `==` compares trees structurally, across
+  arenas. Nothing in the compiler uses it yet; it is the first piece of the arena AST
+  described in `docs/dixscript/arena-ast.md`.
 
 ### Removed
 

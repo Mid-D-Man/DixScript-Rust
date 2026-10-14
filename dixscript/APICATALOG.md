@@ -117,7 +117,10 @@ for the `Value` / `Expression` / `QuickFuncStatement` family: `Arena`, the node 
 `ValueNode`, `ExprNode`, `StmtNode`, `ObjectPropNode`, `SwitchCaseNode` and `UnknownData`, the
 handles `ValueId`, `ExprId`, `StmtId`, `CaseId`, `UnknownId` and `Str` plus the list spans, and
 `Arena::import_value` / `import_expr` / `import_stmt` with the matching `export_*` that return
-the owned types. Nothing in the compiler uses it yet.
+the owned types. `Arena::value_ref` / `expr_ref` / `stmt_ref` return the handles `ValueRef`,
+`ExprRef` and `StmtRef`, which implement `Display` and `Debug` with the owned types' output and
+a structural `PartialEq` that works across arenas. The node types themselves do not implement
+`PartialEq`. Nothing in the compiler uses it yet.
 
 `Compiler::AST::Visitors` is also re-exported (`pub use Visitors::*`) but
 not catalogued in detail here — check the module directly if you need a

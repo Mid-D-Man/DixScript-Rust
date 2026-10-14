@@ -6,6 +6,10 @@
 //! `QuickFuncStatement` family completely: importing a tree and exporting it again gives back
 //! an equal tree.
 //!
+//! The same samples and corpus also gate the arena handles (`value_ref` and friends): their
+//! `Display` and `Debug` must print exactly what the owned types print, and their `==` must
+//! agree with the owned types' `==`, including across two arenas.
+//!
 //! Three layers. Hand-built samples cover every variant of every type, plus the cases a
 //! lossy copy would get wrong (`None` against an empty list, a switch with and without a
 //! default). The same samples go into one shared arena to catch ids or spans that collide.
@@ -445,6 +449,372 @@ fn positions_are_readable_without_exporting() {
 }
 
 // -----------------------------------------------------------------------------
+// Handles: Display, Debug, equality
+// -----------------------------------------------------------------------------
+
+/// Floats that Display or compare specially: whole numbers, NaN, infinities, tiny and huge.
+fn float_values() -> Vec<Value> {
+    let p = pos(1);
+    vec![
+        Value::Double { value: 4.0, position: p },
+        Value::Double { value: -0.0, position: p },
+        Value::Double { value: 2.5, position: p },
+        Value::Double { value: f64::NAN, position: p },
+        Value::Double { value: f64::INFINITY, position: p },
+        Value::Double { value: 1e300, position: p },
+        Value::Float { value: 3.0, position: p },
+        Value::Float { value: f32::NAN, position: p },
+        Value::ScientificNotation { value: 0.0, position: p },
+        Value::ScientificNotation { value: 1.25e-7, position: p },
+    ]
+}
+
+fn all_values() -> Vec<Value> {
+    sample_values().into_iter().chain(edge_values()).chain(float_values()).collect()
+}
+
+fn all_exprs() -> Vec<Expression> {
+    sample_exprs().into_iter().chain(edge_exprs()).collect()
+}
+
+fn all_stmts() -> Vec<QuickFuncStatement> {
+    sample_stmts().into_iter().chain(edge_stmts()).collect()
+}
+
+#[test]
+fn display_matches_the_owned_display_for_every_sample() {
+    for v in all_values() {
+        let mut arena = Arena::new();
+        let id = arena.import_value(&v);
+        assert_eq!(arena.value_ref(id).to_string(), v.to_string(), "value variant {}", value_variant(&v));
+    }
+    for e in all_exprs() {
+        let mut arena = Arena::new();
+        let id = arena.import_expr(&e);
+        assert_eq!(arena.expr_ref(id).to_string(), e.to_string(), "expression variant {}", expr_variant(&e));
+    }
+    for s in all_stmts() {
+        let mut arena = Arena::new();
+        let id = arena.import_stmt(&s);
+        assert_eq!(arena.stmt_ref(id).to_string(), s.to_string(), "statement variant {}", stmt_variant(&s));
+    }
+}
+
+#[test]
+fn debug_matches_the_owned_debug_for_every_sample() {
+    for v in all_values() {
+        let mut arena = Arena::new();
+        let id = arena.import_value(&v);
+        assert_eq!(format!("{:?}", arena.value_ref(id)), format!("{:?}", v));
+        assert_eq!(format!("{:#?}", arena.value_ref(id)), format!("{:#?}", v));
+    }
+    for e in all_exprs() {
+        let mut arena = Arena::new();
+        let id = arena.import_expr(&e);
+        assert_eq!(format!("{:?}", arena.expr_ref(id)), format!("{:?}", e));
+    }
+    for s in all_stmts() {
+        let mut arena = Arena::new();
+        let id = arena.import_stmt(&s);
+        assert_eq!(format!("{:?}", arena.stmt_ref(id)), format!("{:?}", s));
+    }
+}
+
+#[test]
+fn equality_agrees_with_the_owned_equality_for_every_pair() {
+    // Left trees live in one arena and right trees in another, so every comparison crosses
+    // arenas. Every ordered pair must give the answer the owned types give.
+    let values = all_values();
+    let exprs = all_exprs();
+    let stmts = all_stmts();
+
+    let (mut left, mut right) = (Arena::new(), Arena::new());
+    // The right arena is filled in reverse so the same tree has different ids on each side.
+    let lv: Vec<_> = values.iter().map(|v| left.import_value(v)).collect();
+    let rv: Vec<_> = values.iter().rev().map(|v| right.import_value(v)).collect::<Vec<_>>().into_iter().rev().collect();
+    let le: Vec<_> = exprs.iter().map(|e| left.import_expr(e)).collect();
+    let re: Vec<_> = exprs.iter().rev().map(|e| right.import_expr(e)).collect::<Vec<_>>().into_iter().rev().collect();
+    let ls: Vec<_> = stmts.iter().map(|s| left.import_stmt(s)).collect();
+    let rs: Vec<_> = stmts.iter().rev().map(|s| right.import_stmt(s)).collect::<Vec<_>>().into_iter().rev().collect();
+
+    for (i, a) in values.iter().enumerate() {
+        for (j, b) in values.iter().enumerate() {
+            assert_eq!(left.value_ref(lv[i]) == right.value_ref(rv[j]), a == b, "values {} and {}: {} / {}", i, j, a, b);
+        }
+    }
+    for (i, a) in exprs.iter().enumerate() {
+        for (j, b) in exprs.iter().enumerate() {
+            assert_eq!(left.expr_ref(le[i]) == right.expr_ref(re[j]), a == b, "expressions {} and {}: {} / {}", i, j, a, b);
+        }
+    }
+    for (i, a) in stmts.iter().enumerate() {
+        for (j, b) in stmts.iter().enumerate() {
+            assert_eq!(left.stmt_ref(ls[i]) == right.stmt_ref(rs[j]), a == b, "statements {} and {}: {} / {}", i, j, a, b);
+        }
+    }
+}
+
+/// Pairs of trees that differ in exactly one field. The all-pairs test above cannot prove that
+/// a field is compared when only one sample uses it, so each field that equality has to look at
+/// gets a pair here.
+fn values_one_field_apart() -> Vec<(Value, Value)> {
+    let p = pos(1);
+    let s = |t: &str| Value::String { value: t.into(), position: p };
+    let id = |t: &str| Expression::Identifier { name: t.into(), position: p };
+    let unknown = |data: &str, result: CompatibilityResult| Value::Unknown {
+        element_type: "t".into(),
+        element_name: "n".into(),
+        element_data: data.into(),
+        compatibility_result: result,
+        position: p,
+    };
+    vec![
+        (int(1, 1), int(2, 1)),
+        (Value::Long { value: 1, position: p }, Value::Long { value: 2, position: p }),
+        (Value::Float { value: 1.0, position: p }, Value::Float { value: 2.0, position: p }),
+        (Value::Double { value: 1.0, position: p }, Value::Double { value: 2.0, position: p }),
+        (Value::ScientificNotation { value: 1.0, position: p }, Value::ScientificNotation { value: 2.0, position: p }),
+        (Value::Boolean { value: true, position: p }, Value::Boolean { value: false, position: p }),
+        (Value::HexColor { value: "#000".into(), position: p }, Value::HexColor { value: "#001".into(), position: p }),
+        (Value::Date { value: "2026-01-01".into(), position: p }, Value::Date { value: "2026-01-02".into(), position: p }),
+        (Value::Timestamp { value: "a".into(), position: p }, Value::Timestamp { value: "b".into(), position: p }),
+        (Value::Null { position: pos(1) }, Value::Null { position: pos(2) }),
+        (Value::NestedArray { values: vec![], level: 1, position: p }, Value::NestedArray { values: vec![], level: 2, position: p }),
+        (Value::Array { values: vec![int(1, 1)], position: p }, Value::NestedArray { values: vec![int(1, 1)], level: 1, position: p }),
+        (Value::Array { values: vec![int(1, 1)], position: p }, Value::Array { values: vec![int(1, 1), int(1, 1)], position: p }),
+        (Value::EnumValue { enum_name: "E".into(), value: "A".into(), position: p }, Value::EnumValue { enum_name: "E".into(), value: "B".into(), position: p }),
+        (Value::EnumValue { enum_name: "E".into(), value: "A".into(), position: p }, Value::EnumValue { enum_name: "F".into(), value: "A".into(), position: p }),
+        (Value::PrefixedConstructor { prefix: "a".into(), arguments: vec![], position: p }, Value::PrefixedConstructor { prefix: "b".into(), arguments: vec![], position: p }),
+        (Value::PrefixedConstructor { prefix: "a".into(), arguments: vec![int(1, 1)], position: p }, Value::PrefixedConstructor { prefix: "a".into(), arguments: vec![int(2, 1)], position: p }),
+        (Value::Range { start: Box::new(int(1, 1)), end: Box::new(int(2, 1)), position: p }, Value::Range { start: Box::new(int(1, 1)), end: Box::new(int(3, 1)), position: p }),
+        (Value::Range { start: Box::new(int(1, 1)), end: Box::new(int(2, 1)), position: p }, Value::Range { start: Box::new(int(0, 1)), end: Box::new(int(2, 1)), position: p }),
+        (Value::Expression { expr: Box::new(id("a")), position: p }, Value::Expression { expr: Box::new(id("b")), position: p }),
+        (Value::InterpolatedString { template: "a".into(), expressions: vec![], position: p }, Value::InterpolatedString { template: "b".into(), expressions: vec![], position: p }),
+        (Value::InterpolatedString { template: "a".into(), expressions: vec![id("x")], position: p }, Value::InterpolatedString { template: "a".into(), expressions: vec![id("y")], position: p }),
+        (Value::QuickFuncCall { function_name: "f".into(), arguments: vec![], position: p }, Value::QuickFuncCall { function_name: "g".into(), arguments: vec![], position: p }),
+        (Value::QuickFuncCall { function_name: "f".into(), arguments: vec![id("a")], position: p }, Value::QuickFuncCall { function_name: "f".into(), arguments: vec![id("b")], position: p }),
+        (Value::Object { properties: vec![ObjectProperty::new("a".into(), int(1, 1), p)], position: p }, Value::Object { properties: vec![ObjectProperty::new("b".into(), int(1, 1), p)], position: p }),
+        (Value::Object { properties: vec![ObjectProperty::new("a".into(), int(1, 1), p)], position: p }, Value::Object { properties: vec![ObjectProperty::new("a".into(), int(2, 1), p)], position: p }),
+        (Value::Object { properties: vec![ObjectProperty::new("a".into(), int(1, 1), pos(1))], position: p }, Value::Object { properties: vec![ObjectProperty::new("a".into(), int(1, 1), pos(2))], position: p }),
+        (Value::Lambda { parameters: vec!["a".into()], body: Box::new(id("x")), statements: vec![], position: p }, Value::Lambda { parameters: vec!["b".into()], body: Box::new(id("x")), statements: vec![], position: p }),
+        (Value::Lambda { parameters: vec![], body: Box::new(id("x")), statements: vec![], position: p }, Value::Lambda { parameters: vec![], body: Box::new(id("y")), statements: vec![], position: p }),
+        (
+            Value::Lambda { parameters: vec![], body: Box::new(id("x")), statements: vec![QuickFuncStatement::Log { value: id("a"), position: p }], position: p },
+            Value::Lambda { parameters: vec![], body: Box::new(id("x")), statements: vec![QuickFuncStatement::Log { value: id("b"), position: p }], position: p },
+        ),
+        (Value::ParseError { message: "a".into(), position: p }, Value::ParseError { message: "b".into(), position: p }),
+        (Value::Error { message: "a".into(), position: p }, Value::Error { message: "b".into(), position: p }),
+        (Value::ParseError { message: "a".into(), position: p }, Value::Error { message: "a".into(), position: p }),
+        (unknown("d", CompatibilityResult::Compatible), unknown("e", CompatibilityResult::Compatible)),
+        (unknown("d", CompatibilityResult::Compatible), unknown("d", CompatibilityResult::Deprecated { message: "m".into(), suggested_alternative: None })),
+        (s("a"), s("b")),
+        (s("a"), Value::Identifier { value: "a".into(), position: p }),
+    ]
+}
+
+fn exprs_one_field_apart() -> Vec<(Expression, Expression)> {
+    let p = pos(1);
+    let id = |t: &str| Expression::Identifier { name: t.into(), position: p };
+    let bx = |t: &str| Box::new(id(t));
+    let strs = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    vec![
+        (id("a"), id("b")),
+        (Expression::Identifier { name: "a".into(), position: pos(1) }, Expression::Identifier { name: "a".into(), position: pos(2) }),
+        (
+            Expression::QualifiedIdentifier { parts: strs(&["a"]), arguments: None, position: p },
+            Expression::QualifiedIdentifier { parts: strs(&["a"]), arguments: Some(vec![]), position: p },
+        ),
+        (
+            Expression::QualifiedIdentifier { parts: strs(&["a"]), arguments: None, position: p },
+            Expression::QualifiedIdentifier { parts: strs(&["b"]), arguments: None, position: p },
+        ),
+        (
+            Expression::QualifiedIdentifier { parts: strs(&["a"]), arguments: Some(vec![id("x")]), position: p },
+            Expression::QualifiedIdentifier { parts: strs(&["a"]), arguments: Some(vec![id("y")]), position: p },
+        ),
+        (
+            Expression::QualifiedIdentifier { parts: strs(&["a", "b"]), arguments: None, position: p },
+            Expression::QualifiedIdentifier { parts: strs(&["a"]), arguments: None, position: p },
+        ),
+        (Expression::FunctionCall { name: "f".into(), arguments: vec![], position: p }, Expression::FunctionCall { name: "g".into(), arguments: vec![], position: p }),
+        (Expression::FunctionCall { name: "f".into(), arguments: vec![id("a")], position: p }, Expression::FunctionCall { name: "f".into(), arguments: vec![id("b")], position: p }),
+        (Expression::FunctionCall { name: "f".into(), arguments: vec![], position: p }, Expression::QuickFuncCall { name: "f".into(), arguments: vec![], position: p }),
+        (Expression::QuickFuncCall { name: "f".into(), arguments: vec![], position: p }, Expression::QuickFuncCall { name: "g".into(), arguments: vec![], position: p }),
+        (Expression::DixFunctionCall { function_name: "f".into(), arguments: vec![], position: p }, Expression::DixFunctionCall { function_name: "g".into(), arguments: vec![], position: p }),
+        (Expression::StaticMethodCall { object_name: "A".into(), method_name: "m".into(), arguments: vec![], position: p }, Expression::StaticMethodCall { object_name: "B".into(), method_name: "m".into(), arguments: vec![], position: p }),
+        (Expression::StaticMethodCall { object_name: "A".into(), method_name: "m".into(), arguments: vec![], position: p }, Expression::StaticMethodCall { object_name: "A".into(), method_name: "n".into(), arguments: vec![], position: p }),
+        (Expression::StaticMethodCall { object_name: "A".into(), method_name: "m".into(), arguments: vec![id("a")], position: p }, Expression::StaticMethodCall { object_name: "A".into(), method_name: "m".into(), arguments: vec![id("b")], position: p }),
+        (Expression::InstanceMethodCall { instance: bx("a"), method_name: "m".into(), arguments: vec![], position: p }, Expression::InstanceMethodCall { instance: bx("b"), method_name: "m".into(), arguments: vec![], position: p }),
+        (Expression::InstanceMethodCall { instance: bx("a"), method_name: "m".into(), arguments: vec![], position: p }, Expression::InstanceMethodCall { instance: bx("a"), method_name: "n".into(), arguments: vec![], position: p }),
+        (Expression::InstanceMethodCall { instance: bx("a"), method_name: "m".into(), arguments: vec![id("a")], position: p }, Expression::InstanceMethodCall { instance: bx("a"), method_name: "m".into(), arguments: vec![id("b")], position: p }),
+        (Expression::BuiltinFunction { target: bx("a"), method: "m".into(), arguments: None, position: p }, Expression::BuiltinFunction { target: bx("a"), method: "m".into(), arguments: Some(vec![]), position: p }),
+        (Expression::BuiltinFunction { target: bx("a"), method: "m".into(), arguments: None, position: p }, Expression::BuiltinFunction { target: bx("b"), method: "m".into(), arguments: None, position: p }),
+        (Expression::BuiltinFunction { target: bx("a"), method: "m".into(), arguments: None, position: p }, Expression::BuiltinFunction { target: bx("a"), method: "n".into(), arguments: None, position: p }),
+        (Expression::BuiltinFunction { target: bx("a"), method: "m".into(), arguments: Some(vec![id("x")]), position: p }, Expression::BuiltinFunction { target: bx("a"), method: "m".into(), arguments: Some(vec![id("y")]), position: p }),
+        (Expression::StaticFunction { class_name: "A".into(), method: "m".into(), arguments: vec![], position: p }, Expression::StaticFunction { class_name: "B".into(), method: "m".into(), arguments: vec![], position: p }),
+        (Expression::StaticFunction { class_name: "A".into(), method: "m".into(), arguments: vec![], position: p }, Expression::StaticFunction { class_name: "A".into(), method: "n".into(), arguments: vec![], position: p }),
+        (Expression::StaticFunction { class_name: "A".into(), method: "m".into(), arguments: vec![id("a")], position: p }, Expression::StaticFunction { class_name: "A".into(), method: "m".into(), arguments: vec![id("b")], position: p }),
+        (Expression::ImportedFunctionCall { namespace_name: "a".into(), function_name: "f".into(), arguments: vec![], position: p }, Expression::ImportedFunctionCall { namespace_name: "b".into(), function_name: "f".into(), arguments: vec![], position: p }),
+        (Expression::ImportedFunctionCall { namespace_name: "a".into(), function_name: "f".into(), arguments: vec![], position: p }, Expression::ImportedFunctionCall { namespace_name: "a".into(), function_name: "g".into(), arguments: vec![], position: p }),
+        (Expression::ImportedFunctionCall { namespace_name: "a".into(), function_name: "f".into(), arguments: vec![id("a")], position: p }, Expression::ImportedFunctionCall { namespace_name: "a".into(), function_name: "f".into(), arguments: vec![id("b")], position: p }),
+        (Expression::ArithmeticOp { left: bx("a"), operator: "+".into(), right: bx("b"), position: p }, Expression::ArithmeticOp { left: bx("c"), operator: "+".into(), right: bx("b"), position: p }),
+        (Expression::ArithmeticOp { left: bx("a"), operator: "+".into(), right: bx("b"), position: p }, Expression::ArithmeticOp { left: bx("a"), operator: "-".into(), right: bx("b"), position: p }),
+        (Expression::ArithmeticOp { left: bx("a"), operator: "+".into(), right: bx("b"), position: p }, Expression::ArithmeticOp { left: bx("a"), operator: "+".into(), right: bx("c"), position: p }),
+        (Expression::ArithmeticOp { left: bx("a"), operator: "+".into(), right: bx("b"), position: p }, Expression::BitwiseOp { left: bx("a"), operator: "+".into(), right: bx("b"), position: p }),
+        (Expression::BitwiseOp { left: bx("a"), operator: "&".into(), right: bx("b"), position: p }, Expression::BitwiseOp { left: bx("a"), operator: "|".into(), right: bx("b"), position: p }),
+        (Expression::BitwiseOp { left: bx("a"), operator: "&".into(), right: bx("b"), position: p }, Expression::BitwiseOp { left: bx("c"), operator: "&".into(), right: bx("b"), position: p }),
+        (Expression::BitwiseOp { left: bx("a"), operator: "&".into(), right: bx("b"), position: p }, Expression::BitwiseOp { left: bx("a"), operator: "&".into(), right: bx("c"), position: p }),
+        (Expression::ComparisonOp { left: bx("a"), operator: ">".into(), right: bx("b"), position: p }, Expression::ComparisonOp { left: bx("a"), operator: "<".into(), right: bx("b"), position: p }),
+        (Expression::ComparisonOp { left: bx("a"), operator: ">".into(), right: bx("b"), position: p }, Expression::ComparisonOp { left: bx("c"), operator: ">".into(), right: bx("b"), position: p }),
+        (Expression::ComparisonOp { left: bx("a"), operator: ">".into(), right: bx("b"), position: p }, Expression::ComparisonOp { left: bx("a"), operator: ">".into(), right: bx("c"), position: p }),
+        (Expression::LogicalOp { left: bx("a"), operator: "&&".into(), right: bx("b"), position: p }, Expression::LogicalOp { left: bx("a"), operator: "||".into(), right: bx("b"), position: p }),
+        (Expression::LogicalOp { left: bx("a"), operator: "&&".into(), right: bx("b"), position: p }, Expression::LogicalOp { left: bx("c"), operator: "&&".into(), right: bx("b"), position: p }),
+        (Expression::LogicalOp { left: bx("a"), operator: "&&".into(), right: bx("b"), position: p }, Expression::LogicalOp { left: bx("a"), operator: "&&".into(), right: bx("c"), position: p }),
+        (Expression::UnaryOp { operator: "-".into(), operand: bx("a"), position: p }, Expression::UnaryOp { operator: "!".into(), operand: bx("a"), position: p }),
+        (Expression::UnaryOp { operator: "-".into(), operand: bx("a"), position: p }, Expression::UnaryOp { operator: "-".into(), operand: bx("b"), position: p }),
+        (Expression::ConfigAccess { key: "a".into(), position: p }, Expression::ConfigAccess { key: "b".into(), position: p }),
+        (Expression::EnumAccess { namespace_name: None, enum_name: "E".into(), value: "V".into(), position: p }, Expression::EnumAccess { namespace_name: Some(String::new()), enum_name: "E".into(), value: "V".into(), position: p }),
+        (Expression::EnumAccess { namespace_name: Some("a".into()), enum_name: "E".into(), value: "V".into(), position: p }, Expression::EnumAccess { namespace_name: Some("b".into()), enum_name: "E".into(), value: "V".into(), position: p }),
+        (Expression::EnumAccess { namespace_name: None, enum_name: "E".into(), value: "V".into(), position: p }, Expression::EnumAccess { namespace_name: None, enum_name: "F".into(), value: "V".into(), position: p }),
+        (Expression::EnumAccess { namespace_name: None, enum_name: "E".into(), value: "V".into(), position: p }, Expression::EnumAccess { namespace_name: None, enum_name: "E".into(), value: "W".into(), position: p }),
+        (Expression::ObjectAccess { path: strs(&["a", "b"]), position: p }, Expression::ObjectAccess { path: strs(&["a", "c"]), position: p }),
+        (Expression::ObjectAccess { path: strs(&["a", "b"]), position: p }, Expression::ObjectAccess { path: strs(&["a"]), position: p }),
+        (Expression::PropertyAccess { object: bx("a"), property: "p".into(), position: p }, Expression::PropertyAccess { object: bx("b"), property: "p".into(), position: p }),
+        (Expression::PropertyAccess { object: bx("a"), property: "p".into(), position: p }, Expression::PropertyAccess { object: bx("a"), property: "q".into(), position: p }),
+        (Expression::IndexAccess { object: bx("a"), index: bx("i"), position: p }, Expression::IndexAccess { object: bx("b"), index: bx("i"), position: p }),
+        (Expression::IndexAccess { object: bx("a"), index: bx("i"), position: p }, Expression::IndexAccess { object: bx("a"), index: bx("j"), position: p }),
+        (Expression::Value { value: int(1, 1), position: p }, Expression::Value { value: int(2, 1), position: p }),
+        (Expression::Parenthesized { expression: bx("a"), position: p }, Expression::Parenthesized { expression: bx("b"), position: p }),
+        (Expression::Conditional { condition: bx("a"), true_value: bx("b"), false_value: bx("c"), position: p }, Expression::Conditional { condition: bx("x"), true_value: bx("b"), false_value: bx("c"), position: p }),
+        (Expression::Conditional { condition: bx("a"), true_value: bx("b"), false_value: bx("c"), position: p }, Expression::Conditional { condition: bx("a"), true_value: bx("x"), false_value: bx("c"), position: p }),
+        (Expression::Conditional { condition: bx("a"), true_value: bx("b"), false_value: bx("c"), position: p }, Expression::Conditional { condition: bx("a"), true_value: bx("b"), false_value: bx("x"), position: p }),
+        (Expression::TypeCast { expression: bx("a"), target_type: DataType::Int, position: p }, Expression::TypeCast { expression: bx("b"), target_type: DataType::Int, position: p }),
+        (Expression::TypeCast { expression: bx("a"), target_type: DataType::Int, position: p }, Expression::TypeCast { expression: bx("a"), target_type: DataType::Long, position: p }),
+    ]
+}
+
+fn stmts_one_field_apart() -> Vec<(QuickFuncStatement, QuickFuncStatement)> {
+    use QuickFuncStatement as S;
+    let p = pos(1);
+    let e = |t: &str| ident(t, 1);
+    let log = |t: &str| S::Log { value: e(t), position: p };
+    let case = |v: i32, body: Vec<QuickFuncStatement>| SwitchCase::new(int(v, 1), body, p);
+    let decl = |kind: DeclarationType, mutable: bool, name: &str, dt: Option<DataType>, value: &str| S::VariableDeclaration {
+        declaration_type: kind,
+        is_mutable: mutable,
+        variable_name: name.into(),
+        data_type: dt,
+        value: e(value),
+        position: p,
+    };
+    vec![
+        (S::Return { value: e("a"), position: p }, S::Return { value: e("b"), position: p }),
+        (S::Return { value: e("a"), position: p }, S::Log { value: e("a"), position: p }),
+        (S::Log { value: e("a"), position: p }, S::Log { value: e("b"), position: p }),
+        (S::ExpressionStatement { expression: e("a"), position: p }, S::ExpressionStatement { expression: e("b"), position: p }),
+        (S::Assignment { variable: "v".into(), value: e("a"), position: p }, S::Assignment { variable: "w".into(), value: e("a"), position: p }),
+        (S::Assignment { variable: "v".into(), value: e("a"), position: p }, S::Assignment { variable: "v".into(), value: e("b"), position: p }),
+        (S::ArithmeticAssignment { variable: "v".into(), operator: "+=".into(), value: e("a"), position: p }, S::ArithmeticAssignment { variable: "v".into(), operator: "-=".into(), value: e("a"), position: p }),
+        (S::ArithmeticAssignment { variable: "v".into(), operator: "+=".into(), value: e("a"), position: p }, S::ArithmeticAssignment { variable: "w".into(), operator: "+=".into(), value: e("a"), position: p }),
+        (S::ArithmeticAssignment { variable: "v".into(), operator: "+=".into(), value: e("a"), position: p }, S::ArithmeticAssignment { variable: "v".into(), operator: "+=".into(), value: e("b"), position: p }),
+        (S::ObjectCreation { variable: "o".into(), object: int(1, 1), position: p }, S::ObjectCreation { variable: "o".into(), object: int(2, 1), position: p }),
+        (S::ObjectCreation { variable: "o".into(), object: int(1, 1), position: p }, S::ObjectCreation { variable: "q".into(), object: int(1, 1), position: p }),
+        (S::If { condition: e("c"), then_branch: vec![], else_branch: None, position: p }, S::If { condition: e("c"), then_branch: vec![], else_branch: Some(vec![]), position: p }),
+        (S::If { condition: e("c"), then_branch: vec![], else_branch: None, position: p }, S::If { condition: e("d"), then_branch: vec![], else_branch: None, position: p }),
+        (S::If { condition: e("c"), then_branch: vec![log("a")], else_branch: None, position: p }, S::If { condition: e("c"), then_branch: vec![log("b")], else_branch: None, position: p }),
+        (S::If { condition: e("c"), then_branch: vec![], else_branch: Some(vec![log("a")]), position: p }, S::If { condition: e("c"), then_branch: vec![], else_branch: Some(vec![log("b")]), position: p }),
+        (
+            S::Switch { expression: e("s"), cases: vec![], default_case: None, position: p },
+            S::Switch { expression: e("s"), cases: vec![], default_case: Some(case(0, vec![])), position: p },
+        ),
+        (
+            S::Switch { expression: e("s"), cases: vec![], default_case: None, position: p },
+            S::Switch { expression: e("t"), cases: vec![], default_case: None, position: p },
+        ),
+        (
+            S::Switch { expression: e("s"), cases: vec![case(1, vec![])], default_case: None, position: p },
+            S::Switch { expression: e("s"), cases: vec![case(2, vec![])], default_case: None, position: p },
+        ),
+        (
+            S::Switch { expression: e("s"), cases: vec![case(1, vec![log("a")])], default_case: None, position: p },
+            S::Switch { expression: e("s"), cases: vec![case(1, vec![log("b")])], default_case: None, position: p },
+        ),
+        (
+            S::Switch { expression: e("s"), cases: vec![], default_case: Some(case(1, vec![])), position: p },
+            S::Switch { expression: e("s"), cases: vec![], default_case: Some(case(2, vec![])), position: p },
+        ),
+        (
+            S::Switch { expression: e("s"), cases: vec![], default_case: Some(case(1, vec![log("a")])), position: p },
+            S::Switch { expression: e("s"), cases: vec![], default_case: Some(case(1, vec![log("b")])), position: p },
+        ),
+        (
+            S::Switch { expression: e("s"), cases: vec![case(1, vec![])], default_case: None, position: p },
+            S::Switch { expression: e("s"), cases: vec![case(1, vec![]), case(1, vec![])], default_case: None, position: p },
+        ),
+        (decl(DeclarationType::Let, false, "x", None, "v"), decl(DeclarationType::Const, false, "x", None, "v")),
+        (decl(DeclarationType::Let, false, "x", None, "v"), decl(DeclarationType::Let, true, "x", None, "v")),
+        (decl(DeclarationType::Let, false, "x", None, "v"), decl(DeclarationType::Let, false, "y", None, "v")),
+        (decl(DeclarationType::Let, false, "x", None, "v"), decl(DeclarationType::Let, false, "x", Some(DataType::Int), "v")),
+        (decl(DeclarationType::Let, false, "x", Some(DataType::Int), "v"), decl(DeclarationType::Let, false, "x", Some(DataType::Long), "v")),
+        (decl(DeclarationType::Let, false, "x", None, "v"), decl(DeclarationType::Let, false, "x", None, "w")),
+    ]
+}
+
+#[test]
+fn every_compared_field_is_actually_compared() {
+    macro_rules! check_pairs {
+        ($pairs:expr, $import:ident, $handle:ident, $what:expr) => {
+            for (i, (a, b)) in $pairs.iter().enumerate() {
+                assert!(a != b, "{} pair {} is not different in the owned form: {} / {}", $what, i, a, b);
+                let mut left = Arena::new();
+                let mut right = Arena::new();
+                let (la, lb) = (left.$import(a), left.$import(b));
+                let ra = right.$import(a);
+                assert!(left.$handle(la) != left.$handle(lb), "{} pair {} compares equal: {} / {}", $what, i, a, b);
+                assert!(left.$handle(la) == right.$handle(ra), "{} pair {}: a tree is not equal to itself across arenas", $what, i);
+                assert!(right.$handle(ra) != left.$handle(lb), "{} pair {} compares equal across arenas", $what, i);
+            }
+        };
+    }
+    check_pairs!(values_one_field_apart(), import_value, value_ref, "value");
+    check_pairs!(exprs_one_field_apart(), import_expr, expr_ref, "expression");
+    check_pairs!(stmts_one_field_apart(), import_stmt, stmt_ref, "statement");
+}
+
+#[test]
+fn a_tree_with_nan_is_not_equal_to_itself_in_either_form() {
+    let nan = Value::Double { value: f64::NAN, position: pos(1) };
+    assert!(nan != nan.clone());
+    let mut arena = Arena::new();
+    let id = arena.import_value(&nan);
+    assert!(arena.value_ref(id) != arena.value_ref(id));
+
+    let wrapped = Value::Array { values: vec![nan.clone()], position: pos(2) };
+    let id = arena.import_value(&wrapped);
+    assert!(arena.value_ref(id) != arena.value_ref(id));
+}
+
+#[test]
+fn trees_differing_in_one_leaf_are_unequal() {
+    let base = |text: &str, line: usize| Value::Object {
+        properties: vec![ObjectProperty::new(
+            "k".into(),
+            Value::Array { values: vec![int(1, 1), Value::String { value: text.into(), position: pos(line) }], position: pos(1) },
+            pos(1),
+        )],
+        position: pos(1),
+    };
+    let mut arena = Arena::new();
+    let same_a = arena.import_value(&base("x", 5));
+    let same_b = arena.import_value(&base("x", 5));
+    let text_differs = arena.import_value(&base("y", 5));
+    let position_differs = arena.import_value(&base("x", 6));
+    assert!(arena.value_ref(same_a) == arena.value_ref(same_b));
+    assert!(arena.value_ref(same_a) != arena.value_ref(text_differs));
+    assert!(arena.value_ref(same_a) != arena.value_ref(position_differs));
+}
+
+// -----------------------------------------------------------------------------
 // Layout
 // -----------------------------------------------------------------------------
 
@@ -589,18 +959,48 @@ fn every_compiled_file_in_the_corpus_round_trips() {
             .collect();
         arena_nodes += arena.value_count() + arena.expr_count() + arena.stmt_count();
 
-        for (root, id) in roots.iter().zip(&imported) {
-            match (root, id) {
-                (Root::Value(v), Imported::Value(id)) => {
-                    assert_eq!(arena.export_value(*id), **v, "{}", path.display())
+        // A second arena imported in reverse, so the same tree has different ids and spans
+        // there, for the cross-arena equality check below.
+        let mut second = Arena::new();
+        let mut imported_second: Vec<Imported> = roots
+            .iter()
+            .rev()
+            .map(|r| match r {
+                Root::Value(v) => Imported::Value(second.import_value(v)),
+                Root::Expr(e) => Imported::Expr(second.import_expr(e)),
+                Root::Stmt(s) => Imported::Stmt(second.import_stmt(s)),
+            })
+            .collect();
+        imported_second.reverse();
+
+        for (k, (root, id)) in roots.iter().zip(&imported).enumerate() {
+            match (root, id, &imported_second[k]) {
+                (Root::Value(v), Imported::Value(id), Imported::Value(id2)) => {
+                    assert_eq!(arena.export_value(*id), **v, "{}", path.display());
+                    assert_eq!(arena.value_ref(*id).to_string(), v.to_string(), "display, {}", path.display());
+                    assert!(arena.value_ref(*id) == second.value_ref(*id2), "equality, {}", path.display());
                 }
-                (Root::Expr(e), Imported::Expr(id)) => {
-                    assert_eq!(arena.export_expr(*id), **e, "{}", path.display())
+                (Root::Expr(e), Imported::Expr(id), Imported::Expr(id2)) => {
+                    assert_eq!(arena.export_expr(*id), **e, "{}", path.display());
+                    assert_eq!(arena.expr_ref(*id).to_string(), e.to_string(), "display, {}", path.display());
+                    assert!(arena.expr_ref(*id) == second.expr_ref(*id2), "equality, {}", path.display());
                 }
-                (Root::Stmt(s), Imported::Stmt(id)) => {
-                    assert_eq!(arena.export_stmt(*id), **s, "{}", path.display())
+                (Root::Stmt(s), Imported::Stmt(id), Imported::Stmt(id2)) => {
+                    assert_eq!(arena.export_stmt(*id), **s, "{}", path.display());
+                    assert_eq!(arena.stmt_ref(*id).to_string(), s.to_string(), "display, {}", path.display());
+                    assert!(arena.stmt_ref(*id) == second.stmt_ref(*id2), "equality, {}", path.display());
                 }
                 _ => unreachable!("import kind always matches root kind"),
+            }
+        }
+
+        // Neighbouring value roots: arena equality must give the owned answer, which is
+        // mostly `false` and so guards against an equality that says yes to everything.
+        for k in 0..roots.len().saturating_sub(1) {
+            if let (Root::Value(a), Root::Value(b), Imported::Value(x), Imported::Value(y)) =
+                (&roots[k], &roots[k + 1], &imported[k], &imported[k + 1])
+            {
+                assert_eq!(arena.value_ref(*x) == arena.value_ref(*y), *a == *b, "{}", path.display());
             }
         }
     }

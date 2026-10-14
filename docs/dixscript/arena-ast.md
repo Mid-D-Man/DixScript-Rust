@@ -25,6 +25,11 @@ which design options exist, and what has to be decided before any code moves.
 - **Recommendation:** do the two arena-independent fixes first, re-measure, then decide
   between a reference arena and an index arena with a prototype of the index arena
   in the existing benchmark. See "Recommended sequence" and "Open decisions".
+- **The index arena (option B) was benchmarked against the bumpalo arena (option A)**
+  (Measurement 5). On the mirror types, B builds as fast as A or slightly faster, copies
+  2.2x to 4.2x faster, and costs more only on read-only traversal (47% more instructions
+  on the realistic profile). Speed does not separate the two; the structural points under
+  "Design options" do.
 
 ## How this was measured
 
@@ -108,8 +113,11 @@ owned `Box` AST vs bumpalo arena AST:
 
 So the arena's real advantage is allocation and teardown (2x to 4x); reading the
 tree is barely affected (1.1x to 1.5x). "Churn" is the LSP pattern: build an AST per
-edit and drop the last one. The benchmark does not cover an index arena, which is the
-other serious option (below).
+edit and drop the last one. This table predates Measurement 5, which rewrote the
+benchmark: the construct rows here include teardown on both sides (criterion's plain
+`iter` drops the routine's output inside the timed loop), which is consistent with
+construct and churn being nearly equal for the realistic profile. The index arena, the other serious
+option, is measured in Measurement 5.
 
 ## Measurement 3: the parsers over-reserve capacity
 
@@ -167,6 +175,135 @@ over a `pending` list of unresolved calls and, per call, formats the arguments w
 `{:?}` and stamps `Utc::now()` into a history record. **This is a suspect, not a
 diagnosis:** it was found by reading, not by profiling. The next step is a profile of
 the 32x input.
+
+## Measurement 5: option A against option B
+
+`dixscript/benches/arena_vs_box_benchmark.rs` now compares three representations of the
+same mirror AST: the owned `Box` tree, option A (bumpalo, `&'a` nodes) and option B (an
+owned arena with `u32` ids into per-kind `Vec`s). All three build identical trees from the
+same profiles, and an equivalence check proves it before any timing starts. The types are
+still mirrors, not the real ones. Numbers below come from a single-core Linux sandbox,
+Rust 1.75.0, `--release`, criterion 0.5.1 with shortened windows (20 to 30 samples, 2 to 3
+seconds, 1 second warm-up) and one run per group, so treat differences under about 15
+percent as noise. Medians:
+
+| Operation | Profile | Owned | A (bumpalo) | B (index) |
+|---|---|---|---|---|
+| Construct, teardown excluded | realistic | 295 us | 163 us | 136 us |
+| | deep_expressions | 126 ms | 63.2 ms | 52.4 ms |
+| | large_file | 6.53 ms | 6.54 ms | 4.46 ms |
+| Clone (A rebuilds) | realistic | 264 us | 87.0 us | 34.4 us |
+| | deep_expressions | 173 ms | 90.2 ms | 41.4 ms |
+| | large_file | 8.51 ms | 4.38 ms | 1.05 ms |
+| Clone then edit every `Value` | realistic | 325 us | 87.2 us | 29.3 us (linear), 45.5 us (walk) |
+| | deep_expressions | 190 ms | 89.6 ms | 44.0 ms (linear), 55.7 ms (walk) |
+| | large_file | 9.79 ms | 2.90 ms | 1.30 ms (linear), 1.54 ms (walk) |
+| Traverse | realistic | 8.5 us | 10.6 us | 12.5 us |
+| | deep_expressions | 23.7 ms | 19.6 ms | 24.1 ms |
+| | large_file | 408 us | 445 us | 328 us |
+| Build and drop (churn) | realistic | 289 us | 118 us | 105 us |
+| | deep_expressions | 177 ms | 32.0 ms | 29.9 ms |
+| | large_file | 14.1 ms | 3.30 ms | 3.29 ms |
+
+B without up-front reservation (`index_noreserve`) cost more than B with it on
+construct and churn (for example 3.29 ms against 4.40 ms on `large_file` churn; 6% to
+34% across the six cases, and 11% more instructions), so a
+parser that cannot size the arena from the source length still keeps most of the gain.
+
+Instruction counts are deterministic, so they are the safer comparison. Callgrind,
+realistic profile, instructions per iteration:
+
+| Operation | Owned | A | B |
+|---|---|---|---|
+| Build and drop | 2,523,125 | 1,064,019 | 988,516 (1,101,601 without reservation) |
+| Clone (A rebuilds) | 2,156,540 | 373,735 | 161,747 |
+| Clone then edit every `Value` | 2,214,461 | 373,753 | 177,449 (linear), 268,330 (walk) |
+| Traverse | 84,422 | 84,221 | 123,394 |
+
+Layout and allocations, realistic profile:
+
+| | Owned | A | B |
+|---|---|---|---|
+| `Expression` / `Statement` size | 72 / 136 bytes | 56 / 104 bytes | 48 / 48 bytes |
+| Allocations for one build | 4,534 | 1,459 | 1,466 (1,514 without reservation) |
+| Peak live bytes for one build | 250,261 | 1,052,666 (reserved chunk) | 1,180,170 (reserved), 239,658 (unreserved) |
+
+About 1,450 of the allocations in the A and B columns are the benchmark's own `format!`
+temporaries for names, which all three representations pay. A real parser slices names out
+of the source, so the real allocation gap between arena and owned is wider than this
+table shows.
+
+What the numbers say:
+
+- **Speed does not separate A from B.** B builds as fast as A or slightly faster (7% fewer
+  instructions; 17% to 32% faster by wall clock when outputs are held, which is more than
+  the instruction gap explains and probably reflects B's smaller nodes touching less fresh
+  memory; that was not verified separately). In churn, where memory is reused, they are
+  within 12% of each other.
+- **B copies much faster than A.** A has no clone, so it re-allocates every node; B clones
+  a handful of `Vec`s. A plain copy is 2.2x to 4.2x faster on B. The enhancer's
+  copy-then-edit step is 2.0x to 3.0x faster with a linear pass (one loop over a `Vec`,
+  valid for passes that ignore tree structure) and 1.6x to 1.9x faster with a tree walk.
+- **Reading is B's cost.** Every access goes through an index, so a traversal runs 47%
+  more instructions than A on the realistic profile. Wall-clock results were mixed: B was
+  1.18x and 1.23x slower than A on two profiles and 1.36x faster on `large_file`. Parse
+  and enhancement build and copy; semantic analysis and the converter only read, so the
+  cost lands where an arena helps least anyway (see "Where an arena helps, and where it
+  does not").
+- Against the owned tree, both arenas are at least 1.9x faster on copy and churn. On
+  construct they are 1.8x to 2.4x faster on `realistic` and `deep_expressions`; on
+  `large_file` B is 1.5x faster and A ties the owned tree.
+
+### What the benchmark files do
+
+`benches/arena_vs_box_benchmark.rs` holds the criterion groups and `main`. The three
+representations live in `benches/arena_shapes/`: `owned.rs`, `bump.rs` (option A) and
+`index.rs` (option B), with `mod.rs` holding the profiles, the tree fingerprint and the
+checks. Each representation builds the same programs, counts nodes, fingerprints itself
+and implements the copy and edit operations the groups time. The index arena keeps one
+`Vec` per node kind, `(start, len)` ranges for lists and for text, and two scratch stacks
+so nested lists land contiguously. Groups: construct, clone and rebuild, clone then edit,
+traverse, and build-and-drop churn.
+
+### Decisions
+
+- The ids `owned` and `arena` keep their old meaning, so the published summary history
+  stays comparable; B is `index`, and `index_noreserve` is B starting empty.
+- Operators are `&'static str` in both A and B builders, so neither pays to build them.
+  Option A's rebuild still copies them into the new arena (the conservative reading), while
+  B's clone never needs to. A real migration would use an operator enum.
+- B reserves its buffers from the byte budget the bump arena gets, divided by the bump
+  arena's real cost per expression (64 bytes). The equivalence check asserts that no buffer
+  grew during a hinted build, so the label is true.
+- The construct and clone groups use `iter_with_large_drop` so teardown is never in
+  the timed region; teardown is what the churn group measures.
+- The clone-then-edit group measures B two ways: a linear pass (cheap because nodes of a
+  kind are contiguous, valid only for passes that ignore structure) and a tree walk (the
+  like-for-like comparison with the owned walk).
+
+### Tests
+
+`verify_representations` runs before any timing. For every profile it builds each
+representation, compares a structural fingerprint (node count, value sum, name bytes,
+operator bytes, positions) with the owned tree, then checks every copy and edit against
+the expected fingerprint. It also asserts that the hinted index arena never grew. A fourth,
+untimed profile (`branches`) exercises the `If` paths. Result: all four profiles agree.
+The bench compiles warning-free on Rust 1.75.0.
+
+### Fixes and Problems
+
+- **The old header comment was wrong about criterion.** It said plain `iter` defers drops
+  until after timing. In criterion 0.5.1 it drops the output inside the loop, so the
+  earlier construct numbers included teardown on both sides. Fixed by using
+  `iter_with_large_drop` for construct and clone.
+- **The timed profiles never emit an `If`.** `stmts_per_function` is 3 and
+  `if_every_n_stmts` is 5, so `si % 5 == 4` never holds. The profiles were left as they
+  are so results stay comparable; the untimed `branches` profile covers the code.
+- **Option A's large-file rebuild varies with heap state.** The same rebuild measured 4.38
+  ms in one group and 2.90 ms in another run, a spread of about 30%. The direction of every
+  conclusion above is unaffected, but magnitudes on that profile are loose.
+- **Not covered:** the real types (`Value` carries `String`s), a parser that slices names
+  from the source, parallel section builds, and the pipeline end to end.
 
 ## Blast radius
 
@@ -270,9 +407,10 @@ into the source.
   with id offsets.
 - **Against:** every access needs the arena (`arena.expr(id)`), so signatures and
   pattern matches change shape rather than just gaining a lifetime; node-by-node
-  pattern matching over children is more verbose. Its speed is **unmeasured**: the
-  benchmark does not model it, and it will be somewhat slower than A (bounds-checked
-  index reads, ids instead of pointers) though far faster than owned `Box` trees.
+  pattern matching over children is more verbose. Measurement 5 measured its speed on
+  the mirror types: it builds as fast as A or slightly faster, copies 2.2x to 4.2x faster,
+  and reads slower (47% more instructions on a traversal), and it is far faster than owned
+  `Box` trees.
 
 ### C. Stay owned and cut the waste
 
@@ -315,7 +453,8 @@ synthetic input.
    whatever is left of parse, enhancement and LSP churn after steps 1 to 3.
 5. **Prototype option B in the existing benchmark** next to the bumpalo version, using
    the real shapes (`Value` with its `String`s, the real expression variants) and
-   `size_of` of the real types. Decide A or B from numbers.
+   `size_of` of the real types. Decide A or B from numbers. (Done on the mirror types:
+   Measurement 5. A run on the real types is still open.)
 6. **If proceeding**, migrate in this order, each step compiling with the 703/674 test
    counts intact: AST types and the binary unpacker and parser (constructors first);
    then the read-only consumers (analyzers, converter, serializers); then the mutating
@@ -333,14 +472,15 @@ synthetic input.
   `quickfuncs_section_parser.rs` and `quickfuncs_section_analyzer.rs` alone are over
   6,600 lines.
 - **Benchmark fidelity:** the existing benchmark uses mirror types, not the real ones,
-  and does not model option B or the parallel build.
+  and does not model the parallel build (option B is modelled since Measurement 5).
 
 ## Open decisions
 
 1. What is the goal: compile throughput, LSP latency and memory, or code structure?
    The measurements favour different answers for each.
-2. Option A or B, once B has a number: is a lifetime on `DixScript` acceptable, or
-   must it stay an owned `'static` value?
+2. Option A or B: B has a number now (Measurement 5) and speed does not separate them,
+   so the question is whether a lifetime on `DixScript` is acceptable, or whether it must
+   stay an owned `'static` value.
 3. Is a major version bump (and the work in `mdix-lsp`) acceptable?
 4. Do steps 1 to 3 go first, before any arena work?
 
@@ -349,7 +489,7 @@ synthetic input.
 - RSS or peak resident memory (only requested bytes).
 - The parse-time AST and intermediate clones (only the final resolved AST).
 - Any LSP request path (semantic tokens, hover, completion) or `Document` memory.
-- Option B's speed, and the arena in the real pipeline.
+- Either arena in the real pipeline, on the real types, or with parallel section builds.
 - Whether the value-resolution suspect above is the cause.
 - Non-Linux, 32-bit and wasm32 behaviour.
 
@@ -463,4 +603,5 @@ all instructions.
 
 - Step 2 follow-ups inside value resolution: the `format!` per resolved call, and the clones.
 - Cheap semantic analysis fixes: the keyword check's allocations.
-- Steps 3 to 6 (operator enum, whole-tree clones, the index-arena prototype, migration).
+- Steps 3, 4 and 6 (operator enum, whole-tree clones, re-measure, migration). The
+  index-arena prototype (step 5) exists on the mirror types; see Measurement 5.

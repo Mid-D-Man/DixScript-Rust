@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/arena-ast.md, section "Compiler/AST/arena"
+// ============================================================================
 //! # AST - Abstract Syntax Tree for DixScript
 //!
 //! This module contains all AST node definitions for DixScript v1.0.0
@@ -18,13 +22,14 @@ pub mod statements;
 pub mod quickfuncs;
 pub mod root;
 pub mod helpers;
+pub mod arena;
 pub mod Visitors;
 
 // Re-exports for convenience
 pub use position::Position;
 pub use data_types::{
     DataType,
-    ElemType,            // ← new typed-collection element type
+    ElemType,
     ErrorHandlingStrategy,
     CompatibilityMode,
     DebugMode,

@@ -16,6 +16,15 @@ their own release history.
 
 Breaking release.
 
+### Added
+
+- **`Compiler::AST::arena`**, an index arena for the `Value`, `Expression` and
+  `QuickFuncStatement` family: `Arena`, the node types `ValueNode`, `ExprNode` and `StmtNode`
+  (40, 48 and 48 bytes, against 144, 160 and 384 for the owned types), and lossless
+  `import_*` and `export_*` between an owned tree and the arena. Nothing in the compiler uses
+  it yet; it is the first piece of the arena AST described in
+  `docs/dixscript/arena-ast.md`.
+
 ### Removed
 
 - **`DCompressor.bzip2` and `DCompressor.lzma`.** gzip is the only DLM

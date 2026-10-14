@@ -26,10 +26,15 @@ which design options exist, and what has to be decided before any code moves.
   between a reference arena and an index arena with a prototype of the index arena
   in the existing benchmark. See "Recommended sequence" and "Open decisions".
 - **The index arena (option B) was benchmarked against the bumpalo arena (option A)**
-  (Measurement 5). On the mirror types, B builds as fast as A or slightly faster, copies
-  2.2x to 4.2x faster, and costs more only on read-only traversal (47% more instructions
-  on the realistic profile). Speed does not separate the two; the structural points under
-  "Design options" do.
+  (Measurement 5, run in a sandbox and on a GitHub Actions runner). On the mirror types, B
+  builds, copies and churns at least as fast as A on both machines, copies 2.2x to 8.8x
+  faster, and costs more only on read-only traversal of a small tree (47% more
+  instructions on the realistic profile). The structural points under "Design options"
+  point the same way.
+- **The arena for the real `Value` family exists** (`Compiler/AST/arena`, step 6 started).
+  Nodes are 40, 48 and 48 bytes against 144, 160 and 384 for the owned `Value`,
+  `Expression` and `QuickFuncStatement`, and a corpus round trip through the real compiler
+  returns equal trees. Nothing in the compiler uses it yet.
 
 ## How this was measured
 
@@ -182,10 +187,12 @@ the 32x input.
 same mirror AST: the owned `Box` tree, option A (bumpalo, `&'a` nodes) and option B (an
 owned arena with `u32` ids into per-kind `Vec`s). All three build identical trees from the
 same profiles, and an equivalence check proves it before any timing starts. The types are
-still mirrors, not the real ones. Numbers below come from a single-core Linux sandbox,
-Rust 1.75.0, `--release`, criterion 0.5.1 with shortened windows (20 to 30 samples, 2 to 3
-seconds, 1 second warm-up) and one run per group, so treat differences under about 15
-percent as noise. Medians:
+still mirrors, not the real ones. Two runs are reported. The first comes from a
+single-core Linux sandbox, Rust 1.75.0, `--release`, criterion 0.5.1 with shortened
+windows (20 to 30 samples, 2 to 3 seconds, 1 second warm-up) and one run per group. The
+second comes from the GitHub Actions runner (`ubuntu-latest`, stable Rust, full windows)
+through the bench workflow, and is listed after the sandbox tables. Treat differences
+under about 15 percent as noise in either. Sandbox medians:
 
 | Operation | Profile | Owned | A (bumpalo) | B (index) |
 |---|---|---|---|---|
@@ -233,26 +240,61 @@ temporaries for names, which all three representations pay. A real parser slices
 of the source, so the real allocation gap between arena and owned is wider than this
 table shows.
 
-What the numbers say:
+### GitHub Actions run
 
-- **Speed does not separate A from B.** B builds as fast as A or slightly faster (7% fewer
-  instructions; 17% to 32% faster by wall clock when outputs are held, which is more than
-  the instruction gap explains and probably reflects B's smaller nodes touching less fresh
-  memory; that was not verified separately). In churn, where memory is reused, they are
-  within 12% of each other.
-- **B copies much faster than A.** A has no clone, so it re-allocates every node; B clones
-  a handful of `Vec`s. A plain copy is 2.2x to 4.2x faster on B. The enhancer's
-  copy-then-edit step is 2.0x to 3.0x faster with a linear pass (one loop over a `Vec`,
-  valid for passes that ignore tree structure) and 1.6x to 1.9x faster with a tree walk.
-- **Reading is B's cost.** Every access goes through an index, so a traversal runs 47%
-  more instructions than A on the realistic profile. Wall-clock results were mixed: B was
-  1.18x and 1.23x slower than A on two profiles and 1.36x faster on `large_file`. Parse
-  and enhancement build and copy; semantic analysis and the converter only read, so the
-  cost lands where an arena helps least anyway (see "Where an arena helps, and where it
-  does not").
-- Against the owned tree, both arenas are at least 1.9x faster on copy and churn. On
-  construct they are 1.8x to 2.4x faster on `realistic` and `deep_expressions`; on
-  `large_file` B is 1.5x faster and A ties the owned tree.
+The same bench through the bench workflow (full sample windows, `ubuntu-latest`, stable
+Rust). Medians; `unreserved` is B starting empty. Node sizes were 64 / 128 bytes for owned
+(a newer compiler lays the owned enums out tighter than 1.75 does), and 56 / 104 and
+48 / 48 for A and B as before.
+
+| Operation | Profile | Owned | A (bumpalo) | B (index) |
+|---|---|---|---|---|
+| Construct, teardown excluded | realistic | 83.0 us | 108 us | 91.1 us (70.1 us unreserved) |
+| | deep_expressions | 70.1 ms | 24.4 ms | 19.2 ms (25.3 ms unreserved) |
+| | large_file | 2.96 ms | 2.79 ms | 2.67 ms (2.47 ms unreserved) |
+| Clone (A rebuilds) | realistic | 99.0 us | 71.6 us | 8.16 us |
+| | deep_expressions | 105 ms | 48.2 ms | 10.1 ms |
+| | large_file | 2.94 ms | 2.86 ms | 1.11 ms |
+| Clone then edit every `Value` | realistic | 118 us | 71.4 us | 10.0 us (linear), 19.4 us (walk) |
+| | deep_expressions | 115 ms | 48.5 ms | 12.2 ms (linear), 18.3 ms (walk) |
+| | large_file | 3.98 ms | 2.82 ms | 1.25 ms (linear), 1.48 ms (walk) |
+| Traverse | realistic | 6.84 us | 5.70 us | 6.69 us |
+| | deep_expressions | 16.4 ms | 7.58 ms | 6.62 ms |
+| | large_file | 281 us | 266 us | 205 us |
+| Build and drop (churn) | realistic | 167 us | 57.2 us | 48.5 us (54.9 us unreserved) |
+| | deep_expressions | 91.3 ms | 22.9 ms | 16.1 ms (23.7 ms unreserved) |
+| | large_file | 4.76 ms | 1.76 ms | 1.33 ms (1.78 ms unreserved) |
+
+What the numbers say, across both runs:
+
+- **B is at least as fast as A on construct, copy, copy-then-edit and churn, on both
+  machines.** A plain copy is 2.2x to 8.8x faster on B (sandbox 2.2x to 4.2x, runner 2.6x to
+  8.8x). Copy-then-edit is 1.6x to 7.1x faster, the linear pass beating the tree walk by
+  1.2x to 1.9x. Churn is 1.2x to 1.4x faster on the runner and within 12% in the sandbox.
+  Construct takes 4% to 22% less time on the runner and 17% to 32% less in the sandbox;
+  the sandbox instruction count for build and drop is 7% lower.
+- **Reading is B's cost, and it depends on tree size.** A traversal of the realistic tree
+  runs 47% more instructions on B and was 17% to 18% slower in wall clock on both
+  machines. On `large_file` B was faster in both runs (23% on the runner, 26% in the
+  sandbox), and on `deep_expressions` it was 23% slower in the sandbox and 13% faster on
+  the runner. The likely reading is that the extra instructions show only while the tree
+  fits in cache, and B's smaller nodes win once it does not; that was not isolated.
+  Semantic analysis and the converter only read, so this lands where an arena helps least
+  anyway (see "Where an arena helps, and where it does not").
+- **Construct against the owned tree depends on the machine.** In the sandbox both arenas
+  were 1.8x to 2.4x faster than owned on `realistic` and `deep_expressions`. On the runner
+  owned beat both arenas on `realistic` (83 us against 108 us and 91 us), the arenas were
+  2.9x and 3.7x faster on `deep_expressions`, and all three were within 11% on
+  `large_file`. B starting empty was the fastest build on `realistic` (70 us). The fixed
+  byte budgets reserve about 1 MB for a tree that uses about 170 KB, and this group hands
+  every iteration fresh memory, which is the probable cause; it was not isolated.
+- **Churn, which reuses memory, is the steadier measure.** Both arenas were at least 2.4x
+  faster than owned on both machines, and B was 1.2x to 1.4x faster than A on the runner.
+  That edge comes largely from reserving: B starting empty took 13% to 47% longer than B
+  reserved and landed within 4% of A.
+- **Copy against the owned tree.** B was 2.6x to 12x faster than an owned clone on the
+  runner. A's rebuild was 1.4x faster than an owned clone on `realistic` and tied it on
+  `large_file`, so A's advantage on copy shrinks where the trees are small or shallow.
 
 ### What the benchmark files do
 
@@ -302,6 +344,10 @@ The bench compiles warning-free on Rust 1.75.0.
 - **Option A's large-file rebuild varies with heap state.** The same rebuild measured 4.38
   ms in one group and 2.90 ms in another run, a spread of about 30%. The direction of every
   conclusion above is unaffected, but magnitudes on that profile are loose.
+- **Construct order against owned is machine dependent.** The sandbox and the runner
+  disagree for `realistic` and `large_file` construct, while the sandbox instruction counts
+  and both churn results agree. The reservation budget is the first thing to test if
+  construct matters.
 - **Not covered:** the real types (`Value` carries `String`s), a parser that slices names
   from the source, parallel section builds, and the pipeline end to end.
 
@@ -408,9 +454,10 @@ into the source.
 - **Against:** every access needs the arena (`arena.expr(id)`), so signatures and
   pattern matches change shape rather than just gaining a lifetime; node-by-node
   pattern matching over children is more verbose. Measurement 5 measured its speed on
-  the mirror types: it builds as fast as A or slightly faster, copies 2.2x to 4.2x faster,
-  and reads slower (47% more instructions on a traversal), and it is far faster than owned
-  `Box` trees.
+  the mirror types, in a sandbox and on a GitHub Actions runner: it builds, copies and
+  churns at least as fast as A, copies 2.2x to 8.8x faster, and reads slower on a small
+  tree (47% more instructions on a traversal), and it is far faster than owned `Box`
+  trees on copy and churn.
 
 ### C. Stay owned and cut the waste
 
@@ -459,7 +506,8 @@ synthetic input.
    counts intact: AST types and the binary unpacker and parser (constructors first);
    then the read-only consumers (analyzers, converter, serializers); then the mutating
    ones (enhancer, resolver); then `Runtime`; then DLM. Siblings move last, behind a
-   major version bump of `dixscript`; `mdix-lsp` last of all.
+   major version bump of `dixscript`; `mdix-lsp` last of all. (Started: the arena for the
+   `Value` family exists and round-trips; see "Compiler/AST/arena".)
 
 ## Risks
 
@@ -478,9 +526,9 @@ synthetic input.
 
 1. What is the goal: compile throughput, LSP latency and memory, or code structure?
    The measurements favour different answers for each.
-2. Option A or B: B has a number now (Measurement 5) and speed does not separate them,
-   so the question is whether a lifetime on `DixScript` is acceptable, or whether it must
-   stay an owned `'static` value.
+2. Option A or B: B has numbers now (Measurement 5) and is as fast or faster in every
+   operation except traversal of a small tree, so the remaining question is whether a
+   lifetime on `DixScript` is acceptable, or whether it must stay an owned `'static` value.
 3. Is a major version bump (and the work in `mdix-lsp`) acceptable?
 4. Do steps 1 to 3 go first, before any arena work?
 
@@ -579,6 +627,18 @@ Callgrind at 16x: 1,374M to 502M instructions (-63%); parsing (50.4M) and semant
   formatted into strings for every resolved call), and `String` and `Vec` clones another 13.6
   and 14.4 percent. Those are the next targets, and the clones are what an arena changes.
 
+### Step 6 started: the arena for the Value family
+
+The first piece of the migration is additive, so every delivered drop compiles with the
+existing tests intact. `Value`, `Expression` and `QuickFuncStatement` (with `ObjectProperty`
+and `SwitchCase`) are one mutually recursive family, so they move together: a `Value` holds
+`Expression`s, an `Expression` holds a `Value`, and a lambda `Value` holds statements that hold
+both. They also hold most of a compile's allocations. The new `Compiler/AST/arena` module
+stores the family in one owned `Arena` and copies trees in and out losslessly, so consumers can
+move over one at a time. A round trip through the real compiler over the whole `mdix_files`
+corpus returns equal trees. See the sections "Compiler/AST/arena" and "tests/arena_roundtrip.rs"
+at the end of this document.
+
 ### Where an arena helps, and where it does not
 
 A callgrind profile of one `FullFunctionTest` compile (59.8M instructions, debug mode as
@@ -603,5 +663,130 @@ all instructions.
 
 - Step 2 follow-ups inside value resolution: the `format!` per resolved call, and the clones.
 - Cheap semantic analysis fixes: the keyword check's allocations.
-- Steps 3, 4 and 6 (operator enum, whole-tree clones, re-measure, migration). The
-  index-arena prototype (step 5) exists on the mirror types; see Measurement 5.
+- Steps 3 and 4 (operator enum, whole-tree clones, re-measure).
+- The rest of step 6. Planned drops, each compiling with the tests intact:
+  1. Arena-aware `Display`, `Debug` and equality for nodes (a handle that pairs an id with
+     its `&Arena`), because the owned types are formatted and compared with `{}` and `==` all
+     over the compiler and the nodes cannot do either on their own.
+  2. An arena-resident `DixScript`: the section structs hold ids into one owned arena, with
+     import and export for the whole file and the same corpus round trip.
+  3. Parser constructors that build into the arena (with scratch stacks for lists, since child
+     counts are unknown while parsing), converting at the end of the parse until consumers move.
+  4. Read-only consumers, then mutators (enhancer, resolver), then `Runtime`, then DLM. Siblings
+     last behind the 2.0.0 bump, `mdix-lsp` last of all.
+
+## Compiler/AST/arena
+
+### What it does
+
+`dixscript/src/Compiler/AST/arena/` is option B for the real `Value`, `Expression` and
+`QuickFuncStatement` family. One owned `Arena` holds a `Vec` per node kind (`ValueNode`,
+`ExprNode`, `StmtNode`, plus object properties, switch cases and unknown-value records), a
+`Vec` per list kind, and one `String` for every piece of text. Children are `u32` ids
+(`ValueId`, `ExprId`, `StmtId`), lists are `(start, len)` spans (`ValueList`, `ExprList`,
+`StmtList`, `StrList`, `PropList`, `CaseList`) and text is a span (`Str`). The arena has no
+lifetime, so it is a `'static`, `Send + Sync`, `Clone` value, and every node is `Copy`.
+
+`Arena::import_value`, `import_expr` and `import_stmt` copy an owned tree in and return the id
+of its root. `export_value`, `export_expr` and `export_stmt` copy a tree back out as the
+original owned types. `export(import(x)) == x` for every tree. That pair is the migration
+seam: a consumer that has moved reads the arena, and one that has not gets the owned tree it
+expects. The module is `pub mod arena` in `Compiler/AST/mod.rs`, which is the only existing
+file it touches. It is reached as `Compiler::AST::arena`, not re-exported flat.
+
+Layout, measured with `size_of` on Rust 1.75, x86_64:
+
+| Owned type | Bytes | Arena node | Bytes |
+|---|---|---|---|
+| `Value` | 144 | `ValueNode` | 40 |
+| `Expression` | 160 | `ExprNode` | 48 |
+| `QuickFuncStatement` | 384 | `StmtNode` | 48 |
+
+The owned sizes are large because the variants carry `String`s and `Vec`s inline, `Value`
+carries the three-string `Unknown` variant, and `QuickFuncStatement::ObjectCreation` carries a
+whole `Value`. This is the layout the benchmark's mirror types stood in for: the mirror's owned
+types were 72 and 136 bytes.
+
+### Decisions
+
+- **Additive first.** Nothing in the compiler uses the arena. The alternative, changing
+  `Value` in place, breaks about 4,500 mentions in 132 files at once and cannot be delivered
+  as a compiling drop. Consumers move one at a time through import and export instead.
+- **The whole family in one arena.** The three types reference each other, so no one of them can
+  move alone.
+- **`Option` is kept where the owned type has it.** `Option<ExprList>` keeps `None` (a property
+  or enum access) apart from `Some` of an empty list (a call with no arguments) for
+  `QualifiedIdentifier` and `BuiltinFunction`, and `Option<StmtList>` and `Option<CaseId>` do the
+  same for `else` and `default`. A copy that merged them would change meaning.
+- **`Unknown` values live out of line.** Their `CompatibilityResult` owns strings and would
+  have made every `ValueNode` larger, so the node holds an `UnknownId` into a side pool.
+- **Names and operators are `Str` spans in one text buffer.** They are not interned and not an
+  operator enum yet (that is step 3), so the same operator text is stored once per use.
+- **`Position` is kept as it is** (two `usize`, 16 bytes) so the copy is lossless. Narrowing it
+  is a later size lever.
+- **Lists are imported by reserving the whole run first** with placeholder entries and filling
+  them as each child is imported. Children with lists of their own append after the run, so
+  every run stays contiguous without a scratch stack. A parser, which does not know a list's
+  length in advance, will need the scratch stacks the benchmark's index arena uses.
+- **No wildcard arms.** Every `match` in `import.rs` and `export.rs` lists every variant, so
+  adding a variant to an owned type fails to compile until the arena handles it.
+- **Ids are `u32`.** An arena that would exceed about 4.29 billion nodes, list entries or bytes
+  of text panics with a clear message instead of wrapping.
+
+### Tests
+
+`tests/arena_roundtrip.rs`; see its section below.
+
+### Fixes and Problems
+
+- **Nodes cannot be formatted or compared on their own.** The owned types implement `Display`
+  and `PartialEq` over their contents. Node `Debug` shows ids and spans, not text, and node
+  `PartialEq` compares ids, so two equal trees in different arenas compare unequal. Every
+  consumer that formats or compares a tree needs an arena-aware handle first. That is the first
+  planned drop under "Not done yet".
+- **Importing copies.** Import and export each copy the tree, so using them at a boundary adds a
+  copy. They are a migration tool, not the end state.
+
+## tests/arena_roundtrip.rs
+
+### What it does
+
+Proves the arena holds the family completely. Hand-built samples cover every variant of
+`Value` (25), `Expression` (24) and `QuickFuncStatement` (9), plus edge cases: `None` against an
+empty list, a switch with and without a default, an `else` that is `None` against empty, empty
+arrays, objects and lambdas, and each `CompatibilityResult` variant inside `Unknown`. The same
+samples are imported three times into one arena to catch ids or spans that collide. Then every
+`.mdix` file under `mdix_files/` is compiled with the real compiler and every `Value`,
+`Expression` and statement reachable from its `@DATA`, `@RAW`, `@SECURITY`, `@SCHEMA` and
+`@QUICKFUNCS` sections is imported into one arena per file and exported again.
+
+### Decisions
+
+- The variant names come from `match` expressions with no wildcard arm, and the samples are
+  checked against them, so a new variant stops the file compiling until a sample exists.
+- Files that do not compile are skipped, and a floor on the number of files that compile and
+  on the number of roots checked keeps the corpus test from passing on nothing.
+- Every root of a file is imported before any is exported, so interleaved ids and spans are
+  exercised on data the compiler really produces.
+- A static assertion checks that `Arena` is `Send + Sync + Clone + 'static`.
+
+### Tests
+
+Ten tests, all passing on Rust 1.75: the sample-coverage check, one round trip each for values,
+expressions and statements, `None` against an empty list, everything imported into one arena,
+a cloned arena, readable positions, node size against owned size, and the corpus. In the
+sandbox the corpus has 84 files, of which 70 compile, and the test round-trips 5,993 values,
+1,173 expressions and 1,712 statements (41,651 arena nodes including nested ones). The suite
+passes: 547 unit tests, 172 integration tests including these ten, and 2 doc tests.
+
+### Fixes and Problems
+
+- **14 corpus files do not compile in the sandbox.** Four need network access to download cloud
+  imports (`06_cloud_basic`, `07_cloud_verify_invalid`, `09_cloud_transitive`,
+  `10_cloud_cyclic`), so a run with network access round-trips more files. Others are deliberate
+  failures (`02_bzip2` and `03_lzma`, whose codecs are removed, and the circular-import files)
+  or fail analysis for their own reasons (`EnumsWithStuffImported`, `all_datatypes_test`,
+  `datetime_static_test`, `random_static_test`, `FullDataTestNoFunc`, `01_basic_import`). The
+  test skips them.
+- **Only section values are roots.** `@CONFIG` values use their own `ConfigValue` type and are
+  not part of this family, so they are not exercised.

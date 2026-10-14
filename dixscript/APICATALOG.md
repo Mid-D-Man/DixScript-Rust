@@ -112,6 +112,13 @@ The AST node types returned by `compile_to_resolved_ast` and consumed by
 | `QuickFuncsSection`, `QuickFunction`, `QuickFuncParam` | `@QUICKFUNCS` |
 | Helper functions (`helpers.rs`) | `create_*` constructors for building AST nodes by hand (mainly used in tests) |
 
+`Compiler::AST::arena` (reached by that path, not re-exported flat) is an owned index arena
+for the `Value` / `Expression` / `QuickFuncStatement` family: `Arena`, the node types
+`ValueNode`, `ExprNode`, `StmtNode`, `ObjectPropNode`, `SwitchCaseNode` and `UnknownData`, the
+handles `ValueId`, `ExprId`, `StmtId`, `CaseId`, `UnknownId` and `Str` plus the list spans, and
+`Arena::import_value` / `import_expr` / `import_stmt` with the matching `export_*` that return
+the owned types. Nothing in the compiler uses it yet.
+
 `Compiler::AST::Visitors` is also re-exported (`pub use Visitors::*`) but
 not catalogued in detail here — check the module directly if you need a
 visitor pattern over the tree.

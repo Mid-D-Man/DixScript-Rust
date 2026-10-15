@@ -35,7 +35,8 @@ which design options exist, and what has to be decided before any code moves.
   Nodes are 40, 48 and 48 bytes against 144, 160 and 384 for the owned `Value`,
   `Expression` and `QuickFuncStatement`, and a corpus round trip through the real compiler
   returns equal trees. Handles that pair a node with its arena print and compare exactly
-  like the owned types. Nothing in the compiler uses it yet.
+  like the owned types, and an arena-resident `Document` holds a whole file and converts to and
+  from the owned `DixScript` exactly. Nothing in the compiler uses it yet.
 
 ## How this was measured
 
@@ -637,8 +638,8 @@ and `SwitchCase`) are one mutually recursive family, so they move together: a `V
 both. They also hold most of a compile's allocations. The new `Compiler/AST/arena` module
 stores the family in one owned `Arena` and copies trees in and out losslessly, so consumers can
 move over one at a time. A round trip through the real compiler over the whole `mdix_files`
-corpus returns equal trees, and handles that pair a node with its arena print and compare
-exactly like the owned types. See the sections "Compiler/AST/arena" and "tests/arena_roundtrip.rs"
+corpus returns equal trees, handles that pair a node with its arena print and compare exactly
+like the owned types, and a `Document` holds a whole file in one arena. See the sections "Compiler/AST/arena" and "tests/arena_roundtrip.rs"
 at the end of this document.
 
 ### Where an arena helps, and where it does not
@@ -667,12 +668,13 @@ all instructions.
 - Cheap semantic analysis fixes: the keyword check's allocations.
 - Steps 3 and 4 (operator enum, whole-tree clones, re-measure).
 - The rest of step 6. Done: arena-aware `Display`, `Debug` and equality through handles
-  (`ValueRef`, `ExprRef`, `StmtRef`). Planned drops, each compiling with the tests intact:
-  2. An arena-resident `DixScript`: the section structs hold ids into one owned arena, with
-     import and export for the whole file and the same corpus round trip.
-  3. Parser constructors that build into the arena (with scratch stacks for lists, since child
+  (`ValueRef`, `ExprRef`, `StmtRef`), and the arena-resident `Document`. Planned drops, each
+  compiling with the tests intact:
+  1. Parser constructors that build into the arena (with scratch stacks for lists, since child
      counts are unknown while parsing), converting at the end of the parse until consumers move.
-  4. Read-only consumers, then mutators (enhancer, resolver), then `Runtime`, then DLM. Siblings
+  2. `Display` for `Document` and the `Doc*` section twins, which consumers that print a whole
+     section will need.
+  3. Read-only consumers, then mutators (enhancer, resolver), then `Runtime`, then DLM. Siblings
      last behind the 2.0.0 bump, `mdix-lsp` last of all.
 
 ## Compiler/AST/arena
@@ -699,6 +701,18 @@ return `Copy` handles (`ValueRef`, `ExprRef`, `StmtRef`) that hold an id and its
 implement `Display`, `Debug` and `PartialEq` the way the owned types do: `Display` prints the same
 text, `Debug` prints the same text as the owned derived `Debug`, and `==` is structural and works
 across two different arenas.
+
+`arena::Document` holds a whole file: one `Arena` plus the sections. `@CONFIG`, `@IMPORTS`,
+`@DLM` and `@ENUMS` contain nothing from the `Value` family, so the document reuses the owned
+types for them unchanged. The five sections that do hold values (`@DATA`, `@RAW`, `@SECURITY`,
+`@SCHEMA`, `@QUICKFUNCS`) have `Doc*` twins (`DocData` with `DocDataEntry` and
+`DocPropertyAssignment`, `DocRawBlock` with `DocRawField`, `DocSecurity` with
+`DocSecurityEntry` and `DocSecurityField`, `DocSchema` with `DocSchemaField`, `DocQuickFuncs`
+with `DocQuickFunction` and `DocQuickFuncParam`) that hold ids and spans where the owned type
+holds a `Value`, `Expression` or statement. `Document::from_owned(&ds).export() == ds` for
+every file, and `Document` implements `==` structurally across arenas. Like `Arena`, a
+`Document` has no lifetime, so it is an ordinary `'static`, `Send + Sync`, `Clone` value, which
+is what lets `mdix-lsp` keep one per open file.
 
 Layout, measured with `size_of` on Rust 1.75, x86_64:
 
@@ -747,6 +761,14 @@ types were 72 and 136 bytes.
 - **Equality follows the owned rules.** Same variant, equal fields, children, text and
   positions, with floats compared as IEEE numbers, so a tree holding `NaN` is not equal to
   itself, exactly as with the owned types.
+- **Owned types are reused for the sections with no values.** `@CONFIG`, `@IMPORTS`, `@DLM`
+  and `@ENUMS` are cloned into the document as they are; twins would add code and no benefit.
+- **Section-level names stay owned `String`s** (entry names, keys, paths, function names). They
+  are a handful per field or function, not per expression, so the first step carries them over
+  unchanged; moving them into the arena's text buffer is a later size lever.
+- **The `Doc*` types do not implement `PartialEq`**, for the same reason as the nodes: their ids
+  mean nothing without the arena. `Document` implements it, comparing the value-holding
+  sections through the handles and the rest with the owned `==`.
 - **The node types do not implement `PartialEq`.** Their children are ids, so a derived `==`
   would compare ids and say two equal trees in different arenas differ. Trees are compared
   through the handles.
@@ -760,6 +782,9 @@ types were 72 and 136 bytes.
   spans. Consumers print and compare through the handles; a consumer that holds only a node
   must be given the arena.
 - **`Debug` on a handle allocates**, because it exports the node first.
+- **`Document` and the `Doc*` types have no `Display` yet.** The owned sections print through
+  their own `Display`, and consumers that print a whole section need an arena-aware version.
+  It is the second planned drop under "Not done yet".
 - **Importing copies.** Import and export each copy the tree, so using them at a boundary adds a
   copy. They are a migration tool, not the end state.
 
@@ -826,3 +851,56 @@ every-compared-field test and the `Display` test failed, while the all-pairs tes
   notice a `Display` change there.
 - **Only section values are roots.** `@CONFIG` values use their own `ConfigValue` type and are
   not part of this family, so they are not exercised.
+
+## tests/arena_document.rs
+
+### What it does
+
+Proves a `Document` holds a whole `DixScript` exactly: `Document::from_owned(&ds).export() ==
+ds`, and `Document`'s own `==` agrees with the owned `==`. A hand-built file fills every
+value-holding section: all four `@DATA` entry kinds, two `@RAW` blocks (one with content and
+one empty), `@SECURITY`, `@SCHEMA`, and two `@QUICKFUNCS` functions, one with every optional part
+present and one with none. Every corpus file that compiles is round-tripped whole through the
+real compiler.
+
+### Decisions
+
+- **Equality is tested by changing one field at a time.** 66 tweaks of the hand-built file each
+  change exactly one field (a name, a type, a value, a position, a path segment, a list length,
+  a section being absent, an optional part appearing or disappearing). Each must make the owned
+  files unequal and the documents unequal, in both directions.
+- **`None` and an empty section stay different.** A file with empty `@DATA`, `@SECURITY`,
+  `@SCHEMA` and `@QUICKFUNCS` sections must differ from an empty file.
+- **Second copies use different ids.** One test imports the same file after padding, so every id
+  differs, and requires the documents to be equal.
+- **Real compiler output for the sections the corpus lacks.** No file in `mdix_files/` has an
+  `@RAW` or `@SCHEMA` section, so the sources the existing raw and schema tests compile are
+  round-tripped here as well.
+- **Consecutive corpus files** must give the owned answer for `==`. Almost all pairs differ,
+  which guards against an equality that says yes to everything.
+
+### Tests
+
+Seven tests, all passing on Rust 1.75: the hand-built round trip, empty files and empty
+sections, an owned and shareable document with an equal clone, equal documents with different
+ids, every compared field, compiled `@RAW` and `@SCHEMA` sources, and the corpus. In the sandbox
+70 of 84 corpus files compile and round-trip whole. Sections present across them: `@DATA` in 65,
+`@SECURITY` in 12, `@QUICKFUNCS` in 40, `@RAW` and `@SCHEMA` in none. `@DATA` entries: 636 simple,
+1,840 table, 547 group arrays and 10 objects; 69 neighbouring pairs were unequal. The suite
+passes: 547 unit tests, 185 integration tests including these seven and the sixteen in
+`arena_roundtrip.rs`, and 2 doc tests.
+
+A mutation check confirmed the tests are not vacuous. With the scope list dropped on export, the
+raw content dropped on export, and the security field key left out of equality, five tests
+failed. Run on its own, the equality bug was caught only by the every-compared-field test
+(`security: field key: documents compare equal`), not by the corpus or the round trips. The
+file was restored afterwards.
+
+### Fixes and Problems
+
+- **The corpus has no `@RAW` or `@SCHEMA` sections**, which is why the compiled-source test
+  exists. The 14 files that do not compile in the sandbox fail for the reasons listed under
+  `tests/arena_roundtrip.rs`.
+- **Only `Document` equality is native.** The `Doc*` section twins carry ids and are compared
+  only through `Document`.
+

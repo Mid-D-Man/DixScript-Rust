@@ -20,14 +20,24 @@
 //! A bare id cannot be printed or compared. [`Arena::value_ref`], [`Arena::expr_ref`] and
 //! [`Arena::stmt_ref`] return handles that pair an id with its arena and implement `Display`,
 //! `Debug` and `PartialEq` with the same output and rules as the owned types.
+//!
+//! [`Document`] is the arena-resident form of a whole `DixScript`: one `Arena` plus the sections,
+//! with `Doc*` twins of the five sections that hold values, converting exactly in both
+//! directions with [`Document::from_owned`] and [`Document::export`].
 
 mod display;
+mod document;
 mod equality;
 mod export;
 mod import;
 mod nodes;
 mod view;
 
+pub use document::{
+    DocData, DocDataEntry, DocPropertyAssignment, DocQuickFuncParam, DocQuickFuncs,
+    DocQuickFunction, DocRawBlock, DocRawField, DocSchema, DocSchemaField, DocSecurity,
+    DocSecurityEntry, DocSecurityField, Document,
+};
 pub use nodes::{ExprNode, ObjectPropNode, StmtNode, SwitchCaseNode, UnknownData, ValueNode};
 pub use view::{ExprRef, StmtRef, ValueRef};
 

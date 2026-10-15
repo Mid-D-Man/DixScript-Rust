@@ -120,6 +120,11 @@ handles `ValueId`, `ExprId`, `StmtId`, `CaseId`, `UnknownId` and `Str` plus the 
 the owned types. `Arena::value_ref` / `expr_ref` / `stmt_ref` return the handles `ValueRef`,
 `ExprRef` and `StmtRef`, which implement `Display` and `Debug` with the owned types' output and
 a structural `PartialEq` that works across arenas. The node types themselves do not implement
+`PartialEq`. `arena::Document` is the arena-resident form of a whole `DixScript`: one `Arena`
+plus the sections, with the owned types reused for `@CONFIG`, `@IMPORTS`, `@DLM` and `@ENUMS` and
+`DocData`, `DocRawBlock`, `DocSecurity`, `DocSchema` and `DocQuickFuncs` (with their entry,
+field and parameter types) for the five sections that hold values. `Document::from_owned` and
+`Document::export` convert exactly in both directions, and `Document` has a structural
 `PartialEq`. Nothing in the compiler uses it yet.
 
 `Compiler::AST::Visitors` is also re-exported (`pub use Visitors::*`) but

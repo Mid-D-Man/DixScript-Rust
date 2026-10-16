@@ -1,6 +1,6 @@
 // ============================================================================
 // NOTICE: Full documentation, design decisions, and fix history for this file
-// live in docs/dixscript/arena-ast.md, section "Compiler/AST/arena"
+// live in docs/dixscript/arena-ast.md, section "Compiler/AST/arena/import.rs"
 // ============================================================================
 //! Copies an owned tree into the arena.
 //!
@@ -36,6 +36,31 @@ fn placeholder_case() -> SwitchCaseNode {
 }
 
 impl Arena {
+    /// Copies an owned [`Value`] tree into the arena and returns the id of its root.
+    ///
+    /// Every node, list and string of the tree is copied, so the arena does not borrow from
+    /// `value`. [`Arena::export_value`] reverses it exactly.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the arena would need more nodes, list entries or text bytes than a `u32` can
+    /// address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::Arena;
+    /// use dixscript::Compiler::AST::{Position, Value};
+    ///
+    /// let value = Value::EnumValue {
+    ///     enum_name: "Color".to_string(),
+    ///     value: "Red".to_string(),
+    ///     position: Position::new(3, 7),
+    /// };
+    /// let mut arena = Arena::new();
+    /// let id = arena.import_value(&value);
+    /// assert_eq!(arena.export_value(id), value);
+    /// ```
     pub fn import_value(&mut self, value: &Value) -> ValueId {
         let node = match value {
             Value::Integer { value, position } => ValueNode::Integer { value: *value, position: *position },
@@ -127,6 +152,14 @@ impl Arena {
         self.alloc_value(node)
     }
 
+    /// Copies an owned [`Expression`] tree into the arena and returns the id of its root.
+    ///
+    /// See [`Arena::import_value`] for the details; [`Arena::export_expr`] reverses it exactly.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the arena would need more nodes, list entries or text bytes than a `u32` can
+    /// address.
     pub fn import_expr(&mut self, expr: &Expression) -> ExprId {
         let node = match expr {
             Expression::Identifier { name, position } => {
@@ -253,6 +286,15 @@ impl Arena {
         self.alloc_expr(node)
     }
 
+    /// Copies an owned [`QuickFuncStatement`] tree into the arena and returns the id of its
+    /// root.
+    ///
+    /// See [`Arena::import_value`] for the details; [`Arena::export_stmt`] reverses it exactly.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the arena would need more nodes, list entries or text bytes than a `u32` can
+    /// address.
     pub fn import_stmt(&mut self, stmt: &QuickFuncStatement) -> StmtId {
         let node = match stmt {
             QuickFuncStatement::Return { value, position } => {

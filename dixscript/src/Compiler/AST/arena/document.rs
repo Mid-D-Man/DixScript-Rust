@@ -1,6 +1,6 @@
 // ============================================================================
 // NOTICE: Full documentation, design decisions, and fix history for this file
-// live in docs/dixscript/arena-ast.md, section "Compiler/AST/arena"
+// live in docs/dixscript/arena-ast.md, section "Compiler/AST/arena/document.rs"
 // ============================================================================
 //! The arena-resident form of a whole `DixScript`.
 //!
@@ -30,23 +30,42 @@ use crate::Compiler::AST::dlm::DLMSection;
 use crate::Compiler::AST::enums::EnumsSection;
 use crate::Compiler::AST::imports::ImportsSection;
 
+// The `Doc*` structs and variants below mirror the owned section types field for field and
+// keep their names. Each type's documentation names the owned type it mirrors and says what
+// changes (a `Value` becomes a `ValueId`, a `Vec<Value>` a `ValueList`, and so on); the
+// field-level documentation of the owned type applies and is not repeated.
+
 // -- @DATA --------------------------------------------------------------------
 
+/// Arena form of [`DataSection`]: the `@DATA` section. Values are ids into the document's
+/// arena.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct DocData {
     pub entries: Vec<DocDataEntry>,
     pub position: Position,
 }
 
+/// Arena form of [`DataEntry`]. Each variant mirrors the owned variant of the same name.
 #[derive(Debug, Clone)]
 pub enum DocDataEntry {
+    /// A single `name = value` property.
+    #[allow(missing_docs)]
     SimpleProperty { name: String, data_type: Option<DataType>, value: ValueId, position: Position },
+    /// A table path with a list of property assignments.
+    #[allow(missing_docs)]
     TableProperty { path: TablePath, properties: Vec<DocPropertyAssignment>, position: Position },
+    /// A group array: a path with a run of values.
+    #[allow(missing_docs)]
     GroupArray { path: TablePath, items: ValueList, position: Position },
+    /// A property whose value is an object.
+    #[allow(missing_docs)]
     ObjectProperty { name: String, data_type: Option<DataType>, object: ValueId, position: Position },
 }
 
+/// Arena form of [`PropertyAssignment`]: one assignment inside a table property.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct DocPropertyAssignment {
     pub name: String,
     pub data_type: Option<DataType>,
@@ -56,7 +75,9 @@ pub struct DocPropertyAssignment {
 
 // -- @RAW ---------------------------------------------------------------------
 
+/// Arena form of [`RawBlock`]: one `@RAW` block.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct DocRawBlock {
     pub meta_data: Vec<DocRawField>,
     pub using: Vec<DocRawField>,
@@ -64,7 +85,9 @@ pub struct DocRawBlock {
     pub position: Position,
 }
 
+/// Arena form of [`RawField`]: one key and value in a `@RAW` block.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct DocRawField {
     pub key: String,
     pub value: ValueId,
@@ -73,20 +96,26 @@ pub struct DocRawField {
 
 // -- @SECURITY ----------------------------------------------------------------
 
+/// Arena form of [`SecuritySection`]: the `@SECURITY` section.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct DocSecurity {
     pub entries: Vec<DocSecurityEntry>,
     pub position: Position,
 }
 
+/// Arena form of [`SecurityEntry`]: one block of the `@SECURITY` section.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct DocSecurityEntry {
     pub block_key: String,
     pub fields: Vec<DocSecurityField>,
     pub position: Position,
 }
 
+/// Arena form of [`SecurityField`]: one key and value in a security block.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct DocSecurityField {
     pub key: String,
     pub value: ValueId,
@@ -95,13 +124,18 @@ pub struct DocSecurityField {
 
 // -- @SCHEMA ------------------------------------------------------------------
 
+/// Arena form of [`SchemaBlock`]: the `@SCHEMA` section.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct DocSchema {
     pub fields: Vec<DocSchemaField>,
     pub position: Position,
 }
 
+/// Arena form of [`SchemaField`]: one schema rule. `arguments` is a run of values in the
+/// document's arena.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct DocSchemaField {
     pub path: TablePath,
     pub method: String,
@@ -111,13 +145,17 @@ pub struct DocSchemaField {
 
 // -- @QUICKFUNCS --------------------------------------------------------------
 
+/// Arena form of [`QuickFuncsSection`]: the `@QUICKFUNCS` section.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct DocQuickFuncs {
     pub functions: Vec<DocQuickFunction>,
     pub position: Position,
 }
 
+/// Arena form of [`QuickFunction`]. `body` is a run of statements in the document's arena.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct DocQuickFunction {
     pub name: String,
     pub return_type: Option<DataType>,
@@ -127,7 +165,9 @@ pub struct DocQuickFunction {
     pub position: Position,
 }
 
+/// Arena form of [`QuickFuncParam`]. A default value is an expression id.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct DocQuickFuncParam {
     pub name: String,
     pub data_type: Option<DataType>,
@@ -135,30 +175,187 @@ pub struct DocQuickFuncParam {
     pub position: Position,
 }
 
+// -- section conversions ------------------------------------------------------
+
+impl DocData {
+    /// Copies an owned `@DATA` section into `arena`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `arena` would need more nodes, list entries or text bytes than a `u32` can
+    /// address.
+    pub fn from_owned(arena: &mut Arena, section: &DataSection) -> DocData {
+        import_data(arena, section)
+    }
+
+    /// Copies this section out of `arena` as the owned [`DataSection`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if an id in the section is out of range for `arena`, for example when `arena` is
+    /// not the one the section was built in.
+    pub fn export(&self, arena: &Arena) -> DataSection {
+        export_data(arena, self)
+    }
+}
+
+impl DocRawBlock {
+    /// Copies an owned `@RAW` block into `arena`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `arena` would need more nodes, list entries or text bytes than a `u32` can
+    /// address.
+    pub fn from_owned(arena: &mut Arena, block: &RawBlock) -> DocRawBlock {
+        import_raw(arena, block)
+    }
+
+    /// Copies this block out of `arena` as the owned [`RawBlock`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if an id in the block is out of range for `arena`, for example when `arena` is
+    /// not the one the block was built in.
+    pub fn export(&self, arena: &Arena) -> RawBlock {
+        export_raw(arena, self)
+    }
+}
+
+impl DocSecurity {
+    /// Copies an owned `@SECURITY` section into `arena`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `arena` would need more nodes, list entries or text bytes than a `u32` can
+    /// address.
+    pub fn from_owned(arena: &mut Arena, section: &SecuritySection) -> DocSecurity {
+        import_security(arena, section)
+    }
+
+    /// Copies this section out of `arena` as the owned [`SecuritySection`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if an id in the section is out of range for `arena`, for example when `arena` is
+    /// not the one the section was built in.
+    pub fn export(&self, arena: &Arena) -> SecuritySection {
+        export_security(arena, self)
+    }
+}
+
+impl DocSchema {
+    /// Copies an owned `@SCHEMA` section into `arena`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `arena` would need more nodes, list entries or text bytes than a `u32` can
+    /// address.
+    pub fn from_owned(arena: &mut Arena, section: &SchemaBlock) -> DocSchema {
+        import_schema(arena, section)
+    }
+
+    /// Copies this section out of `arena` as the owned [`SchemaBlock`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if an id in the section is out of range for `arena`, for example when `arena` is
+    /// not the one the section was built in.
+    pub fn export(&self, arena: &Arena) -> SchemaBlock {
+        export_schema(arena, self)
+    }
+}
+
+impl DocQuickFuncs {
+    /// Copies an owned `@QUICKFUNCS` section into `arena`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `arena` would need more nodes, list entries or text bytes than a `u32` can
+    /// address.
+    pub fn from_owned(arena: &mut Arena, section: &QuickFuncsSection) -> DocQuickFuncs {
+        import_quickfuncs(arena, section)
+    }
+
+    /// Copies this section out of `arena` as the owned [`QuickFuncsSection`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if an id in the section is out of range for `arena`, for example when `arena` is
+    /// not the one the section was built in.
+    pub fn export(&self, arena: &Arena) -> QuickFuncsSection {
+        export_quickfuncs(arena, self)
+    }
+}
+
 // -- the document -------------------------------------------------------------
 
-/// One arena plus the sections of a file. See the module documentation.
+/// One arena plus the sections of a file. See the [module documentation](super).
+///
+/// The public fields are the sections. `config`, `imports`, `dlm` and `enums` are the owned
+/// types, unchanged; `data`, `security`, `schema`, `raw` and `quick_functions` are the `Doc*`
+/// twins whose ids point into [`arena`](Document::arena).
+///
+/// # Examples
+///
+/// ```
+/// use dixscript::Compiler::AST::arena::Document;
+/// use dixscript::Compiler::AST::{DataEntry, DataSection, DixScript, Position, Value};
+///
+/// let mut ds = DixScript::new();
+/// ds.data = Some(DataSection::new(
+///     vec![DataEntry::SimpleProperty {
+///         name: "port".to_string(),
+///         data_type: None,
+///         value: Value::Integer { value: 8080, position: Position::new(2, 8) },
+///         position: Position::new(2, 1),
+///     }],
+///     Position::new(1, 1),
+/// ));
+///
+/// let document = Document::from_owned(&ds);
+/// assert_eq!(document.export(), ds);
+///
+/// // Two documents of the same file are equal even though their arenas are separate.
+/// assert!(document == Document::from_owned(&ds));
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct Document {
+    /// The arena that every id and span in the `Doc*` sections points into.
     pub arena: Arena,
+    /// The `@CONFIG` section, as the owned type.
     pub config: Option<ConfigSection>,
+    /// The `@IMPORTS` section, as the owned type.
     pub imports: Option<ImportsSection>,
+    /// The `@DLM` section, as the owned type.
     pub dlm: Option<DLMSection>,
+    /// The `@ENUMS` section, as the owned type.
     pub enums: Option<EnumsSection>,
+    /// The `@QUICKFUNCS` section.
     pub quick_functions: Option<DocQuickFuncs>,
+    /// The `@DATA` section.
     pub data: Option<DocData>,
+    /// The `@SECURITY` section.
     pub security: Option<DocSecurity>,
+    /// The `@RAW` blocks, in source order.
     pub raw: Vec<DocRawBlock>,
+    /// The `@SCHEMA` section.
     pub schema: Option<DocSchema>,
 }
 
 impl Document {
+    /// Creates an empty document: an empty arena and no sections.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Copies an owned `DixScript` into a new document. The sections that hold no values are
-    /// cloned; the others are imported into the document's arena.
+    /// Copies an owned `DixScript` into a new document.
+    ///
+    /// The sections that hold no values are cloned; the others are imported into the document's
+    /// arena. [`Document::export`] reverses it exactly.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the file needs more nodes, list entries or text bytes than a `u32` can address.
     pub fn from_owned(ds: &DixScript) -> Document {
         let mut arena = Arena::new();
         let data = ds.data.as_ref().map(|s| import_data(&mut arena, s));
@@ -181,6 +378,11 @@ impl Document {
     }
 
     /// Copies the document back out as the owned `DixScript` it was made from.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the document's sections hold ids that are out of range for its own arena,
+    /// which can only happen if a section was built in a different arena and assigned in.
     pub fn export(&self) -> DixScript {
         let a = &self.arena;
         DixScript {

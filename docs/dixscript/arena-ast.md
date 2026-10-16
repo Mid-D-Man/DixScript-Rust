@@ -298,61 +298,6 @@ What the numbers say, across both runs:
   runner. A's rebuild was 1.4x faster than an owned clone on `realistic` and tied it on
   `large_file`, so A's advantage on copy shrinks where the trees are small or shallow.
 
-### What the benchmark files do
-
-`benches/arena_vs_box_benchmark.rs` holds the criterion groups and `main`. The three
-representations live in `benches/arena_shapes/`: `owned.rs`, `bump.rs` (option A) and
-`index.rs` (option B), with `mod.rs` holding the profiles, the tree fingerprint and the
-checks. Each representation builds the same programs, counts nodes, fingerprints itself
-and implements the copy and edit operations the groups time. The index arena keeps one
-`Vec` per node kind, `(start, len)` ranges for lists and for text, and two scratch stacks
-so nested lists land contiguously. Groups: construct, clone and rebuild, clone then edit,
-traverse, and build-and-drop churn.
-
-### Decisions
-
-- The ids `owned` and `arena` keep their old meaning, so the published summary history
-  stays comparable; B is `index`, and `index_noreserve` is B starting empty.
-- Operators are `&'static str` in both A and B builders, so neither pays to build them.
-  Option A's rebuild still copies them into the new arena (the conservative reading), while
-  B's clone never needs to. A real migration would use an operator enum.
-- B reserves its buffers from the byte budget the bump arena gets, divided by the bump
-  arena's real cost per expression (64 bytes). The equivalence check asserts that no buffer
-  grew during a hinted build, so the label is true.
-- The construct and clone groups use `iter_with_large_drop` so teardown is never in
-  the timed region; teardown is what the churn group measures.
-- The clone-then-edit group measures B two ways: a linear pass (cheap because nodes of a
-  kind are contiguous, valid only for passes that ignore structure) and a tree walk (the
-  like-for-like comparison with the owned walk).
-
-### Tests
-
-`verify_representations` runs before any timing. For every profile it builds each
-representation, compares a structural fingerprint (node count, value sum, name bytes,
-operator bytes, positions) with the owned tree, then checks every copy and edit against
-the expected fingerprint. It also asserts that the hinted index arena never grew. A fourth,
-untimed profile (`branches`) exercises the `If` paths. Result: all four profiles agree.
-The bench compiles warning-free on Rust 1.75.0.
-
-### Fixes and Problems
-
-- **The old header comment was wrong about criterion.** It said plain `iter` defers drops
-  until after timing. In criterion 0.5.1 it drops the output inside the loop, so the
-  earlier construct numbers included teardown on both sides. Fixed by using
-  `iter_with_large_drop` for construct and clone.
-- **The timed profiles never emit an `If`.** `stmts_per_function` is 3 and
-  `if_every_n_stmts` is 5, so `si % 5 == 4` never holds. The profiles were left as they
-  are so results stay comparable; the untimed `branches` profile covers the code.
-- **Option A's large-file rebuild varies with heap state.** The same rebuild measured 4.38
-  ms in one group and 2.90 ms in another run, a spread of about 30%. The direction of every
-  conclusion above is unaffected, but magnitudes on that profile are loose.
-- **Construct order against owned is machine dependent.** The sandbox and the runner
-  disagree for `realistic` and `large_file` construct, while the sandbox instruction counts
-  and both churn results agree. The reservation budget is the first thing to test if
-  construct matters.
-- **Not covered:** the real types (`Value` carries `String`s), a parser that slices names
-  from the source, parallel section builds, and the pipeline end to end.
-
 ## Blast radius
 
 "Mention" below means a word-boundary occurrence of any of the 40 AST type names. It
@@ -509,7 +454,8 @@ synthetic input.
    then the read-only consumers (analyzers, converter, serializers); then the mutating
    ones (enhancer, resolver); then `Runtime`; then DLM. Siblings move last, behind a
    major version bump of `dixscript`; `mdix-lsp` last of all. (Started: the arena for the
-   `Value` family exists and round-trips; see "Compiler/AST/arena".)
+   `Value` family exists and round-trips, and the `@SECURITY` parser builds into it; see
+   "Modules" below.)
 
 ## Risks
 
@@ -639,8 +585,7 @@ both. They also hold most of a compile's allocations. The new `Compiler/AST/aren
 stores the family in one owned `Arena` and copies trees in and out losslessly, so consumers can
 move over one at a time. A round trip through the real compiler over the whole `mdix_files`
 corpus returns equal trees, handles that pair a node with its arena print and compare exactly
-like the owned types, and a `Document` holds a whole file in one arena. See the sections "Compiler/AST/arena" and "tests/arena_roundtrip.rs"
-at the end of this document.
+like the owned types, and a `Document` holds a whole file in one arena. See "Modules" below.
 
 ### Where an arena helps, and where it does not
 
@@ -670,51 +615,133 @@ all instructions.
 - The rest of step 6. Done: arena-aware `Display`, `Debug` and equality through handles
   (`ValueRef`, `ExprRef`, `StmtRef`), and the arena-resident `Document`. Planned drops, each
   compiling with the tests intact:
-  1. Parser constructors that build into the arena (with scratch stacks for lists, since child
-     counts are unknown while parsing), converting at the end of the parse until consumers move.
+  1. The rest of the parsers building into the arena. The `@SECURITY` parser is done and is the
+     pilot. Next come `@RAW` and `@SCHEMA` (small), then `@DATA` (`data_section_parser.rs`, 3,325
+     lines) and `@QUICKFUNCS` (`quickfuncs_section_parser.rs`, 3,361 lines), which hold most of
+     the construction sites (52 `Value`, 25 `Expression` in the first; 79, 81 and 21 statements
+     in the second). Lists need scratch stacks there, since child counts are unknown while
+     parsing. The sections are parsed in parallel, so each section parser builds into its own
+     arena and exports at the end of its section; merging the arenas by id offset comes after
+     that, once consumers can read a `Document`.
   2. `Display` for `Document` and the `Doc*` section twins, which consumers that print a whole
      section will need.
   3. Read-only consumers, then mutators (enhancer, resolver), then `Runtime`, then DLM. Siblings
      last behind the 2.0.0 bump, `mdix-lsp` last of all.
 
-## Compiler/AST/arena
+## Modules
 
-### What it does
+### `benches/arena_vs_box_benchmark.rs`
 
-`dixscript/src/Compiler/AST/arena/` is option B for the real `Value`, `Expression` and
-`QuickFuncStatement` family. One owned `Arena` holds a `Vec` per node kind (`ValueNode`,
-`ExprNode`, `StmtNode`, plus object properties, switch cases and unknown-value records), a
-`Vec` per list kind, and one `String` for every piece of text. Children are `u32` ids
-(`ValueId`, `ExprId`, `StmtId`), lists are `(start, len)` spans (`ValueList`, `ExprList`,
-`StmtList`, `StrList`, `PropList`, `CaseList`) and text is a span (`Str`). The arena has no
-lifetime, so it is a `'static`, `Send + Sync`, `Clone` value, and every node is `Copy`.
+**What it does:** Criterion groups that compare three representations of the same mirror AST:
+the owned `Box` tree, option A (bumpalo, `&'a` nodes) and option B (an index arena). The groups
+are construct (teardown not timed), clone and rebuild, clone then edit every `Value`, traverse,
+and build-and-drop churn. `main` is written out instead of using `criterion_main!` so that
+`verify_representations` runs before any timing. The types are mirrors of the real AST's three
+recursion shapes, not the real types.
 
-`Arena::import_value`, `import_expr` and `import_stmt` copy an owned tree in and return the id
-of its root. `export_value`, `export_expr` and `export_stmt` copy a tree back out as the
-original owned types. `export(import(x)) == x` for every tree. That pair is the migration
-seam: a consumer that has moved reads the arena, and one that has not gets the owned tree it
-expects. The module is `pub mod arena` in `Compiler/AST/mod.rs`, which is the only existing
-file it touches. It is reached as `Compiler::AST::arena`, not re-exported flat.
+**Decisions:**
+- The ids `owned` and `arena` keep their earlier meaning so the published summary history stays
+  comparable. B is `index`, and `index_noreserve` is B starting empty.
+- Construct and clone use `iter_with_large_drop`, so teardown is never in the timed region. The
+  churn group uses `iter_custom` because teardown is what it measures.
+- Clone then edit measures B two ways: a linear pass over its `Vec`, valid for passes that ignore
+  tree structure, and a tree walk, the like-for-like comparison with the owned walk.
 
-A bare id cannot be printed or compared, so `Arena::value_ref`, `expr_ref` and `stmt_ref`
-return `Copy` handles (`ValueRef`, `ExprRef`, `StmtRef`) that hold an id and its `&Arena`. They
-implement `Display`, `Debug` and `PartialEq` the way the owned types do: `Display` prints the same
-text, `Debug` prints the same text as the owned derived `Debug`, and `==` is structural and works
-across two different arenas.
+**Benchmarks:** The results are in "Measurement 5" above, for a single-core sandbox and for a
+GitHub Actions runner. From GitHub, run the Test and Bench Publisher workflow from the Actions
+tab with `publish_type` set to bench and `bench_target` set to `arena_vs_box_benchmark`. Locally:
+`cargo bench -p dixscript --bench arena_vs_box_benchmark`.
 
-`arena::Document` holds a whole file: one `Arena` plus the sections. `@CONFIG`, `@IMPORTS`,
-`@DLM` and `@ENUMS` contain nothing from the `Value` family, so the document reuses the owned
-types for them unchanged. The five sections that do hold values (`@DATA`, `@RAW`, `@SECURITY`,
-`@SCHEMA`, `@QUICKFUNCS`) have `Doc*` twins (`DocData` with `DocDataEntry` and
-`DocPropertyAssignment`, `DocRawBlock` with `DocRawField`, `DocSecurity` with
-`DocSecurityEntry` and `DocSecurityField`, `DocSchema` with `DocSchemaField`, `DocQuickFuncs`
-with `DocQuickFunction` and `DocQuickFuncParam`) that hold ids and spans where the owned type
-holds a `Value`, `Expression` or statement. `Document::from_owned(&ds).export() == ds` for
-every file, and `Document` implements `==` structurally across arenas. Like `Arena`, a
-`Document` has no lifetime, so it is an ordinary `'static`, `Send + Sync`, `Clone` value, which
-is what lets `mdix-lsp` keep one per open file.
+**Tests:** `verify_representations` runs before timing and panics on any mismatch. See
+`benches/arena_shapes/mod.rs`.
 
-Layout, measured with `size_of` on Rust 1.75, x86_64:
+### `benches/arena_shapes/mod.rs`
+
+**What it does:** The parts the three representations share: the timed profiles (`realistic`,
+`deep_expressions`, `large_file`), the `Fingerprint` of a tree (node count, value sum, name and
+operator bytes, positions), `verify_representations` and `report_layout`.
+
+**Decisions:**
+- The fingerprint is order-insensitive, because the representations allocate in different
+  orders but must describe the same program.
+- `verify_representations` builds, checks and drops one representation at a time, so peak
+  memory stays at one deep tree.
+- A fourth profile, `branches`, is used only for verification. The timed profiles never emit an
+  `If`, so this one exercises the branch paths of all three builders and walkers.
+- The index arena reserves from the same byte budget the bump arena gets, and verification
+  asserts that no buffer grew during a hinted build.
+
+**Tests:** `verify_representations` itself. All four profiles agree across the three
+representations, including every copy and every edit.
+
+### `benches/arena_shapes/owned.rs`
+
+**What it does:** The owned representation, the shape of the current AST: `String`, `Vec` and
+`Box`, with the node walks, the fingerprint, the in-place edit and the deterministic program
+generator.
+
+**Decisions:**
+- `PropertyAccess` is kept, with `#[allow(dead_code)]`, so the single-Box shape is represented
+  even though the generator never builds one.
+
+### `benches/arena_shapes/bump.rs`
+
+**What it does:** Option A: `&'a str`, `&'a [T]` and `&'a T` over a bumpalo arena, every node
+`Copy`. Includes the rebuild that stands in for a clone.
+
+**Decisions:**
+- Operators are `&'static str` literals in the builder, so construction does not allocate them.
+  The rebuild copies them into the new arena, the conservative reading of an independently
+  owned copy.
+- The rebuild takes a `delta` added to every `Value`, so clone then edit shares the code with
+  plain copy (a delta of 0).
+- The rebuild shares no structure. A real implementation could rebuild only the edited spine,
+  which would beat this; the benchmark deliberately does not.
+
+### `benches/arena_shapes/index.rs`
+
+**What it does:** Option B: one `Vec` per node kind, `u32` ids for children, `(start, len)` spans
+for lists, and one text buffer for all strings. The arena is a plain owned value.
+
+**Decisions:**
+- Lists are built through two scratch stacks: children are pushed as they finish, and
+  `finish_*_list` moves them into the side `Vec` in one contiguous run.
+- Operators are `&'static str`, the same cost model as option A's builder. A real migration
+  would use an operator enum.
+- The AST is append-only, so none of the machinery of a removal-capable arena (free lists,
+  generations) is present.
+
+### `Compiler/AST/arena/mod.rs`
+
+**What it does:** The index arena for the `Value`, `Expression` and `QuickFuncStatement`
+family. One owned `Arena` holds a `Vec` per node kind, a `Vec` per list kind and one `String`
+for all text. Children are `u32` ids (`ValueId`, `ExprId`, `StmtId`), lists are `(start, len)`
+spans (`ValueList`, `ExprList`, `StmtList`, `StrList`, `PropList`, `CaseList`) and text is a
+span (`Str`). The arena has no lifetime, so it is a `'static`, `Send + Sync`, `Clone` value.
+The module re-exports everything under it and carries the crate-facing documentation.
+
+**Decisions:**
+- **Additive first.** Nothing in the compiler reads the arena. Changing `Value` in place would
+  break about 4,500 mentions in 132 files at once and could not be delivered as a compiling
+  drop. Consumers move one at a time through import and export instead.
+- **The whole family in one arena.** The three types reference each other, so none of them
+  can move alone.
+- **Ids are `u32`.** An arena that would exceed about 4.29 billion nodes, list entries or
+  bytes of text panics with a clear message instead of wrapping.
+- **Documentation follows the Rust conventions for a library crate.** The module sets
+  `#![warn(missing_docs)]`, every public item has a doc comment, accessors and allocators carry
+  a `# Panics` section, and the module, `Arena`, `import_value`, `export_value`, `ValueRef` and
+  `Document` carry runnable examples (six doctests). `cargo doc` reports no warnings for the
+  module.
+
+**Tests:** The six doctests (`cargo test -p dixscript --doc arena`), plus
+`tests/arena_roundtrip.rs` and `tests/arena_document.rs`.
+
+### `Compiler/AST/arena/nodes.rs`
+
+**What it does:** The node types: `ValueNode`, `ExprNode`, `StmtNode`, `ObjectPropNode`,
+`SwitchCaseNode` and `UnknownData`. Each enum mirrors the owned type variant for variant and
+keeps its field names. Layout, measured with `size_of` on Rust 1.75, x86_64:
 
 | Owned type | Bytes | Arena node | Bytes |
 |---|---|---|---|
@@ -724,183 +751,234 @@ Layout, measured with `size_of` on Rust 1.75, x86_64:
 
 The owned sizes are large because the variants carry `String`s and `Vec`s inline, `Value`
 carries the three-string `Unknown` variant, and `QuickFuncStatement::ObjectCreation` carries a
-whole `Value`. This is the layout the benchmark's mirror types stood in for: the mirror's owned
-types were 72 and 136 bytes.
+whole `Value`.
 
-### Decisions
-
-- **Additive first.** Nothing in the compiler uses the arena. The alternative, changing
-  `Value` in place, breaks about 4,500 mentions in 132 files at once and cannot be delivered
-  as a compiling drop. Consumers move one at a time through import and export instead.
-- **The whole family in one arena.** The three types reference each other, so no one of them can
-  move alone.
+**Decisions:**
 - **`Option` is kept where the owned type has it.** `Option<ExprList>` keeps `None` (a property
   or enum access) apart from `Some` of an empty list (a call with no arguments) for
   `QualifiedIdentifier` and `BuiltinFunction`, and `Option<StmtList>` and `Option<CaseId>` do the
   same for `else` and `default`. A copy that merged them would change meaning.
-- **`Unknown` values live out of line.** Their `CompatibilityResult` owns strings and would
-  have made every `ValueNode` larger, so the node holds an `UnknownId` into a side pool.
+- **`Unknown` values live out of line.** Their `CompatibilityResult` owns strings and would have
+  made every `ValueNode` larger, so the node holds an `UnknownId` into a side pool.
 - **Names and operators are `Str` spans in one text buffer.** They are not interned and not an
-  operator enum yet (that is step 3), so the same operator text is stored once per use.
+  operator enum yet (that is step 3 of the recommended sequence), so the same operator text is
+  stored once per use.
 - **`Position` is kept as it is** (two `usize`, 16 bytes) so the copy is lossless. Narrowing it
   is a later size lever.
-- **Lists are imported by reserving the whole run first** with placeholder entries and filling
-  them as each child is imported. Children with lists of their own append after the run, so
-  every run stays contiguous without a scratch stack. A parser, which does not know a list's
-  length in advance, will need the scratch stacks the benchmark's index arena uses.
-- **No wildcard arms.** Every `match` in `import.rs` and `export.rs` lists every variant, so
-  adding a variant to an owned type fails to compile until the arena handles it.
-- **Ids are `u32`.** An arena that would exceed about 4.29 billion nodes, list entries or bytes
-  of text panics with a clear message instead of wrapping.
-- **`Display` and equality are written natively, not by exporting.** Converting to the owned
-  tree to print or compare would allocate the whole tree, and the compiler formats call
-  arguments for every resolved call. The wording and the comparison rules are copied from the
-  owned types and gated by tests that compare the two.
-- **`Debug` delegates to the owned type's `Debug`** by exporting the node, so its output is
-  identical (including `{:#?}`). It allocates, so it is for diagnostics only.
-- **Equality follows the owned rules.** Same variant, equal fields, children, text and
-  positions, with floats compared as IEEE numbers, so a tree holding `NaN` is not equal to
-  itself, exactly as with the owned types.
-- **Owned types are reused for the sections with no values.** `@CONFIG`, `@IMPORTS`, `@DLM`
-  and `@ENUMS` are cloned into the document as they are; twins would add code and no benefit.
-- **Section-level names stay owned `String`s** (entry names, keys, paths, function names). They
-  are a handful per field or function, not per expression, so the first step carries them over
-  unchanged; moving them into the arena's text buffer is a later size lever.
-- **The `Doc*` types do not implement `PartialEq`**, for the same reason as the nodes: their ids
-  mean nothing without the arena. `Document` implements it, comparing the value-holding
-  sections through the handles and the rest with the owned `==`.
 - **The node types do not implement `PartialEq`.** Their children are ids, so a derived `==`
   would compare ids and say two equal trees in different arenas differ. Trees are compared
-  through the handles.
-### Tests
+  through the handles in `view.rs`.
+- **Variants are documented, fields are not repeated.** Each variant has a doc comment and the
+  type documentation holds the table that maps owned field types to arena field types. The
+  field-level documentation of the owned variant applies, so each variant carries
+  `#[allow(missing_docs)]` for its fields rather than restating names.
 
-`tests/arena_roundtrip.rs`; see its section below.
+### `Compiler/AST/arena/import.rs`
 
-### Fixes and Problems
+**What it does:** `Arena::import_value`, `import_expr` and `import_stmt` copy an owned tree into
+the arena and return the id of its root.
 
-- **Bare nodes still cannot be printed with their text.** A node's own `Debug` shows ids and
-  spans. Consumers print and compare through the handles; a consumer that holds only a node
-  must be given the arena.
-- **`Debug` on a handle allocates**, because it exports the node first.
-- **`Document` and the `Doc*` types have no `Display` yet.** The owned sections print through
-  their own `Display`, and consumers that print a whole section need an arena-aware version.
-  It is the second planned drop under "Not done yet".
-- **Importing copies.** Import and export each copy the tree, so using them at a boundary adds a
-  copy. They are a migration tool, not the end state.
+**Decisions:**
+- Every `match` lists every variant with no wildcard arm, so adding a variant to an owned type
+  fails to compile until the arena handles it.
+- A list is imported by reserving its whole run in the list buffer with placeholder entries and
+  filling them in as each child is imported. Children with lists of their own append after the
+  run, so every run stays contiguous without a scratch stack. A parser, which does not know a
+  list's length in advance, needs scratch stacks like the benchmark's index arena.
 
-## tests/arena_roundtrip.rs
+### `Compiler/AST/arena/export.rs`
 
-### What it does
+**What it does:** `Arena::export_value`, `export_expr` and `export_stmt` copy a tree out of the
+arena as the original owned types. `export(import(x)) == x` for every tree.
 
-Proves the arena holds the family completely, and that its handles print and compare like the
-owned types. Hand-built samples cover every variant of
-`Value` (25), `Expression` (24) and `QuickFuncStatement` (9), plus edge cases: `None` against an
-empty list, a switch with and without a default, an `else` that is `None` against empty, empty
-arrays, objects and lambdas, and each `CompatibilityResult` variant inside `Unknown`. The same
-samples are imported three times into one arena to catch ids or spans that collide. Then every
-`.mdix` file under `mdix_files/` is compiled with the real compiler and every `Value`,
-`Expression` and statement reachable from its `@DATA`, `@RAW`, `@SECURITY`, `@SCHEMA` and
-`@QUICKFUNCS` sections is imported into one arena per file and exported again; its `Display`
-output is compared with the owned type's, and it is compared with a second copy imported into a
-different arena in reverse order, so the same tree has different ids there.
+**Decisions:**
+- It is the exact mirror of `import.rs`, with the same no-wildcard rule.
 
-### Decisions
+### `Compiler/AST/arena/view.rs`
 
+**What it does:** `ValueRef`, `ExprRef` and `StmtRef`, `Copy` handles that hold an id and its
+`&Arena`, made with `Arena::value_ref`, `expr_ref` and `stmt_ref`. A bare id cannot be printed
+or compared, because the text and the children live in the arena.
+
+**Decisions:**
+- `Display` prints what the owned type prints (`display.rs`), `PartialEq` is structural and works
+  across arenas (`equality.rs`), and `Debug` exports the node and delegates, so its output is
+  identical to the owned type's derived `Debug`, including `{:#?}`. `Debug` allocates, so it is
+  for diagnostics only.
+
+### `Compiler/AST/arena/display.rs`
+
+**What it does:** `Display` for the three handles, producing exactly the text the owned `Value`,
+`Expression` and `QuickFuncStatement` produce.
+
+**Decisions:**
+- It is written natively, not by exporting first, because converting to the owned tree would
+  allocate the whole tree and the compiler formats call arguments for every resolved call.
+- The wording is copied from `values.rs`, `expressions.rs` and `statements.rs`, and tests compare
+  the two outputs on every sample and on the whole corpus.
+
+### `Compiler/AST/arena/equality.rs`
+
+**What it does:** Structural equality between two nodes, each in its own arena or both in the
+same one. The rules are the owned types' derived `PartialEq`: the same variant, equal fields,
+equal children, equal text and equal positions.
+
+**Decisions:**
+- Floats compare as IEEE numbers, so a tree holding `NaN` is not equal to itself, exactly as with
+  the owned types.
+- Each function matches every variant of the left node with no wildcard arm and then asks
+  whether the right node is the same variant with equal contents.
+
+### `Compiler/AST/arena/document.rs`
+
+**What it does:** `Document`, the arena-resident form of a whole `DixScript`: one `Arena` plus
+the sections. `@CONFIG`, `@IMPORTS`, `@DLM` and `@ENUMS` hold nothing from the `Value` family, so
+the document reuses the owned types for them. The five sections that do hold values (`@DATA`,
+`@RAW`, `@SECURITY`, `@SCHEMA`, `@QUICKFUNCS`) have `Doc*` twins that hold ids and spans where the
+owned type holds a `Value`, `Expression` or statement. `Document::from_owned(&ds).export() == ds`
+for every file, and `Document` implements `==` structurally across arenas. Each twin also has
+its own `from_owned` and `export`, which the parsers use.
+
+**Decisions:**
+- **Owned types are reused for the sections with no values.** Twins would add code and no
+  benefit.
+- **Section-level names stay owned `String`s** (entry names, keys, paths, function names). They
+  are a handful per field or function, not per expression, so the first step carries them over
+  unchanged. Moving them into the arena's text buffer is a later size lever.
+- **The `Doc*` types do not implement `PartialEq`**, for the same reason as the nodes. `Document`
+  implements it, comparing the value-holding sections through the handles and the rest with the
+  owned `==`.
+- Like the nodes, the `Doc*` types are documented as a whole and carry `#[allow(missing_docs)]`
+  for fields that mirror the owned section's fields.
+
+### `tests/arena_roundtrip.rs`
+
+**What it does:** Proves the arena holds the `Value` family completely, and that its handles
+print and compare like the owned types. Hand-built samples cover every variant of `Value` (25),
+`Expression` (24) and `QuickFuncStatement` (9), plus edge cases: `None` against an empty list, a
+switch with and without a default, an `else` that is `None` against empty, empty arrays, objects
+and lambdas, and each `CompatibilityResult` variant inside `Unknown`. The same samples go into one
+arena three times to catch ids or spans that collide. Then every `.mdix` file under `mdix_files/`
+is compiled with the real compiler and every `Value`, `Expression` and statement reachable from
+its `@DATA`, `@RAW`, `@SECURITY`, `@SCHEMA` and `@QUICKFUNCS` sections is imported into one
+arena per file and exported again. Its `Display` output is compared with the owned type's, and it
+is compared with a second copy imported into a different arena in reverse order.
+
+**Decisions:**
 - The variant names come from `match` expressions with no wildcard arm, and the samples are
   checked against them, so a new variant stops the file compiling until a sample exists.
-- Files that do not compile are skipped, and a floor on the number of files that compile and
-  on the number of roots checked keeps the corpus test from passing on nothing.
-- Every root of a file is imported before any is exported, so interleaved ids and spans are
-  exercised on data the compiler really produces.
+- Files that do not compile are skipped. Floors on the number of files that compile and on the
+  number of roots checked keep the corpus test from passing on nothing.
+- Equality is checked three ways, because each catches what the others miss: every ordered pair
+  of samples across two arenas must agree with the owned `==`; 125 hand-built pairs that differ
+  in exactly one field must compare unequal (the all-pairs check cannot prove a field is compared
+  when only one sample uses it); and neighbouring corpus roots must agree with the owned answer.
+- Special floats (whole, negative zero, `NaN`, infinity, very large and very small) are included
+  because `Display` and equality treat them specially.
 - A static assertion checks that `Arena` is `Send + Sync + Clone + 'static`.
-- Equality is checked three ways, because each catches what the others miss: every ordered
-  pair of samples across two arenas must agree with the owned `==`; 125 hand-built
-  pairs that differ in exactly one field must compare unequal (the all-pairs check cannot
-  prove a field is compared when only one sample uses it, which a deliberate bug confirmed);
-  and neighbouring corpus roots must agree with the owned answer.
-- Special floats (whole, negative zero, `NaN`, infinity, very large and very small) are
-  included because `Display` and equality treat them specially.
 
-### Tests
-
-Sixteen tests, all passing on Rust 1.75: the sample-coverage check, one round trip each for
-values, expressions and statements, `None` against an empty list, everything imported into one
-arena, a cloned arena, readable positions, `Display` against owned `Display`, `Debug` against
-owned `Debug`, equality against owned equality for every pair, every compared field, `NaN`,
-trees that differ in one leaf, node size against owned size, and the corpus. In the
-sandbox the corpus has 84 files, of which 70 compile, and the test round-trips 5,993 values,
-1,173 expressions and 1,712 statements (41,651 arena nodes including nested ones). The suite
-passes: 547 unit tests, 178 integration tests including these sixteen, and 2 doc tests.
-
-A mutation check confirmed the tests are not vacuous: with `Boolean` equality ignoring its value,
+**Tests:** `cargo test -p dixscript --test arena_roundtrip`. Sixteen tests, all passing on Rust
+1.75. In the sandbox 70 of the 84 corpus files compile, and the test round-trips 5,993 values,
+1,173 expressions and 1,712 statements (41,651 arena nodes including nested ones). A mutation
+check confirmed the tests are not vacuous: with `Boolean` equality ignoring its value,
 `is_mutable` left out of the statement comparison, and `as<` changed in `Display`, the
-every-compared-field test and the `Display` test failed, while the all-pairs test missed the
-`Boolean` bug. The files were restored afterwards.
+per-field test and the `Display` test failed, while the all-pairs test missed the `Boolean`
+bug. The files were restored afterwards.
 
-### Fixes and Problems
+### `tests/arena_document.rs`
 
-- **14 corpus files do not compile in the sandbox.** Four need network access to download cloud
-  imports (`06_cloud_basic`, `07_cloud_verify_invalid`, `09_cloud_transitive`,
-  `10_cloud_cyclic`), so a run with network access round-trips more files. Others are deliberate
-  failures (`02_bzip2` and `03_lzma`, whose codecs are removed, and the circular-import files)
-  or fail analysis for their own reasons (`EnumsWithStuffImported`, `all_datatypes_test`,
-  `datetime_static_test`, `random_static_test`, `FullDataTestNoFunc`, `01_basic_import`). The
-  test skips them.
-- **The corpus contains no `TypeCast` expressions**, so `Display` and equality for that variant
-  are covered by the samples only. The mutation check above showed the corpus test does not
-  notice a `Display` change there.
-- **Only section values are roots.** `@CONFIG` values use their own `ConfigValue` type and are
-  not part of this family, so they are not exercised.
+**What it does:** Proves a `Document` holds a whole `DixScript` exactly:
+`Document::from_owned(&ds).export() == ds`, and `Document`'s own `==` agrees with the owned `==`.
+A hand-built file fills every value-holding section: all four `@DATA` entry kinds, two `@RAW`
+blocks (one with content and one empty), `@SECURITY`, `@SCHEMA`, and two `@QUICKFUNCS` functions,
+one with every optional part present and one with none. Every corpus file that compiles is
+round-tripped whole through the real compiler.
 
-## tests/arena_document.rs
-
-### What it does
-
-Proves a `Document` holds a whole `DixScript` exactly: `Document::from_owned(&ds).export() ==
-ds`, and `Document`'s own `==` agrees with the owned `==`. A hand-built file fills every
-value-holding section: all four `@DATA` entry kinds, two `@RAW` blocks (one with content and
-one empty), `@SECURITY`, `@SCHEMA`, and two `@QUICKFUNCS` functions, one with every optional part
-present and one with none. Every corpus file that compiles is round-tripped whole through the
-real compiler.
-
-### Decisions
-
-- **Equality is tested by changing one field at a time.** 66 tweaks of the hand-built file each
+**Decisions:**
+- Equality is tested by changing one field at a time. 66 tweaks of the hand-built file each
   change exactly one field (a name, a type, a value, a position, a path segment, a list length,
   a section being absent, an optional part appearing or disappearing). Each must make the owned
   files unequal and the documents unequal, in both directions.
-- **`None` and an empty section stay different.** A file with empty `@DATA`, `@SECURITY`,
-  `@SCHEMA` and `@QUICKFUNCS` sections must differ from an empty file.
-- **Second copies use different ids.** One test imports the same file after padding, so every id
-  differs, and requires the documents to be equal.
-- **Real compiler output for the sections the corpus lacks.** No file in `mdix_files/` has an
-  `@RAW` or `@SCHEMA` section, so the sources the existing raw and schema tests compile are
-  round-tripped here as well.
-- **Consecutive corpus files** must give the owned answer for `==`. Almost all pairs differ,
-  which guards against an equality that says yes to everything.
+- `None` and an empty section stay different: a file with empty `@DATA`, `@SECURITY`, `@SCHEMA`
+  and `@QUICKFUNCS` sections must differ from an empty file.
+- One test imports the same file after padding, so every id differs, and requires the documents
+  to be equal.
+- No file in `mdix_files/` has an `@RAW` or `@SCHEMA` section, so the sources the existing raw
+  and schema tests compile are round-tripped here as well.
+- Consecutive corpus files must give the owned answer for `==`. Almost all pairs differ, which
+  guards against an equality that says yes to everything.
 
-### Tests
+**Tests:** `cargo test -p dixscript --test arena_document`. Seven tests, all passing on Rust
+1.75. In the sandbox 70 of 84 corpus files compile and round-trip whole. Sections present across
+them: `@DATA` in 65, `@SECURITY` in 12, `@QUICKFUNCS` in 40, `@RAW` and `@SCHEMA` in none.
+`@DATA` entries: 636 simple, 1,840 table, 547 group arrays and 10 objects. A mutation check with
+the scope list dropped on export, the raw content dropped on export, and the security field key
+left out of equality made five tests fail. Run on its own, the equality bug was caught only by the
+every-compared-field test, not by the corpus or the round trips. The file was restored afterwards.
+The whole suite passes: 547 unit tests, 195 integration tests and 8 doctests (26 ignored, as
+before).
 
-Seven tests, all passing on Rust 1.75: the hand-built round trip, empty files and empty
-sections, an owned and shareable document with an equal clone, equal documents with different
-ids, every compared field, compiled `@RAW` and `@SCHEMA` sources, and the corpus. In the sandbox
-70 of 84 corpus files compile and round-trip whole. Sections present across them: `@DATA` in 65,
-`@SECURITY` in 12, `@QUICKFUNCS` in 40, `@RAW` and `@SCHEMA` in none. `@DATA` entries: 636 simple,
-1,840 table, 547 group arrays and 10 objects; 69 neighbouring pairs were unequal. The suite
-passes: 547 unit tests, 185 integration tests including these seven and the sixteen in
-`arena_roundtrip.rs`, and 2 doc tests.
+## Fixes and Problems
 
-A mutation check confirmed the tests are not vacuous. With the scope list dropped on export, the
-raw content dropped on export, and the security field key left out of equality, five tests
-failed. Run on its own, the equality bug was caught only by the every-compared-field test
-(`security: field key: documents compare equal`), not by the corpus or the round trips. The
-file was restored afterwards.
+### `benches/arena_vs_box_benchmark.rs`
+- The old header comment said plain `iter` defers drops until after timing. In criterion 0.5.1
+  it drops the output inside the loop, so the earlier construct numbers included teardown on
+  both sides. Construct and clone now use `iter_with_large_drop`.
+- Construct against the owned tree depends on the machine. The sandbox and the GitHub runner
+  disagree for `realistic` and `large_file` construct, while the sandbox instruction counts and
+  both churn results agree. The reservation budget is the first thing to test if construct
+  matters.
+- Option A's large-file rebuild varies with heap state: the same rebuild measured 4.38 ms in one
+  group and 2.90 ms in another run, a spread of about 30 percent. The direction of every
+  conclusion is unaffected, but magnitudes on that profile are loose.
+- Not covered: the real types (`Value` carries `String`s), a parser that slices names from the
+  source, parallel section builds, and the pipeline end to end.
 
-### Fixes and Problems
+### `benches/arena_shapes/mod.rs`
+- The timed profiles never emit an `If` (`stmts_per_function` is 3 and `if_every_n_stmts` is 5, so
+  `si % 5 == 4` never holds). The profiles were left as they are so results stay comparable, and
+  the untimed `branches` profile covers the code.
 
-- **The corpus has no `@RAW` or `@SCHEMA` sections**, which is why the compiled-source test
-  exists. The 14 files that do not compile in the sandbox fail for the reasons listed under
-  `tests/arena_roundtrip.rs`.
-- **Only `Document` equality is native.** The `Doc*` section twins carry ids and are compared
-  only through `Document`.
+### `Compiler/AST/arena/mod.rs`
+- Ids and spans carry no record of the arena that issued them, so using one with another arena
+  reads the wrong node or panics. Each accessor documents this under `# Panics`.
 
+### `Compiler/AST/arena/nodes.rs`
+- The `missing_docs` lint is satisfied for fields by `#[allow(missing_docs)]` on each variant,
+  with the variant and the type documented, instead of about 230 field comments that would only
+  restate names.
+
+### `Compiler/AST/arena/import.rs`
+- Importing copies the whole tree, so using import and export at a boundary adds a copy. They are
+  a migration tool, not the end state.
+
+### `Compiler/AST/arena/view.rs`
+- `Debug` on a handle allocates, because it exports the node first.
+- A handle does not check its id when it is made; using it panics if the id is not from the arena.
+- A bare node's own `Debug` shows ids and spans, not text. Consumers print and compare through
+  the handles.
+
+### `Compiler/AST/arena/equality.rs`
+- The corpus contains no `TypeCast` expressions, so `Display` and equality for that variant are
+  covered by the samples only. The mutation check showed the corpus test does not notice a
+  `Display` change there.
+
+### `Compiler/AST/arena/document.rs`
+- `Document` and the `Doc*` types have no `Display` yet. The owned sections print through their
+  own `Display`, and consumers that print a whole section will need an arena-aware version.
+
+### `tests/arena_roundtrip.rs`
+- 14 corpus files do not compile in the sandbox. Four need network access to download cloud
+  imports (`06_cloud_basic`, `07_cloud_verify_invalid`, `09_cloud_transitive`,
+  `10_cloud_cyclic`), so a run with network access round-trips more files. Others are deliberate
+  failures (`02_bzip2` and `03_lzma`, whose codecs are removed, and the circular-import files) or
+  fail analysis for their own reasons (`EnumsWithStuffImported`, `all_datatypes_test`,
+  `datetime_static_test`, `random_static_test`, `FullDataTestNoFunc`, `01_basic_import`). The test
+  skips them.
+- Only section values are roots. `@CONFIG` values use their own `ConfigValue` type and are not
+  part of this family, so they are not exercised.
+
+### `tests/arena_document.rs`
+- The corpus has no `@RAW` or `@SCHEMA` sections, which is why the compiled-source test exists.
+- Only `Document` equality is native. The `Doc*` section twins carry ids and are compared only
+  through `Document`.

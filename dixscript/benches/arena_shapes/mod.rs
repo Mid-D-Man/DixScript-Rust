@@ -1,7 +1,6 @@
 // ============================================================================
 // NOTICE: Full documentation, design decisions, and fix history for this file
-// live in docs/dixscript/arena-ast.md, section "Measurement 5: option A against
-// option B"
+// live in docs/dixscript/arena-ast.md, section "benches/arena_shapes/mod.rs"
 // ============================================================================
 //! Shared pieces for `arena_vs_box_benchmark.rs`.
 //!

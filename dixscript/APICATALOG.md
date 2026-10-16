@@ -124,8 +124,8 @@ a structural `PartialEq` that works across arenas. The node types themselves do 
 plus the sections, with the owned types reused for `@CONFIG`, `@IMPORTS`, `@DLM` and `@ENUMS` and
 `DocData`, `DocRawBlock`, `DocSecurity`, `DocSchema` and `DocQuickFuncs` (with their entry,
 field and parameter types) for the five sections that hold values. `Document::from_owned` and
-`Document::export` convert exactly in both directions, and `Document` has a structural
-`PartialEq`. Nothing in the compiler uses it yet.
+`Document::export` convert exactly in both directions, each `Doc*` section twin has its own
+`from_owned` and `export`, and `Document` has a structural `PartialEq`. Nothing in the compiler uses it yet.
 
 `Compiler::AST::Visitors` is also re-exported (`pub use Visitors::*`) but
 not catalogued in detail here — check the module directly if you need a

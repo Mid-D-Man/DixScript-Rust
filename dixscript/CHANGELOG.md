@@ -26,7 +26,7 @@ Breaking release.
   exactly what the owned types print and whose `==` compares trees structurally, across
   arenas. `arena::Document` is the arena-resident form of a whole `DixScript`
   (`Document::from_owned`, `Document::export`, structural `==`), with `Doc*` twins of the five
-  sections that hold values. Nothing in the compiler uses it yet; it is the first piece of the
+  sections that hold values, each with its own `from_owned` and `export`. Nothing in the compiler uses it yet; it is the first piece of the
   arena AST described in `docs/dixscript/arena-ast.md`.
 
 ### Removed

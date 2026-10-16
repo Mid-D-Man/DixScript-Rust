@@ -303,6 +303,67 @@ except for the DLM codecs: bzip2 and lzma are valid in 1.0.0 and invalid in 2.0.
   unit tests build their own `VersionManager` and use the pure helpers so they never
   touch the singleton.
 
+### `Compiler/AST/mod.rs`
+
+**What it does:** Declares the AST submodules and re-exports their types flat, so
+`Compiler::AST::Value` and `Compiler::AST::DixScript` are the usual paths. `pub mod arena;`
+is declared here and is the one submodule that is not re-exported flat, so it is reached as
+`Compiler::AST::arena`. Its types are documented in `docs/dixscript/arena-ast.md`.
+
+**Decisions:**
+- The arena is not re-exported flat, so its names (`Arena`, `Document`, `ValueNode`) cannot
+  collide with the owned AST names.
+- The module documentation now says that `arena` exists and that the compiler does not use it
+  yet.
+
+### `Compiler/Core/SectionParsers/security_section_parser.rs`
+
+**What it does:** Parses the `@SECURITY(...)` section into a `SecuritySection`: blocks such as
+`encryption -> { mode = "password" }`, each holding `key = value` fields whose values are string,
+integer, long, float, double, boolean, hex colour, `null` or `auto`.
+
+**Decisions:**
+- This is the first parser built on the arena AST, as a pilot. The parser owns an `Arena`, builds
+  every field value as a node there, keeps entries and fields as `DocSecurityEntry` and
+  `DocSecurityField` records that hold the value ids, and exports the finished section once, at
+  the end of `parse_section`. The public interface and the result are unchanged.
+- It exports at the end of the section, rather than handing the arena on, because the sections are
+  parsed in parallel and their arenas cannot yet be merged. Until a consumer reads a `Document`,
+  this adds one export copy per section, so it is not faster than before. The `@SECURITY` section
+  is small, so the cost is small too.
+- `parse_security_value` reads the current token through a copy of the shared token slice, so the
+  token does not borrow the parser and the arena can be borrowed mutably while it is read.
+- The end-of-file token is a module-level `static` shared by `current()` and
+  `parse_security_value`.
+- The public items now carry doc comments, and the module documentation describes the arena.
+
+**Tests:** `tests/security_section_tests.rs`. The conversion was checked against the original
+parser with a before and after dump (see Fixes and Problems below), and the same ten tests pass on
+both.
+
+### `tests/security_section_tests.rs`
+
+**What it does:** Pins the behaviour of the `@SECURITY` parser, which had no tests of its own. It
+runs the loader's first four stages (tokenize, split `@CONFIG`, process `@CONFIG`, parse) with an
+isolated error manager so the parse diagnostics can be read back. The tests cover a plain section
+with exact positions, every scalar value kind, optional commas between blocks and a trailing field
+comma, an empty section and an empty block, that block names are not validated by the parser,
+seven malformed inputs under `halt` (each must give no section and report the right message),
+the `Value::Error` stand-in for a missing value under `continue` and `recover`, recovery skipping
+to the next good entry, recovery around two bad values, and every `@SECURITY` section in the
+corpus.
+
+**Decisions:**
+- Every expectation was taken from the original, pre-arena parser's output, and the tests were
+  run against that parser as well as the converted one.
+- Positions are pinned exactly in the cases where a position is the point (a plain section, the
+  error-value cases). The scalar test compares the printed value and the value kind.
+- The recover and continue cases put a three-line `@CONFIG` header in front, which shifts every
+  source line by three.
+
+**Tests:** `cargo test -p dixscript --test security_section_tests`. Ten tests, all passing on
+Rust 1.75.
+
 ## Fixes and Problems
 
 ### `Compiler/VersionControl/version_constraints.rs`
@@ -512,3 +573,23 @@ requires the larger to take less than 7 times as long.
   as long in that function. The suspect in `arena-ast.md` (the formatting and timestamp in the
   loop) was not the cause. Found by comparing callgrind profiles of a 4x and a 16x input.
 
+### Fixes and Problems: arena AST pilot
+
+- **`Compiler/AST/mod.rs`:** a comment on the `ElemType` re-export read "new typed-collection
+  element type", which is history rather than explanation. It was removed.
+- **`Compiler/Core/SectionParsers/security_section_parser.rs`:** the parser had no tests and no
+  documentation section. The conversion was checked with a throwaway before and after harness:
+  the loader's tokenize, config and parse stages run over the 84 corpus files and 28 crafted
+  sources (valid scalars, an empty section, and malformed sections), each crafted source under all
+  three error strategies (84 runs), dumping the parsed section and the parse diagnostics. The
+  output was byte-identical across the 168 runs. Fourteen of them contain the `Value::Error`
+  fallback's message, so a change to it would show in the diff.
+- **The first harness missed the fallback.** It ran only the default `halt` strategy, under which
+  the parser gives up before it reaches the `Value::Error` stand-in for a missing value, so that
+  path was uncovered. Running the crafted sources under `continue` and `recover` reached it. A
+  deliberate bug in the integer arm showed up in the first harness's diff.
+- **`tests/security_section_tests.rs`:** the parser accepts any block name, so `bogus -> { a = 1 }`
+  parses. Rejecting it is the semantic analyzer's job, and a test records this.
+- **Where the arena stops paying:** the sections are parsed in parallel, so each parser builds
+  into its own arena and exports at the end of its section. That adds a copy, and it stays until
+  the arenas can be merged by id offset and consumers read a `Document`.

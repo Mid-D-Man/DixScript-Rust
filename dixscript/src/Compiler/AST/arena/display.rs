@@ -1,6 +1,6 @@
 // ============================================================================
 // NOTICE: Full documentation, design decisions, and fix history for this file
-// live in docs/dixscript/arena-ast.md, section "Compiler/AST/arena"
+// live in docs/dixscript/arena-ast.md, section "Compiler/AST/arena/display.rs"
 // ============================================================================
 //! `Display` for the arena handles, written to produce exactly the text the owned
 //! `Value`, `Expression` and `QuickFuncStatement` produce. The wording is copied from

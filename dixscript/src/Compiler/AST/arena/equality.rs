@@ -1,6 +1,6 @@
 // ============================================================================
 // NOTICE: Full documentation, design decisions, and fix history for this file
-// live in docs/dixscript/arena-ast.md, section "Compiler/AST/arena"
+// live in docs/dixscript/arena-ast.md, section "Compiler/AST/arena/equality.rs"
 // ============================================================================
 //! Structural equality between two nodes, each in its own arena (or both in the same one).
 //!

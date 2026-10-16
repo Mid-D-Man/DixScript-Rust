@@ -1,6 +1,6 @@
 // ============================================================================
 // NOTICE: Full documentation, design decisions, and fix history for this file
-// live in docs/dixscript/arena-ast.md, section "Compiler/AST/arena"
+// live in docs/dixscript/arena-ast.md, section "Compiler/AST/arena/export.rs"
 // ============================================================================
 //! Copies a tree out of the arena as the original owned types.
 //!
@@ -15,6 +15,25 @@ use crate::Compiler::AST::{
 };
 
 impl Arena {
+    /// Copies the tree rooted at `id` out of the arena as an owned [`Value`].
+    ///
+    /// The result equals the value that was imported: `export_value(import_value(v)) == v`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id`, or anything it reaches, is out of range for this arena, for example an
+    /// id from another arena.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::Arena;
+    /// use dixscript::Compiler::AST::{Position, Value};
+    ///
+    /// let mut arena = Arena::new();
+    /// let id = arena.import_value(&Value::Null { position: Position::new(1, 1) });
+    /// assert_eq!(arena.export_value(id), Value::Null { position: Position::new(1, 1) });
+    /// ```
     pub fn export_value(&self, id: ValueId) -> Value {
         match *self.value(id) {
             ValueNode::Integer { value, position } => Value::Integer { value, position },
@@ -89,6 +108,14 @@ impl Arena {
         }
     }
 
+    /// Copies the tree rooted at `id` out of the arena as an owned [`Expression`].
+    ///
+    /// See [`Arena::export_value`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id`, or anything it reaches, is out of range for this arena, for example an
+    /// id from another arena.
     pub fn export_expr(&self, id: ExprId) -> Expression {
         match *self.expr(id) {
             ExprNode::Identifier { name, position } => Expression::Identifier { name: self.text(name).to_string(), position },
@@ -208,6 +235,14 @@ impl Arena {
         }
     }
 
+    /// Copies the tree rooted at `id` out of the arena as an owned [`QuickFuncStatement`].
+    ///
+    /// See [`Arena::export_value`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id`, or anything it reaches, is out of range for this arena, for example an
+    /// id from another arena.
     pub fn export_stmt(&self, id: StmtId) -> QuickFuncStatement {
         match *self.stmt(id) {
             StmtNode::Return { value, position } => QuickFuncStatement::Return { value: self.export_expr(value), position },

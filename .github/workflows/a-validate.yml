@@ -46,6 +46,24 @@ jobs:
       - name: Run tests
         run: cargo test -p dixscript
 
+  msrv:
+    name: MSRV (Rust 1.75)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The declared rust-version. The repository's Cargo.lock pins a few
+      # dependencies below their newest versions, and the pins are what keep the
+      # graph inside 1.75. A new or upgraded dependency that needs a newer Rust
+      # fails here.
+      - uses: dtolnay/rust-toolchain@1.75.0
+
+      - name: Type check on the MSRV toolchain
+        run: cargo check -p dixscript --all-targets
+
+      - name: Run tests on the MSRV toolchain
+        run: cargo test -p dixscript
+
   build-minimal:
     name: Build (no default features)
     runs-on: ubuntu-latest
@@ -71,7 +89,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       # Default features on purpose — this is what mdix-wasm actually builds
-      # with. Confirms cloud-import/bzip2-support/xz-support/rayon-support
+      # with. Confirms cloud-import/rayon-support
       # all resolve correctly (or gracefully no-op, for cloud-import) on the
       # target that's historically been the fragile one all along.
       - name: Build dixscript for wasm32

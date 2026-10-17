@@ -1,95 +1,25 @@
-// =============================================================================
-// COMPRESSION MIGRATION + DATABASE VISIBILITY PATCH  ·  DixScript v1.0.0
-// =============================================================================
-// 1. bzip2 0.4 → 0.6       (pure Rust via libbz2-rs-sys, all targets)
-// 2. xz2   0.1 → xz 0.4   (pure Rust fork of liblzma, all targets)
-// 3. Both moved from target-conditional to regular [dependencies]
-// 4. cfg gates removed from bzip2_compressor.rs, lzma_compressor.rs, mod.rs
-// 5. mdix-python: database.rs fn data → pub(crate)
-// 6. mdix-python: Cargo.toml adds tempfile = "3"
-// =============================================================================
-
+// Updates the Rust version badge in the repo-root README.md from 1.85+ to 1.75+.
+//
+// Why this is a patch and not part of the replacements archive: the root README.md
+// would be a flat archive member, and "README.md" matches many files in this repo,
+// so it needs a manifest override. A one-line edit does not justify that.
+//
+// Put this at .mdix/patches/patch.mdix and run "Apply Surgical Patch" (dry_run = true
+// first). It touches one line and deletes nothing. The other README (dixscript/README.md)
+// is already updated by the replacements archive.
 @CONFIG(
   version    -> "1.0.0"
-  author     -> "MidManStudio"
+  features   -> "quickfuncs,data"
   debug_mode -> "off"
 )
 
 @QUICKFUNCS(
-  ~patch_replace_text<object>(_path, _anchor, _content) {
-    return {
-      path    = _path
-      op      = "replace_text"
-      anchor  = _anchor
-      content = _content
-    }
-  }
-
-  ~patch_replace_block<object>(_path, _start_anchor, _end_anchor, _content) {
-    return {
-      path         = _path
-      op           = "replace_block"
-      start_anchor = _start_anchor
-      end_anchor   = _end_anchor
-      content      = _content
-    }
+  ~patch_replace_text<object>(path, anchor, content) {
+    return { path = path, op = "replace_text", anchor = anchor, content = content }
   }
 )
 
 @DATA(
-  description = "Compression migration: bzip2 0.4→0.6, xz2→xz 0.4, pure Rust everywhere"
-
   patch_files::
-
-    patch_replace_block(
-      "dixscript/Cargo.toml",
-      "[target.'cfg(not(target_arch = \"wasm32\"))'.dependencies]",
-      "xz2      = { version = \"0.1\", optional = true }",
-      "[target.'cfg(not(target_arch = \"wasm32\"))'.dependencies]"
-    )
-
-    patch_replace_text(
-      "dixscript/Cargo.toml",
-      "url         = \"2.5\"",
-      "url         = \"2.5\"\nbzip2       = { version = \"0.6\", optional = true }\nxz          = { version = \"0.4\", optional = true }"
-    )
-
-    patch_replace_text(
-      "dixscript/Cargo.toml",
-      "xz-support    = [\"dep:xz2\"]",
-      "xz-support    = [\"dep:xz\"]"
-    )
-
-    patch_replace_block(
-      "dixscript/src/Compiler/DLM/Compressor/mod.rs",
-      "//! Compressor — data compression modules.",
-      "pub use lzma_compressor::LzmaCompressor;",
-      "//! Compressor — data compression modules.\n//! All three compressors are pure Rust and build on every target:\n//! wasm32-unknown-unknown, wasm32-wasip2, Android, iOS, Windows.\n//!\n//! Gzip:  flate2 rust_backend (miniz_oxide) — always pure Rust.\n//! Bzip2: bzip2 0.6+ via libbz2-rs-sys      — pure Rust since June 2025.\n//! LZMA:  xz 0.4+ youknowone fork of liblzma — pure Rust, xz2-compat API.\n\nmod compressor_trait;\nmod gzip_compressor;\nmod bzip2_compressor;\nmod lzma_compressor;\n\npub use compressor_trait::{ICompressor, CompressorResult};\npub use gzip_compressor::{GzipCompressor, CompressionLevel};\npub use bzip2_compressor::Bzip2Compressor;\npub use lzma_compressor::LzmaCompressor;"
-    )
-
-    patch_replace_block(
-      "dixscript/src/Compiler/DLM/Compressor/bzip2_compressor.rs",
-      "//! BZIP2 compression implementation",
-      "#![cfg(not(target_arch = \"wasm32\"))]",
-      "//! BZIP2 compression implementation.\n//! Pure Rust since bzip2 0.6.0 (libbz2-rs-sys) — wasm32 and Android safe.\n//! Slower than Gzip with better ratio (good for medium to large payloads)."
-    )
-
-    patch_replace_block(
-      "dixscript/src/Compiler/DLM/Compressor/lzma_compressor.rs",
-      "//! LZMA compression implementation",
-      "use xz2::write::{XzEncoder, XzDecoder};",
-      "//! LZMA compression implementation.\n//! Pure Rust via xz 0.4+ (youknowone fork of liblzma) — wasm32 and Android safe.\n//! Slowest compression with the best ratio.\nuse super::compressor_trait::{ICompressor, CompressorResult};\nuse crate::Compiler::DLM::dlm_module_base::DLMModuleBase;\nuse crate::ErrorManager::{DlmErrorType, ErrorSeverity};\nuse xz::write::{XzEncoder, XzDecoder};"
-    )
-
-    patch_replace_text(
-      "mdix-python/src/database.rs",
-      "fn data(&self) -> PyResult<&DixData>",
-      "pub(crate) fn data(&self) -> PyResult<&DixData>"
-    )
-
-    patch_replace_text(
-      "mdix-python/Cargo.toml",
-      "pyo3       = { version = \"0.21\", features = [\"extension-module\", \"abi3-py38\"] }",
-      "pyo3       = { version = \"0.21\", features = [\"extension-module\", \"abi3-py38\"] }\ntempfile   = \"3\""
-    )
+    patch_replace_text("README.md", "rust-1.85+", "rust-1.75+")
 )

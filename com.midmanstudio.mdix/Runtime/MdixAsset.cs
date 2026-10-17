@@ -48,10 +48,11 @@ namespace MidManStudio.Mdix.Unity
         }
 
         /// <summary>
-        /// Deserialize the root DATA section directly into a POCO of type T.
-        /// Combines Load() + db.Deserialize<T>() in one call.
-        /// No database handle to manage — deserialization happens and the
-        /// database is disposed before this returns.
+        /// Read the data directly into a class or struct of type T, no database handle to manage:
+        /// the database is disposed before this returns.
+        /// Reads public fields, [SerializeField] fields and properties, and fills lists,
+        /// arrays, sets, dictionaries, nested classes and Unity's Vector, Quaternion, Matrix
+        /// and Color types. T can also be a list or dictionary when prefix names one.
         /// </summary>
         public MdixResult<T> LoadAs<T>(string? prefix = null)
         {
@@ -60,7 +61,29 @@ namespace MidManStudio.Mdix.Unity
                 return MdixResult<T>.Err(loadResult.Error);
 
             using var db = loadResult.SuccessResult;
-            return db.Deserialize<T>(prefix);
+            return MdixBinder.ReadAs<T>(db, MdixBinder.EffectivePrefix(typeof(T), prefix));
+        }
+
+        /// <summary>
+        /// Build a new T and fill it from the data at <paramref name="dataPath"/> (empty = root).
+        /// Same as LoadAs, with the path of the data as the argument instead of a prefix.
+        /// Keys are matched to members as SpawnCap, spawnCap or spawn_cap.
+        /// Fails only when data exists but cannot be converted; see <see cref="MdixBinder"/>
+        /// to get a report of missing members and unused keys.
+        /// The database is disposed before this returns.
+        /// T can be a class, a struct, a positional record, or a ScriptableObject type (made with CreateInstance).
+        ///
+        /// Works by reflection: on IL2CPP, keep T and its nested types from being
+        /// stripped ([Preserve] or a link.xml entry for the assembly that holds them).
+        /// </summary>
+        public MdixResult<T> Bind<T>(string dataPath = "")
+        {
+            var loadResult = Load();
+            if (loadResult.IsFailure)
+                return MdixResult<T>.Err(loadResult.Error);
+
+            using var db = loadResult.SuccessResult;
+            return MdixBinder.ReadAs<T>(db, dataPath);
         }
 
         // Called by MdixImporter — not public API.

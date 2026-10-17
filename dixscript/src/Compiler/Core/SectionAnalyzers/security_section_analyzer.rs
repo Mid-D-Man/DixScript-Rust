@@ -5,7 +5,7 @@ use crate::Compiler::AST::{SecuritySection, SecurityEntry, SecurityField, Value,
 use crate::Compiler::Utilities::SymbolTable;
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::ErrorManager::{ErrorManager, DebugConfig};
-use rustc_hash::FxHashMap;
+use crate::Utilities::RustcHash::FxHashMap;
 use crate::Utilities::LazyStatic::lazy_static;
 
 use super::{SectionAnalysisResult, SemanticWarningInfo};

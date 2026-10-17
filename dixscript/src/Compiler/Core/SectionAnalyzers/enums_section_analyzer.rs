@@ -6,7 +6,7 @@ use crate::Compiler::Utilities::SymbolTable;
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::Compiler::VersionControl::VersionConstraints;
 use crate::ErrorManager::{ErrorManager, SemanticErrorType, DebugConfig};
-use rustc_hash::{FxHashSet, FxHashMap};
+use crate::Utilities::RustcHash::{FxHashSet, FxHashMap};
 
 use super::{SectionAnalysisResult, SemanticErrorInfo, SemanticWarningInfo};
 

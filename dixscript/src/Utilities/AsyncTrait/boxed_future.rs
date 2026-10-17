@@ -1,18 +1,17 @@
 // ============================================================================
 // NOTICE: Full documentation, design decisions, and fix history for this file
-// live in docs/dixscript/utilities.md, section "Utilities/AsyncTrait/boxed_future.rs"
+// live in docs/dixscript/utilities.md, section "Utilities/AsyncTrait"
 // ============================================================================
-//! Replacement for the `async-trait` attribute macro: a type alias and a
-//! recipe, not a macro.
+//! Replacement for the `async-trait` attribute macro: a [`BoxFuture`] alias
+//! and a recipe, not a macro.
 //!
 //! ## Why there is no macro here
 //! `#[async_trait]` is a procedural macro. Writing one means a separate
 //! `proc-macro = true` crate and, realistically, `syn` + `quote` -- exactly
-//! the kind of dependency this pass exists to remove. And it's only needed
-//! in **three places**: the `CloudStorageProvider` trait declaration, its one
-//! implementation (`HttpCloudProvider`), and no other implementor exists.
-//! Writing out what the macro expands to, by hand, in three places is less
-//! code than the macro would be.
+//! the kind of dependency this pass exists to remove. It is needed in only
+//! **two places**: the `CloudStorageProvider` trait declaration and its one
+//! implementation (`HttpCloudProvider`). Writing out what the macro expands
+//! to, by hand, is less code than the macro would be.
 //!
 //! ## Why it can't just be `async fn` in the trait
 //! Native `async fn` in traits (stable since 1.75) is not dyn-compatible,
@@ -20,66 +19,76 @@
 //! (`cloud_provider_factory.rs`). A method that returns a boxed future is
 //! dyn-compatible. That is the entire job `async-trait` does.
 //!
-//! ## The recipe
+//! ## The recipe -- the macro's EXACT expansion
+//! `CloudStorageProvider` is `pub` and re-exported from
+//! `Compiler::ImportsResolution`, so it is an extension point: code outside
+//! this repo implements it with `#[async_trait]`, and the signature that macro
+//! generates is part of what they compile against. The recipe therefore
+//! reproduces that signature exactly -- three lifetimes and three `where`
+//! bounds -- instead of a simpler one-lifetime form (which fails to compile
+//! against an `#[async_trait]` impl with E0195, "lifetime parameters or
+//! bounds on method do not match the trait declaration").
+//!
 //! Trait declaration -- was `async fn f(&self, url: &str) -> R;`
-//! ```ignore
-//! fn f<'a>(&'a self, url: &'a str) -> BoxFuture<'a, R>;
+//! ```text
+//! fn f<'life0, 'life1, 'async_trait>(
+//!     &'life0 self,
+//!     url: &'life1 str,
+//! ) -> BoxFuture<'async_trait, R>
+//! where
+//!     'life0: 'async_trait,
+//!     'life1: 'async_trait,
+//!     Self: 'async_trait;
 //! ```
 //! Implementation -- was `async fn f(&self, url: &str) -> R { body }`
-//! ```ignore
-//! fn f<'a>(&'a self, url: &'a str) -> BoxFuture<'a, R> {
+//! ```text
+//! fn f<'life0, 'life1, 'async_trait>(
+//!     &'life0 self,
+//!     url: &'life1 str,
+//! ) -> BoxFuture<'async_trait, R>
+//! where
+//!     'life0: 'async_trait,
+//!     'life1: 'async_trait,
+//!     Self: 'async_trait,
+//! {
 //!     Box::pin(async move { body })
 //! }
 //! ```
 //! - Delete `#[async_trait::async_trait]` from both.
-//! - `return Err(..)` inside `body` keeps working: `return` inside an `async`
-//!   block returns from the block, which is what it returned from before.
+//! - The body is not edited. `return Err(..)` inside an `async` block returns
+//!   from the block, which is what it returned from before, and `self` is
+//!   captured by the `async move` block.
 //! - The caller -- `block_on(provider.download_file_async(url))` in
 //!   `imports_resolver.rs` -- does not change; `Pin<Box<dyn Future>>` is
 //!   itself a `Future`.
-//! - Both borrows share one lifetime `'a`. The real macro invents a separate
-//!   lifetime per argument; sharing is equivalent for callers, because a
-//!   longer borrow shortens to `'a` automatically.
-//! - If the compiler can't infer the error type of a `?` inside the block,
-//!   end the block with `Ok::<_, CloudStorageError>(value)`. The bodies today
-//!   use `return Err(CloudStorageError::..)` with explicit variants, which
-//!   pins the type, but that's the thing to reach for if an edit breaks it.
+//! - If the compiler cannot infer the error type of a `?` inside the block,
+//!   end the block with `Ok::<_, CloudStorageError>(value)`.
 //!
 //! ## `Send`
-//! `BoxFuture` is `Send`, as the macro's default output is. The future
+//! [`BoxFuture`] is `Send`, as the macro's default output is. The future
 //! captures `&self`, so the implementing type must be `Sync`;
-//! `HttpCloudProvider` (a `reqwest::Client` plus an `ErrorManager`) is.
+//! `HttpCloudProvider` (a `reqwest::Client` plus an `ErrorManager`) is. The
+//! trait itself has no `Send`/`Sync` supertrait, exactly like the original.
 //!
-//! ## This one changes public API -- decide before wiring it in
-//! `CloudStorageProvider` is `pub use`d from `Compiler::ImportsResolution`, so
-//! it is an extension point, not an internal detail. Anyone outside this repo
-//! who implemented it did so with `#[async_trait]`, whose generated method
-//! signature (three lifetime parameters and `where` bounds) does not match the
-//! hand-desugared one (one lifetime parameter). Their `impl` would stop
-//! compiling with "lifetime parameters or bounds on method do not match the
-//! trait declaration". Nothing in this workspace implements it outside
-//! `HttpCloudProvider`, but that says nothing about other crates. If that
-//! matters, this replacement should wait for a version bump -- or not happen.
+//! ## Verification
+//! The tests below use the real `async-trait` as an oracle in BOTH
+//! directions: an `#[async_trait]` impl compiles against the hand-written
+//! trait, and a hand-written impl compiles against an `#[async_trait]` trait.
+//! Re-introducing the one-lifetime signature makes the first of those fail
+//! with E0195 (checked by hand, not kept as a test).
 //!
 //! ## Honest scope of the saving
 //! This removes the `async-trait` crate. It does not shrink the build much
 //! beyond that: `async-trait` depends on `proc-macro2`, `quote` and `syn`,
 //! and `serde_derive` (through `serde`'s `derive` feature) pulls in the same
 //! three, so they stay in the dependency graph regardless.
-//!
-//! ## Not verified against the real trait
-//! The tests below hand-desugar a trait with the same shape as
-//! `CloudStorageProvider` (two methods, `&self` plus a `&str`, used behind
-//! `Arc<dyn Trait + Send + Sync>`, a `return Err` and a `?`) and drive it
-//! with a tiny `block_on`. They do NOT touch `CloudStorageProvider` itself,
-//! which isn't converted until the wiring pass.
 
 use std::future::Future;
 use std::pin::Pin;
 
 /// A heap-allocated, `Send` future borrowing for `'a` -- what an
 /// `#[async_trait]` method returns.
-pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 #[cfg(test)]
 mod tests {
@@ -120,44 +129,75 @@ mod tests {
         }
     }
 
-    // ── a trait shaped like CloudStorageProvider, desugared by hand ──────
     #[derive(Debug, PartialEq)]
     enum TestError {
         Empty,
         NotANumber(String),
     }
 
+    fn parse(key: &str) -> Result<u32, TestError> {
+        key.parse::<u32>().map_err(|_| TestError::NotANumber(key.to_string()))
+    }
+
+    // ── the hand-desugared trait, shaped like CloudStorageProvider ───────
     // Deliberately NO `Send + Sync` supertrait, exactly like the real trait:
-    // those bounds appear only on the `Arc<dyn ..>` below.
+    // those bounds appear only on the `Arc<dyn ..>` in the tests.
     trait Provider {
-        fn fetch<'a>(&'a self, key: &'a str) -> BoxFuture<'a, Result<String, TestError>>;
-        fn exists<'a>(&'a self, key: &'a str) -> BoxFuture<'a, Result<bool, TestError>>;
+        fn fetch<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            key: &'life1 str,
+        ) -> BoxFuture<'async_trait, Result<String, TestError>>
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait;
+
+        fn exists<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            key: &'life1 str,
+        ) -> BoxFuture<'async_trait, Result<bool, TestError>>
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait;
     }
 
     struct Backend {
         prefix: String,
     }
 
-    impl Backend {
-        fn parse(key: &str) -> Result<u32, TestError> {
-            key.parse::<u32>().map_err(|_| TestError::NotANumber(key.to_string()))
-        }
-    }
-
+    // A hand-desugared impl; the bodies are written exactly as they would be
+    // inside an `async fn`.
     impl Provider for Backend {
-        fn fetch<'a>(&'a self, key: &'a str) -> BoxFuture<'a, Result<String, TestError>> {
+        fn fetch<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            key: &'life1 str,
+        ) -> BoxFuture<'async_trait, Result<String, TestError>>
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait,
+        {
             Box::pin(async move {
                 if key.is_empty() {
                     return Err(TestError::Empty);
                 }
                 YieldOnce(false).await;
-                let n = Self::parse(key)?;
+                let n = parse(key)?;
                 Ok(format!("{}{}", self.prefix, n * 2))
             })
         }
 
-        fn exists<'a>(&'a self, key: &'a str) -> BoxFuture<'a, Result<bool, TestError>> {
-            Box::pin(async move { Ok(!key.is_empty() && self.prefix.len() > 0) })
+        fn exists<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            key: &'life1 str,
+        ) -> BoxFuture<'async_trait, Result<bool, TestError>>
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait,
+        {
+            Box::pin(async move { Ok(!key.is_empty() && !self.prefix.is_empty()) })
         }
     }
 
@@ -193,5 +233,81 @@ mod tests {
         let fut = provider.fetch("1");
         assert_send(&fut);
         assert_eq!(block_on(fut), Ok("x2".to_string()));
+    }
+
+    // ── oracle direction 1: a REAL #[async_trait] impl of OUR trait ──────
+    // This is what an external implementor of `CloudStorageProvider` does.
+    struct RealImpl;
+
+    #[::async_trait::async_trait]
+    impl Provider for RealImpl {
+        async fn fetch(&self, key: &str) -> Result<String, TestError> {
+            if key.is_empty() {
+                return Err(TestError::Empty);
+            }
+            YieldOnce(false).await;
+            Ok(format!("real:{}", parse(key)?))
+        }
+
+        async fn exists(&self, key: &str) -> Result<bool, TestError> {
+            Ok(!key.is_empty())
+        }
+    }
+
+    #[test]
+    fn a_real_async_trait_impl_compiles_against_the_hand_written_trait() {
+        let provider: Arc<dyn Provider + Send + Sync> = Arc::new(RealImpl);
+        assert_eq!(block_on(provider.fetch("7")), Ok("real:7".to_string()));
+        assert_eq!(block_on(provider.fetch("")), Err(TestError::Empty));
+        assert_eq!(block_on(provider.exists("a")), Ok(true));
+    }
+
+    // ── oracle direction 2: OUR hand-written impl of a REAL trait ────────
+    #[::async_trait::async_trait]
+    trait RealProvider {
+        async fn fetch(&self, key: &str) -> Result<String, TestError>;
+        async fn exists(&self, key: &str) -> Result<bool, TestError>;
+    }
+
+    struct HandBackend {
+        prefix: String,
+    }
+
+    impl RealProvider for HandBackend {
+        fn fetch<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            key: &'life1 str,
+        ) -> BoxFuture<'async_trait, Result<String, TestError>>
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait,
+        {
+            Box::pin(async move {
+                if key.is_empty() {
+                    return Err(TestError::Empty);
+                }
+                Ok(format!("{}{}", self.prefix, parse(key)? + 1))
+            })
+        }
+
+        fn exists<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            key: &'life1 str,
+        ) -> BoxFuture<'async_trait, Result<bool, TestError>>
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait,
+        {
+            Box::pin(async move { Ok(!key.is_empty()) })
+        }
+    }
+
+    #[test]
+    fn a_hand_written_impl_compiles_against_a_real_async_trait_trait() {
+        let provider: Arc<dyn RealProvider + Send + Sync> = Arc::new(HandBackend { prefix: "h=".into() });
+        assert_eq!(block_on(provider.fetch("9")), Ok("h=10".to_string()));
+        assert_eq!(block_on(provider.exists("")), Ok(false));
     }
 }

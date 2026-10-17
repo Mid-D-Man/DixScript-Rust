@@ -278,6 +278,92 @@ that.
 section-name list that needed `"raw"`/`"raw_section"` added, found while
 wiring the feature gate through, not part of any pre-existing plan.
 
+**Language version 2.0.0.** The manager knows two language versions, 1.0.0 and
+2.0.0, and a file picks one with `@CONFIG` `version`. They are the same language
+except for the DLM codecs: bzip2 and lzma are valid in 1.0.0 and invalid in 2.0.0.
+- The per-version feature set carries one key per codec (`dlm_codec_gzip` in both,
+  `dlm_codec_bzip2` and `dlm_codec_lzma` in 1.0.0 only). `is_valid_dlm_module` reads
+  those keys, so a 2.0.0 file that names a removed codec fails the version check with
+  a message that says it was removed. A 1.0.0 file passes the version check and is
+  stopped later by the DLM analyzer (`DLM004`), because the codecs no longer exist in
+  the implementation for either version.
+- `is_compatible_with(v)` now means "this manager can read files up to version v".
+  It used to be an exact match against a set that only held 1.0.0.
+- `VersionConstraints::get_version_constraints` keeps `SupportedDLMModules` as what
+  actually runs (gzip) and adds `RemovedDLMModules` for tooling that wants to explain
+  a removed codec.
+- The defaults did not move. `OperationalSettings`, the config schema defaults, the
+  minimal config and the manager's fallback are all still 1.0.0, because tests assert
+  on them. A file opts into 2.0.0 by declaring it. Moving the defaults is a separate
+  step that also has to move those tests.
+- The manager is a process-wide singleton set when a file's `@CONFIG` is processed.
+  Compiling files that declare different versions on different threads can see the
+  other file's version for the codec check. The outcome is the same either way (both
+  versions end in an error for a removed codec), only the message differs. The new
+  unit tests build their own `VersionManager` and use the pure helpers so they never
+  touch the singleton.
+
+### `Compiler/AST/mod.rs`
+
+**What it does:** Declares the AST submodules and re-exports their types flat, so
+`Compiler::AST::Value` and `Compiler::AST::DixScript` are the usual paths. `pub mod arena;`
+is declared here and is the one submodule that is not re-exported flat, so it is reached as
+`Compiler::AST::arena`. Its types are documented in `docs/dixscript/arena-ast.md`.
+
+**Decisions:**
+- The arena is not re-exported flat, so its names (`Arena`, `Document`, `ValueNode`) cannot
+  collide with the owned AST names.
+- The module documentation now says that `arena` exists and that the compiler does not use it
+  yet.
+
+### `Compiler/Core/SectionParsers/security_section_parser.rs`
+
+**What it does:** Parses the `@SECURITY(...)` section into a `SecuritySection`: blocks such as
+`encryption -> { mode = "password" }`, each holding `key = value` fields whose values are string,
+integer, long, float, double, boolean, hex colour, `null` or `auto`.
+
+**Decisions:**
+- This is the first parser built on the arena AST, as a pilot. The parser owns an `Arena`, builds
+  every field value as a node there, keeps entries and fields as `DocSecurityEntry` and
+  `DocSecurityField` records that hold the value ids, and exports the finished section once, at
+  the end of `parse_section`. The public interface and the result are unchanged.
+- It exports at the end of the section, rather than handing the arena on, because the sections are
+  parsed in parallel and their arenas cannot yet be merged. Until a consumer reads a `Document`,
+  this adds one export copy per section, so it is not faster than before. The `@SECURITY` section
+  is small, so the cost is small too.
+- `parse_security_value` reads the current token through a copy of the shared token slice, so the
+  token does not borrow the parser and the arena can be borrowed mutably while it is read.
+- The end-of-file token is a module-level `static` shared by `current()` and
+  `parse_security_value`.
+- The public items now carry doc comments, and the module documentation describes the arena.
+
+**Tests:** `tests/security_section_tests.rs`. The conversion was checked against the original
+parser with a before and after dump (see Fixes and Problems below), and the same ten tests pass on
+both.
+
+### `tests/security_section_tests.rs`
+
+**What it does:** Pins the behaviour of the `@SECURITY` parser, which had no tests of its own. It
+runs the loader's first four stages (tokenize, split `@CONFIG`, process `@CONFIG`, parse) with an
+isolated error manager so the parse diagnostics can be read back. The tests cover a plain section
+with exact positions, every scalar value kind, optional commas between blocks and a trailing field
+comma, an empty section and an empty block, that block names are not validated by the parser,
+seven malformed inputs under `halt` (each must give no section and report the right message),
+the `Value::Error` stand-in for a missing value under `continue` and `recover`, recovery skipping
+to the next good entry, recovery around two bad values, and every `@SECURITY` section in the
+corpus.
+
+**Decisions:**
+- Every expectation was taken from the original, pre-arena parser's output, and the tests were
+  run against that parser as well as the converted one.
+- Positions are pinned exactly in the cases where a position is the point (a plain section, the
+  error-value cases). The scalar test compares the printed value and the value kind.
+- The recover and continue cases put a three-line `@CONFIG` header in front, which shifts every
+  source line by three.
+
+**Tests:** `cargo test -p dixscript --test security_section_tests`. Ten tests, all passing on
+Rust 1.75.
+
 ## Fixes and Problems
 
 ### `Compiler/VersionControl/version_constraints.rs`
@@ -291,6 +377,14 @@ wiring the feature gate through, not part of any pre-existing plan.
   missing `"raw_section"`. Same class of problem as above, one layer
   down: without it, `@RAW` would never be considered a supported feature
   of version 1.0.0 at all, regardless of a file's own `@CONFIG`.
+- The singleton was a `std::sync::LazyLock`, which needs Rust 1.80. It is now the
+  crate's own `Lazy` (see [utilities.md](utilities.md)), so the manager builds on 1.75.
+- A file that declared `version -> "2.0.0"` was accepted by the config schema (its
+  version regex allows any `N.N.N`) but the manager silently treated it as 1.0.0, and
+  `initialize_singletons` logged a version mismatch. 2.0.0 is now a real version.
+- `Core/Tokenizer/lexer.rs` kept a fast path only for versions starting with `1.`.
+  A manager at 2.0.0 would have sent every token down the slow per-token feature
+  check. The fast path now covers `2.` as well.
 
 ### Adding `DixScript.raw` broke every other struct-literal construction site
 - Real CI (`cargo bench --no-run`, the actual crate compiled with every
@@ -364,3 +458,138 @@ wiring the feature gate through, not part of any pre-existing plan.
 - `mdix merge` does not merge `@SCHEMA` (same gap as `@RAW`).
 - Editor support for `@SCHEMA` (VS Code grammar, LSP hover/semantic tokens)
   is not done.
+
+### `Compiler/Utilities/identifier_pattern_analyzer.rs`
+
+**What it does:** Looks ahead in the token stream to recognise identifier patterns
+(for example whether a name is followed by a call).
+
+**Fixes and Problems:**
+- Two lookahead checks used `Option::is_none_or`, stable only since Rust 1.82. They are
+  now `map_or(true, ..)`, which means the same thing and builds on 1.75.
+
+### `Compiler/ImportsResolution/imports_resolver.rs`
+
+**What it does:** Resolves `@IMPORTS` entries recursively, with cycle detection and
+cloud download.
+
+**Fixes and Problems:**
+- The cloud-import error path used `Result::inspect_err` (Rust 1.76). It is now
+  `map_err` with the same side effect that returns the error unchanged, which builds
+  on 1.75.
+
+### `Utilities/parser_collection_helper.rs`
+
+**What it does:** Up-front capacities for the vectors the section parsers build.
+`section_estimate` sizes the one vector that holds a whole section and is not capped.
+`bounded_estimate` and the four `estimate_*_count` helpers size vectors inside a
+construct and are capped at `MAX_RESERVED_ELEMENTS` (16).
+
+**Decisions:**
+- A parser knows the length of its whole token stream, not the size of the construct it
+  is parsing. Sizing every vector from the stream length reserved thousands of elements
+  for each call argument list, array, object and statement block. Compiling the 445 KB
+  `elements_database.mdix` requested 7.50 GB. With the cap it requests 159 MB.
+- The four `parse_section` sites (data entries, quickfuncs functions, DLM modules, enum
+  declarations) keep the uncapped estimate. There the stream length is a fair guide and
+  the reservation happens once per section.
+- 16 comes from the experiment in `arena-ast.md`. No other value was measured.
+
+**Tests:** `cargo test -p dixscript --lib parser_collection_helper`, and the allocation
+budget test below.
+
+### `Compiler/Core/SectionParsers/` (data, dlm, enums, quickfuncs)
+
+**What it does:** One parser per section: `data_section_parser.rs` for `@DATA`,
+`quickfuncs_section_parser.rs` for `@QUICKFUNCS`, `dlm_section_parser.rs` for `@DLM` and
+`enums_section_parser.rs` for `@ENUMS`.
+
+**Decisions:**
+- Every token-length-derived reservation goes through the shared helper above.
+  `parse_section` uses `section_estimate`, nested constructs use the capped estimates.
+  This is the only change in these files, so the parsing logic is untouched.
+
+### `tests/parser_alloc_budget.rs`
+
+**What it does:** Counts the bytes one compile of `tests/fixtures/alloc_budget.mdix` asks
+the allocator for, and fails above 20 MB.
+
+**Decisions:**
+- It counts requested bytes because that figure is deterministic and wall time is not.
+- The binary holds one test. The counter is process-wide, so a second test running in
+  parallel would be counted too.
+- The fixture is a copy of `mdix_files/advanced/FullFunctionTest.mdix` kept inside the
+  crate, so the test also runs from the published package.
+- The budget sits between 13.2 MB (with the cap) and 88.0 MB (without it). Both figures
+  were measured by running this test.
+
+**Tests:** `cargo test -p dixscript --test parser_alloc_budget`
+
+### Fixes and Problems: parser reservations
+
+- The module comment of `parser_collection_helper.rs` said pre-allocation cut allocations
+  by 15 to 20 percent. The allocation count does not change with the cap (92,794 before
+  and after for `FullFunctionTest`). What changes is the bytes requested, and with them
+  the parse time.
+
+### `Compiler/Core/ValueResolution/value_resolver.rs`
+
+**What it does:** Resolves values at compile time in five phases: enum pre-resolution, the
+initial data context, discovery of quickfunction calls, iterative execution of those calls
+with the result written back into the AST (phase 4), and the remaining identifier
+references.
+
+**Decisions:**
+- Phase 4 finds where every call sits in the data tree once, before its loop, as a path of
+  child indices per call position. Writing a result back then costs the depth of the node.
+  The path is checked against the node's position before it is used, and if an earlier
+  write-back changed the tree under the index the old search runs instead, so the result is
+  the same as searching every time. A position that was not in the tree when the index was
+  built is left alone, which is what the old search would also have done.
+- Only the positions of the calls being resolved are indexed, so the index costs one small
+  vector per call and not one per node.
+
+**Tests:** `cargo test -p dixscript --test value_resolution_scaling`, and the whole suite.
+
+### `tests/value_resolution_scaling.rs`
+
+**What it does:** Compiles a generated source of 400 resolved calls and one of 1,600 and
+requires the larger to take less than 7 times as long.
+
+**Decisions:**
+- It compares two timings from the same process, so machine speed cancels out. Linear
+  growth gives about 4.3 and a search of the whole tree per call gives about 10; the limit
+  of 7 sits between them. Each size is timed three times and the fastest is used.
+- Each call follows a data entry of 100 values, so a whole-tree search per call has a lot to
+  walk past. With 20 values the old behavior only reached 7.6 and the test passed it.
+
+**Tests:** `cargo test -p dixscript --test value_resolution_scaling`
+
+### Fixes and Problems: value resolution
+
+- **Quadratic write-back.** `replace_value_in_ast_by_location` searched the whole data tree
+  for the node at each resolved call's position, depth first, and ignored its `location`
+  argument. With N calls in a tree of N nodes that is N squared. A 4x larger input took 16x
+  as long in that function. The suspect in `arena-ast.md` (the formatting and timestamp in the
+  loop) was not the cause. Found by comparing callgrind profiles of a 4x and a 16x input.
+
+### Fixes and Problems: arena AST pilot
+
+- **`Compiler/AST/mod.rs`:** a comment on the `ElemType` re-export read "new typed-collection
+  element type", which is history rather than explanation. It was removed.
+- **`Compiler/Core/SectionParsers/security_section_parser.rs`:** the parser had no tests and no
+  documentation section. The conversion was checked with a throwaway before and after harness:
+  the loader's tokenize, config and parse stages run over the 84 corpus files and 28 crafted
+  sources (valid scalars, an empty section, and malformed sections), each crafted source under all
+  three error strategies (84 runs), dumping the parsed section and the parse diagnostics. The
+  output was byte-identical across the 168 runs. Fourteen of them contain the `Value::Error`
+  fallback's message, so a change to it would show in the diff.
+- **The first harness missed the fallback.** It ran only the default `halt` strategy, under which
+  the parser gives up before it reaches the `Value::Error` stand-in for a missing value, so that
+  path was uncovered. Running the crafted sources under `continue` and `recover` reached it. A
+  deliberate bug in the integer arm showed up in the first harness's diff.
+- **`tests/security_section_tests.rs`:** the parser accepts any block name, so `bogus -> { a = 1 }`
+  parses. Rejecting it is the semantic analyzer's job, and a test records this.
+- **Where the arena stops paying:** the sections are parsed in parallel, so each parser builds
+  into its own arena and exports at the end of its section. That adds a copy, and it stays until
+  the arenas can be merged by id offset and consumers read a `Document`.

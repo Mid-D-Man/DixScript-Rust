@@ -12,9 +12,13 @@ namespace MidManStudio.Mdix.Unity.Editor
 {
     /// <summary>
     /// MDIX Studio — the main editor window.
-    /// Three tabs: Explorer (compiled data viewer), Editor (source text),
-    /// Templates (new file creation).
-    /// Open via Window → MDIX Studio, or by double-clicking a .mdix asset.
+    /// Four tabs: Explorer (compiled data viewer), Editor (source text), Search (find text in
+    /// every .mdix file of the project), Templates (new file creation).
+    /// Open via MidManStudio → MDIX Studio, or by double-clicking a .mdix asset.
+    ///
+    /// The window is split over several files: this one holds the shell (tabs, compile, save,
+    /// documents), MdixEditorWindow.Explorer.cs the tree view, MdixEditorWindow.Search.cs the
+    /// project search and MdixEditorWindow.Lsp.cs the language-server features.
     /// </summary>
     public sealed partial class MdixEditorWindow : EditorWindow
     {
@@ -33,7 +37,7 @@ namespace MidManStudio.Mdix.Unity.Editor
         private string       _currentPath  = string.Empty;
         private string       _sourceText   = string.Empty;
         private bool         _isDirty;
-        private int          _activeTab;   // 0 = Explorer, 1 = Editor, 2 = Templates
+        private int          _activeTab;   // 0 = Explorer, 1 = Editor, 2 = Templates, 3 = Search
 
         // UI element references
         private Label?         _titleLabel;
@@ -52,6 +56,10 @@ namespace MidManStudio.Mdix.Unity.Editor
         private VisualElement? _tabExplorer;
         private VisualElement? _tabEditor;
         private VisualElement? _tabTemplates;
+        private Button?        _btnFoldAll;
+
+        private VisualElement _tabSearch;
+        private VisualElement _panelSearch;
 
         // ── Menu and entry points ─────────────────────────────────────────────
 
@@ -64,8 +72,10 @@ namespace MidManStudio.Mdix.Unity.Editor
             var lastPath = EditorPrefs.GetString(PrefKeyLastPath, string.Empty);
             if (!string.IsNullOrEmpty(lastPath))
             {
+                // The menu item only brings the window forward: it must never replace edits
+                // that haven't been saved.
                 var asset = AssetDatabase.LoadAssetAtPath<MdixAsset>(lastPath);
-                if (asset != null)
+                if (asset != null && !window._isDirty)
                     window.LoadAsset(asset);
             }
         }
@@ -74,7 +84,59 @@ namespace MidManStudio.Mdix.Unity.Editor
         {
             var window = GetWindow<MdixEditorWindow>("MDIX Studio");
             window.minSize = new Vector2(600, 480);
-            window.LoadAsset(asset);
+
+            if (window.ConfirmLeaveCurrentDocument(asset.ProjectRelativePath))
+                window.LoadAsset(asset);
+        }
+
+        /// <summary>
+        /// Double-clicking a .mdix asset opens it here (the README has always promised this).
+        /// Returns false for anything else, so Unity's normal handling is left alone.
+        /// </summary>
+        [UnityEditor.Callbacks.OnOpenAsset(1)]
+        public static bool OnOpenMdixAsset(int instanceID, int line)
+        {
+            var asset = EditorUtility.InstanceIDToObject(instanceID) as MdixAsset;
+            if (asset == null) return false;
+
+            OpenWithAsset(asset);
+            return true;
+        }
+
+        /// <summary>
+        /// True if it is fine to replace the document on screen with <paramref name="nextPath"/>.
+        /// Opening another file used to overwrite unsaved edits without a word.
+        /// </summary>
+        private bool ConfirmLeaveCurrentDocument(string nextPath)
+        {
+            if (!_isDirty) return true;
+
+            // Asked to open the file that is already open and edited: keep the edits, just show the window.
+            if (string.Equals(_currentPath, nextPath, StringComparison.Ordinal)) return false;
+
+            var scratch = string.IsNullOrEmpty(_currentPath);
+            var name    = scratch ? "Untitled" : Path.GetFileName(_currentPath);
+
+            var choice = EditorUtility.DisplayDialogComplex(
+                "Unsaved Changes",
+                $"'{name}' has unsaved changes. Save before opening '{Path.GetFileName(nextPath)}'?",
+                "Save", "Cancel", "Discard");
+
+            switch (choice)
+            {
+                case 0: // Save
+                    if (scratch)
+                        return PromptAndWriteNewFile() != null; // cancelled panel => stay put
+
+                    SaveSource();
+                    return !_isDirty;                           // a failed save => stay put
+
+                case 2: // Discard
+                    return true;
+
+                default: // Cancel
+                    return false;
+            }
         }
 
         // ── UIElements lifecycle ──────────────────────────────────────────────
@@ -98,6 +160,7 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             BindElements();
             BuildTemplatesPanel();
+            BuildSearchPanel();
             ShowTab(0);
         }
 
@@ -125,16 +188,14 @@ namespace MidManStudio.Mdix.Unity.Editor
             _tabEditor?.RegisterCallback<ClickEvent>(_ => ShowTab(1));
             _tabTemplates?.RegisterCallback<ClickEvent>(_ => ShowTab(2));
 
+            _tabSearch   = root.Q("tab-search");
+            _panelSearch = root.Q("panel-search");
+            _tabSearch?.RegisterCallback<ClickEvent>(_ => ShowTab(3));
+
             root.Q<Button>("btn-save")?.RegisterCallback<ClickEvent>(_ => SaveSource());
             root.Q<Button>("btn-compile")?.RegisterCallback<ClickEvent>(_ => Compile());
-            root.Q<Button>("btn-fold-all")?.RegisterCallback<ClickEvent>(_ =>
-            {
-                if (_activeTab == 1)
-                    EditorUtility.DisplayDialog(
-                        "Fold All",
-                        "Fold All is not yet implemented in this version.",
-                        "OK");
-            });
+            _btnFoldAll = root.Q<Button>("btn-fold-all");
+            _btnFoldAll?.RegisterCallback<ClickEvent>(_ => ToggleFoldAll());
 
             _codeField = new TextField
             {
@@ -162,6 +223,12 @@ namespace MidManStudio.Mdix.Unity.Editor
                 NotifyLspTextChanged(evt.newValue, evt.previousValue);
             });
 
+            // OnEnable can run LoadAsset() before CreateGUI() builds this field, which would
+            // leave it blank while _sourceText holds the file — and the next keystroke would
+            // then overwrite _sourceText with just what was typed.
+            if (!string.IsNullOrEmpty(_sourceText))
+                _codeField.SetValueWithoutNotify(_sourceText);
+
             _panelEditor?.Add(_codeField);
 
             InitializeLspIntegration();
@@ -176,13 +243,26 @@ namespace MidManStudio.Mdix.Unity.Editor
             SetTabActive(_tabExplorer,  index == 0);
             SetTabActive(_tabEditor,    index == 1);
             SetTabActive(_tabTemplates, index == 2);
+            SetTabActive(_tabSearch,    index == 3);
 
             SetPanelVisible(_panelExplorer,  index == 0);
             SetPanelVisible(_panelEditor,    index == 1);
             SetPanelVisible(_panelTemplates, index == 2);
+            SetPanelVisible(_panelSearch,    index == 3);
 
             if (index == 0 && !string.IsNullOrEmpty(_sourceText))
                 RebuildExplorer();
+
+            if (index == 3)
+            {
+                FocusSearchField();
+
+                // Files may have changed since the last search, so a standing query is run again.
+                if (_searchField != null && !string.IsNullOrEmpty(_searchField.value))
+                    ScheduleSearch();
+            }
+
+            RefreshFoldAllButton();
         }
 
         private static void SetTabActive(VisualElement? tab, bool active)
@@ -204,6 +284,13 @@ namespace MidManStudio.Mdix.Unity.Editor
 
         private void LoadAsset(MdixAsset asset)
         {
+            // A different file has different sections; don't carry the old fold state over.
+            if (!string.Equals(_currentPath, asset.ProjectRelativePath, StringComparison.Ordinal))
+            {
+                _foldedSections.Clear();
+                _knownFoldKeys.Clear();
+            }
+
             _currentAsset = asset;
             _currentPath  = asset.ProjectRelativePath;
             _sourceText   = asset.RawSource;
@@ -212,8 +299,9 @@ namespace MidManStudio.Mdix.Unity.Editor
             if (_fileLabel != null)
                 _fileLabel.text = Path.GetFileName(_currentPath);
 
+            // Without notify: loading a file is not an edit (it used to flag the file dirty).
             if (_codeField != null)
-                _codeField.value = _sourceText;
+                _codeField.SetValueWithoutNotify(_sourceText);
 
             EditorPrefs.SetString(PrefKeyLastPath, _currentPath);
 
@@ -239,9 +327,8 @@ namespace MidManStudio.Mdix.Unity.Editor
             using var db = result.SuccessResult;
 
             var entryCount = db.EntryCount;
-            var allKeys    = db.GetKeys().UnwrapOr(Array.Empty<string>());
-            var flatCount  = allKeys.Count(k => !k.Contains('.'));
-            var tableCount = allKeys.Count(k =>  k.Contains('.'));
+            int flatCount, tableCount;
+            CountTopLevel(db, out flatCount, out tableCount);
 
             SetStatus($"✓  0 errors", error: false);
             UpdateStatusBar(true, entryCount, flatCount, tableCount);
@@ -249,7 +336,8 @@ namespace MidManStudio.Mdix.Unity.Editor
             if (_activeTab == 0)
                 RebuildExplorer(db);
 
-            _isDirty = false;
+            // Compiling only parses the text; it does not write it anywhere. It used to clear the
+            // dirty flag here, so edits that were merely compiled were dropped silently on close.
         }
 
         // ── Explorer ──────────────────────────────────────────────────────────
@@ -265,49 +353,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             RebuildExplorer(db);
         }
 
-        private void RebuildExplorer(MdixDatabase db)
-        {
-            if (_panelExplorer == null) return;
-
-            _panelExplorer.Clear();
-
-            var scroll = new ScrollView(ScrollViewMode.Vertical) { style = { flexGrow = 1 } };
-
-            var allKeys    = db.GetKeys().UnwrapOr(Array.Empty<string>());
-            var flatKeys   = allKeys.Where(k => !k.Contains('.')).ToArray();
-            var groupKeys  = allKeys
-                .Where(k => k.Contains('.'))
-                .Select(k => k.Substring(0, k.IndexOf('.')))
-                .Distinct()
-                .ToArray();
-
-            if (flatKeys.Length > 0)
-            {
-                scroll.Add(MakeSectionHeader("FLAT PROPERTIES"));
-                foreach (var key in flatKeys)
-                    scroll.Add(MakeKeyValueRow(db, key));
-            }
-
-            foreach (var groupKey in groupKeys)
-            {
-                var valueType = db.GetValueType(groupKey);
-
-                if (valueType == MdixValueType.Array)
-                {
-                    scroll.Add(MakeSectionHeader($"ARRAY  —  {groupKey}"));
-                    scroll.Add(MakeArrayTable(db, groupKey));
-                }
-                else if (valueType == MdixValueType.Object)
-                {
-                    scroll.Add(MakeSectionHeader($"TABLE  —  {groupKey}"));
-                    var childKeys = db.GetKeys(groupKey).UnwrapOr(Array.Empty<string>());
-                    foreach (var child in childKeys)
-                        scroll.Add(MakeKeyValueRow(db, $"{groupKey}.{child}", labelOverride: child));
-                }
-            }
-
-            _panelExplorer.Add(scroll);
-        }
+        private void RebuildExplorer(MdixDatabase db) => BuildExplorer(db);
 
         private static Label MakeSectionHeader(string text)
         {
@@ -371,132 +417,6 @@ namespace MidManStudio.Mdix.Unity.Editor
             row.Add(typeLabel);
 
             return row;
-        }
-
-        private static VisualElement MakeArrayTable(MdixDatabase db, string arrayPath)
-        {
-            var container = new VisualElement();
-            container.AddToClassList("mdix-table");
-
-            var length = db.GetArrayLength(arrayPath).UnwrapOr(0);
-            if (length == 0) return container;
-
-            var firstItemPath = $"{arrayPath}[0]";
-            var firstType     = db.GetValueType(firstItemPath);
-
-            if (firstType == MdixValueType.Object)
-            {
-                var columns = db.GetKeys(firstItemPath).UnwrapOr(Array.Empty<string>());
-                if (columns.Length == 0) return container;
-
-                // Header row
-                var headerRow = new VisualElement();
-                headerRow.AddToClassList("mdix-table__header-row");
-
-                var indexHeader = new Label("#");
-                indexHeader.AddToClassList("mdix-table__header-cell");
-                indexHeader.style.maxWidth = 40;
-                headerRow.Add(indexHeader);
-
-                foreach (var col in columns)
-                {
-                    var cell = new Label(col.ToUpper());
-                    cell.AddToClassList("mdix-table__header-cell");
-                    headerRow.Add(cell);
-                }
-                container.Add(headerRow);
-
-                // Data rows
-                for (int i = 0; i < length; i++)
-                {
-                    var itemPath  = $"{arrayPath}[{i}]";
-                    var isBossRow = false;
-
-                    foreach (var col in columns)
-                    {
-                        var colPath = $"{itemPath}.{col}";
-                        if (db.GetValueType(colPath) == MdixValueType.Enum)
-                        {
-                            var field = db.GetEnumField(colPath).UnwrapOr(string.Empty);
-                            if (field.Equals("BOSS", StringComparison.OrdinalIgnoreCase))
-                            {
-                                isBossRow = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    var row = new VisualElement();
-                    row.AddToClassList("mdix-table__row");
-                    if (isBossRow)
-                        row.AddToClassList("mdix-table__row--boss");
-
-                    var indexCell = new Label(i.ToString());
-                    indexCell.AddToClassList("mdix-table__cell");
-                    indexCell.style.maxWidth = 40;
-                    indexCell.style.color    = new StyleColor(new Color(0.478f, 0.596f, 0.769f));
-                    row.Add(indexCell);
-
-                    foreach (var col in columns)
-                    {
-                        var colPath  = $"{itemPath}.{col}";
-                        var colType  = db.GetValueType(colPath);
-                        var valueStr = GetValueDisplayString(db, colPath, colType);
-
-                        var cell = new Label(valueStr);
-                        cell.AddToClassList("mdix-table__cell");
-
-                        if (colType == MdixValueType.Enum)
-                        {
-                            var field = db.GetEnumField(colPath).UnwrapOr(string.Empty);
-                            if (field.Equals("BOSS", StringComparison.OrdinalIgnoreCase))
-                                cell.AddToClassList("mdix-table__cell--enum-boss");
-                        }
-
-                        row.Add(cell);
-                    }
-
-                    container.Add(row);
-                }
-            }
-            else
-            {
-                // Scalar array — single column.
-                var headerRow = new VisualElement();
-                headerRow.AddToClassList("mdix-table__header-row");
-                var hIndex = new Label("#");
-                hIndex.AddToClassList("mdix-table__header-cell");
-                hIndex.style.maxWidth = 40;
-                var hValue = new Label("VALUE");
-                hValue.AddToClassList("mdix-table__header-cell");
-                headerRow.Add(hIndex);
-                headerRow.Add(hValue);
-                container.Add(headerRow);
-
-                for (int i = 0; i < length; i++)
-                {
-                    var itemPath = $"{arrayPath}[{i}]";
-                    var valType  = db.GetValueType(itemPath);
-                    var valStr   = GetValueDisplayString(db, itemPath, valType);
-
-                    var row = new VisualElement();
-                    row.AddToClassList("mdix-table__row");
-
-                    var iCell = new Label(i.ToString());
-                    iCell.AddToClassList("mdix-table__cell");
-                    iCell.style.maxWidth = 40;
-                    iCell.style.color    = new StyleColor(new Color(0.478f, 0.596f, 0.769f));
-
-                    var vCell = new Label(valStr);
-                    vCell.AddToClassList("mdix-table__cell");
-
-                    row.Add(iCell);
-                    row.Add(vCell);
-                    container.Add(row);
-                }
-            }
-
-            return container;
         }
 
         private static string GetValueDisplayString(
@@ -614,7 +534,15 @@ namespace MidManStudio.Mdix.Unity.Editor
 
         private void SaveSource()
         {
-            if (string.IsNullOrEmpty(_currentPath)) return;
+            // A scratch document (typed straight into the Editor tab) has no file yet: Save As.
+            if (string.IsNullOrEmpty(_currentPath))
+            {
+                var newPath = PromptAndWriteNewFile();
+                if (newPath != null)
+                    AdoptSavedPath(newPath);
+
+                return;
+            }
 
             try
             {
@@ -627,6 +555,49 @@ namespace MidManStudio.Mdix.Unity.Editor
             {
                 SetStatus($"✗  Save failed: {ex.Message}", error: true);
             }
+        }
+
+        /// <summary>
+        /// Asks where an unsaved (scratch) document should live and writes it there. Returns the
+        /// project-relative path, or null if the person cancelled or the write failed. Leaves the
+        /// window's own state alone, so it is also safe to call while the window is closing.
+        /// </summary>
+        private string? PromptAndWriteNewFile()
+        {
+            var path = EditorUtility.SaveFilePanelInProject(
+                "Save MDIX file", "untitled", "mdix",
+                "Choose where to save this .mdix file inside the project.");
+
+            if (string.IsNullOrEmpty(path)) return null; // cancelled
+
+            try
+            {
+                File.WriteAllText(path, _sourceText);
+                AssetDatabase.ImportAsset(path);
+                return path;
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"✗  Save failed: {ex.Message}", error: true);
+                return null;
+            }
+        }
+
+        /// <summary>Points the window at the file a scratch document was just saved as.</summary>
+        private void AdoptSavedPath(string path)
+        {
+            _currentAsset = AssetDatabase.LoadAssetAtPath<MdixAsset>(path);
+            _currentPath  = path;
+            _isDirty      = false;
+
+            if (_fileLabel != null)
+                _fileLabel.text = Path.GetFileName(path);
+
+            EditorPrefs.SetString(PrefKeyLastPath, path);
+
+            Compile();                  // refreshes the status bar (file name included) and the Explorer
+            NotifyLspDocumentOpened();  // the server drops the untitled document and opens this file
+            SetStatus("✓  Saved", error: false);
         }
 
         // ── Status helpers ────────────────────────────────────────────────────
@@ -674,12 +645,25 @@ namespace MidManStudio.Mdix.Unity.Editor
         {
             if (_isDirty)
             {
+                var scratch = string.IsNullOrEmpty(_currentPath);
+                var name    = scratch ? "Untitled" : Path.GetFileName(_currentPath);
+
                 if (EditorUtility.DisplayDialog(
                     "Unsaved Changes",
-                    $"'{Path.GetFileName(_currentPath)}' has unsaved changes. Save before closing?",
+                    $"'{name}' has unsaved changes. Save before closing?",
                     "Save", "Discard"))
                 {
-                    SaveSource();
+                    if (scratch)
+                    {
+                        // Only write the file: the window is going away, so don't rebind its UI.
+                        var saved = PromptAndWriteNewFile();
+                        if (saved != null)
+                            EditorPrefs.SetString(PrefKeyLastPath, saved);
+                    }
+                    else
+                    {
+                        SaveSource();
+                    }
                 }
             }
 

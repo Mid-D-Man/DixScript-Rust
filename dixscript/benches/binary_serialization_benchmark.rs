@@ -1,8 +1,12 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/dlm.md, section "binary_serialization_benchmark.rs"
+// ============================================================================
 //! Binary Serialization Benchmark — DixScript v1.0.0
 //!
 //! Compares DixScript's custom binary format against bincode, postcard, and
 //! MessagePack (rmp-serde) across serialization speed and compressed output
-//! size (gzip / bzip2 / lzma).  Results are printed once as a formatted table
+//! size (gzip).  Results are printed once as a formatted table
 //! before the timed measurements begin.
 //!
 //! Groups:
@@ -16,9 +20,7 @@
 use criterion::{
     black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
 };
-use bzip2::{write::BzEncoder, Compression as BzCompression};
 use flate2::{write::GzEncoder, Compression as GzCompression};
-use lzma_rust2::{XzWriter, XzOptions};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::sync::Once;
@@ -229,18 +231,6 @@ fn compress_gzip(data: &[u8]) -> Vec<u8> {
     enc.finish().unwrap()
 }
 
-fn compress_bzip2(data: &[u8]) -> Vec<u8> {
-    let mut enc = BzEncoder::new(Vec::with_capacity(data.len()), BzCompression::default());
-    enc.write_all(data).unwrap();
-    enc.finish().unwrap()
-}
-
-fn compress_lzma(data: &[u8]) -> Vec<u8> {
-    let mut enc = XzWriter::new(Vec::with_capacity(data.len()), XzOptions::default()).unwrap();
-    enc.write_all(data).unwrap();
-    enc.finish().unwrap()
-}
-
 // =============================================================================
 // Comparison report — printed once before Criterion runs its measurements
 // =============================================================================
@@ -279,20 +269,12 @@ fn print_comparison_report() {
 
     println!();
     println!("  ── Small-dataset summary (raw bytes) ──────────────────────────────────────");
-    println!(
-        "  {:<20} {:>9} {:>10} {:>10} {:>10}",
-        "Format", "Raw", "Gzip", "Bzip2", "LZMA"
-    );
-    println!("  {}", "─".repeat(63));
+    println!("  {:<20} {:>9} {:>10}", "Format", "Raw", "Gzip");
+    println!("  {}", "─".repeat(41));
 
     if let Some(ref custom_small) = custom_small_opt {
         let gz = compress_gzip(custom_small);
-        let bz = compress_bzip2(custom_small);
-        let xz = compress_lzma(custom_small);
-        println!(
-            "  {:<20} {:>9} {:>10} {:>10} {:>10}",
-            "DixScript Custom", custom_small.len(), gz.len(), bz.len(), xz.len()
-        );
+        println!("  {:<20} {:>9} {:>10}", "DixScript Custom", custom_small.len(), gz.len());
     } else {
         println!("  {:<20} {:>9}", "DixScript Custom", "(skipped)");
     }
@@ -303,12 +285,7 @@ fn print_comparison_report() {
         ("MessagePack", &msgpack_small),
     ] {
         let gz = compress_gzip(small);
-        let bz = compress_bzip2(small);
-        let xz = compress_lzma(small);
-        println!(
-            "  {:<20} {:>9} {:>10} {:>10} {:>10}",
-            label, small.len(), gz.len(), bz.len(), xz.len()
-        );
+        println!("  {:<20} {:>9} {:>10}", label, small.len(), gz.len());
     }
 
     println!();
@@ -320,26 +297,18 @@ fn print_format_row(label: &str, small: &[u8], medium: &[u8]) {
     };
 
     let gz = compress_gzip(small);
-    let bz = compress_bzip2(small);
-    let xz = compress_lzma(small);
 
     println!();
     println!("  ┌─ {} ─────────────────────────────────────────────────", label);
     println!("  │  [Small dataset — 4 enemies / 3 servers]");
     println!("  │    Raw        : {:>7} bytes", small.len());
     println!("  │    + Gzip     : {:>7} bytes  ({:.1}% reduction)", gz.len(), ratio(small.len(), gz.len()));
-    println!("  │    + Bzip2    : {:>7} bytes  ({:.1}% reduction)", bz.len(), ratio(small.len(), bz.len()));
-    println!("  │    + LZMA     : {:>7} bytes  ({:.1}% reduction)", xz.len(), ratio(small.len(), xz.len()));
 
     if !std::ptr::eq(small, medium) {
         let gz_m = compress_gzip(medium);
-        let bz_m = compress_bzip2(medium);
-        let xz_m = compress_lzma(medium);
         println!("  │  [Medium dataset — 20 enemies / 3 servers]");
         println!("  │    Raw        : {:>7} bytes", medium.len());
         println!("  │    + Gzip     : {:>7} bytes  ({:.1}% reduction)", gz_m.len(), ratio(medium.len(), gz_m.len()));
-        println!("  │    + Bzip2    : {:>7} bytes  ({:.1}% reduction)", bz_m.len(), ratio(medium.len(), bz_m.len()));
-        println!("  │    + LZMA     : {:>7} bytes  ({:.1}% reduction)", xz_m.len(), ratio(medium.len(), xz_m.len()));
     }
 
     println!("  └─────────────────────────────────────────────────────────────");
@@ -433,10 +402,6 @@ fn bench_compression_pipeline(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("gzip",  label), data.as_slice(),
             |b, d| b.iter(|| black_box(compress_gzip(black_box(d)))));
-        group.bench_with_input(BenchmarkId::new("bzip2", label), data.as_slice(),
-            |b, d| b.iter(|| black_box(compress_bzip2(black_box(d)))));
-        group.bench_with_input(BenchmarkId::new("lzma",  label), data.as_slice(),
-            |b, d| b.iter(|| black_box(compress_lzma(black_box(d)))));
     }
 
     group.finish();

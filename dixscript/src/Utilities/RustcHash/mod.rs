@@ -16,15 +16,17 @@
 //! To flip the default to the classic one, change the `pub(crate) use` below
 //! to `fx_hash::{..}`. Nothing else needs to change.
 //!
-//! Crate-internal only (`pub(crate)`). NOTE for the wiring pass: several
-//! `FxHashMap<String, DixValue>` types appear in this crate's PUBLIC
-//! signatures (see docs/dixscript/utilities.md), so `pub(crate)` here will
-//! need revisiting before those are switched over.
+//! The default exports are `pub`: several `FxHashMap<String, DixValue>` types
+//! appear in this crate's PUBLIC signatures (see docs/dixscript/utilities.md),
+//! so callers must be able to name the hasher. The `classic` variant stays
+//! crate-private.
 
+#[allow(dead_code)]
 pub(crate) mod fx_hash;
-pub(crate) mod rustc_hash_v2;
+pub mod rustc_hash_v2;
 
 /// The mid-engine classic FxHash. Not the default; see the module doc.
+#[allow(unused_imports)]
 pub(crate) use self::fx_hash as classic;
 
-pub(crate) use rustc_hash_v2::{FxBuildHasher, FxHashMap, FxHashSet, FxHasher};
+pub use rustc_hash_v2::{FxBuildHasher, FxHashMap, FxHashSet, FxHasher};

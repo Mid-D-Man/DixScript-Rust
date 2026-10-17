@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/SectionParsers/enums_section_parser.rs"
+// ============================================================================
 //! Parser for the `@ENUMS(...)` section.
 //!
 //! ```text
@@ -14,7 +18,7 @@ use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::ErrorManager::{ErrorManager, ParseErrorType,DebugConfig};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::Core::Tokenizer::token::SectionId;
-use crate::Utilities::{Keywords, estimate_enum_fields_count};
+use crate::Utilities::{Keywords, section_estimate, estimate_enum_fields_count};
 
 const MAX_ITERATIONS_PER_TOKEN: usize = 3;
 const ABSOLUTE_MAX_ITERATIONS: usize = 500_000;
@@ -75,7 +79,7 @@ impl<'a> EnumsSectionParser<'a> {
         let section_start_pos = Position::from_token(self.current());
         self.reset_parse_state();
 
-        let mut enum_declarations = Vec::with_capacity(usize::max(2, self.tokens.len() / 20));
+        let mut enum_declarations = Vec::with_capacity(section_estimate(2, self.tokens.len(), 20));
 
         if !self.match_and_consume_symbol('(') {
             let current = self.current().clone();

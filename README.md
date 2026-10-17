@@ -149,7 +149,7 @@ This is just the **camo config** for one weapon class. Three separate blobs, hun
 - 📦 **Configuration** (like TOML)
 - 🔧 **Compile-time functions** (like Jsonnet, but less cryptic)
 - 🔒 **Built-in encryption** (AES-256-GCM, not an afterthought)
-- 🗜️ **Automatic compression** (gzip/bzip2/lzma)
+- 🗜️ **Automatic compression** (gzip)
 - 📋 **Type safety** (enums, strong typing when you want it)
 - 🎯 **Zero runtime dependencies** (pure Rust, or C# in the original)
 

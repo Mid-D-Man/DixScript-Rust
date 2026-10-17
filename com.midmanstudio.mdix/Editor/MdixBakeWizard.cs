@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
 using MidManStudio.Mdix.Core;
@@ -13,44 +14,39 @@ namespace MidManStudio.Mdix.Unity.Editor
     /// Wizard dialog for baking a .mdix asset into a typed ScriptableObject.
     ///
     /// Flow:
-    ///   Right-click .mdix asset → "Generate ScriptableObject"
-    ///   → MdixBakeWizard opens
-    ///   → User picks a [MdixBakeable] ScriptableObject subclass
-    ///   → Wizard deserializes the mdix data into that type
-    ///   → Saves result as a .asset file alongside the .mdix file
+    ///   Right-click .mdix asset, then "Generate ScriptableObject"
+    ///   -> the wizard lists every [MdixBakeable] ScriptableObject subclass, best fit first
+    ///   -> the person picks one
+    ///   -> <see cref="MdixBinder"/> fills a new instance from the data
+    ///   -> the result is saved as a .asset file next to the .mdix file
+    ///      (an existing asset is updated in place, so references to it survive)
     ///
-    /// IMPORTANT — why baked assets can look empty/uneditable in the Inspector:
-    /// deserialization and the copy step below both work over C# *properties*
-    /// (MdixDatabase.Deserialize&lt;T&gt; targets POCO properties, and this
-    /// wizard mirrors them via reflection). Unity's own serializer only ever
-    /// serializes *fields* — public fields, or private fields marked
-    /// [SerializeField] — it never serializes auto-properties. So a
-    /// [MdixBakeable] class written as plain `public string Name { get; set; }`
-    /// bakes correctly in memory, but the moment Unity's default Inspector
-    /// (or a domain reload) touches the asset, those values are invisible —
-    /// there is nothing for SerializedObject to walk.
+    /// What the binder reads: public fields and [SerializeField] fields, which is what Unity itself
+    /// serializes, plus writable properties; lists, arrays, nested [Serializable] classes and enums
+    /// at any depth. See <see cref="MdixBinder"/> for how keys are matched to member names.
     ///
-    /// The fix belongs on the [MdixBakeable] class itself: back every bakeable
-    /// property with [field: SerializeField], e.g.
-    ///     [field: SerializeField] public string Name { get; set; }
-    /// which Unity has supported since 2020.1 and which this wizard's existing
-    /// reflection-based copy already works with unmodified. TryBake() now
-    /// checks for this after baking and surfaces a warning naming exactly
-    /// which properties won't show up, instead of failing silently.
+    /// A bake that is incomplete never passes silently. Members the data does not fill, keys that
+    /// nothing reads, values that could not be converted, and members Unity would not store are all
+    /// listed. A bake with unconvertible values is refused, because the asset would otherwise hold
+    /// defaults where the data had something else.
     /// </summary>
     public sealed class MdixBakeWizard : EditorWindow
     {
+        private const int MaxListedPerGroup = 4;
+
+        private enum StatusKind { Info, Warning, Error }
+
         // ── State ─────────────────────────────────────────────────────────────
 
-        private MdixAsset?            _sourceAsset;
-        private BakeableTypeInfo[]    _availableTypes  = Array.Empty<BakeableTypeInfo>();
-        private int                   _selectedIndex;
-        private string                _outputFileName  = string.Empty;
-        private string                _statusMessage   = string.Empty;
-        private bool                  _statusIsError;
-        private Vector2               _scrollPosition;
-        private string                _searchFilter    = string.Empty;
-        private BakeableTypeInfo[]    _filteredTypes   = Array.Empty<BakeableTypeInfo>();
+        private MdixAsset          _sourceAsset;
+        private BakeableTypeInfo[] _availableTypes  = Array.Empty<BakeableTypeInfo>();
+        private int                _selectedIndex;
+        private string             _outputFileName  = string.Empty;
+        private string             _statusMessage   = string.Empty;
+        private StatusKind         _statusKind      = StatusKind.Info;
+        private Vector2            _scrollPosition;
+        private string             _searchFilter    = string.Empty;
+        private BakeableTypeInfo[] _filteredTypes   = Array.Empty<BakeableTypeInfo>();
 
         // ── Entry point ───────────────────────────────────────────────────────
 
@@ -71,12 +67,20 @@ namespace MidManStudio.Mdix.Unity.Editor
                 focus:   true);
 
             window.minSize         = new Vector2(480, 420);
-            window.maxSize         = new Vector2(480, 600);
+            window.maxSize         = new Vector2(480, 640);
             window._sourceAsset    = asset;
             window._outputFileName = System.IO.Path.GetFileNameWithoutExtension(
                 asset.ProjectRelativePath) + "_data";
+            window._statusMessage  = string.Empty;
+            window._statusKind     = StatusKind.Info;
 
             window.RefreshTypes();
+        }
+
+        private void SetStatus(StatusKind kind, string message)
+        {
+            _statusKind    = kind;
+            _statusMessage = message;
         }
 
         // ── Type discovery ────────────────────────────────────────────────────
@@ -118,17 +122,57 @@ namespace MidManStudio.Mdix.Unity.Editor
                 }
             }
 
+            ProbeTypes(results);
+
+            // Best fit first, so the class that matches this file is already selected.
             _availableTypes = results
-                .OrderBy(t => t.DisplayName)
+                .OrderByDescending(t => t.Score)
+                .ThenBy(t => t.Unused)
+                .ThenBy(t => t.DisplayName, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
             ApplyFilter();
 
             if (_availableTypes.Length == 0)
             {
-                _statusMessage = "No [MdixBakeable] ScriptableObject types found in the project.\n" +
-                                 "Add [MdixBakeable] to a ScriptableObject subclass first.";
-                _statusIsError = true;
+                SetStatus(StatusKind.Error,
+                    "No [MdixBakeable] ScriptableObject types found in the project.\n" +
+                    "Add [MdixBakeable] to a ScriptableObject subclass first.");
+            }
+        }
+
+        /// <summary>Measures how much of this file each candidate type would read.</summary>
+        private void ProbeTypes(List<BakeableTypeInfo> types)
+        {
+            if (_sourceAsset == null || types.Count == 0) return;
+
+            var load = _sourceAsset.Load();
+            if (load.IsFailure)
+            {
+                SetStatus(StatusKind.Error,
+                    "This file has an error, so the types cannot be compared with it:\n" +
+                    load.Error.Message);
+                return;
+            }
+
+            using (var db = load.SuccessResult)
+            {
+                foreach (var info in types)
+                {
+                    try
+                    {
+                        var report = MdixBinder.Probe(db, info.Type, info.DataPath);
+                        info.Probed   = true;
+                        info.Matched  = report.MembersMatched;
+                        info.Seen     = report.MembersSeen;
+                        info.Unused   = report.UnusedKeys.Count;
+                        info.Problems = report.Problems.Count;
+                    }
+                    catch (Exception ex)
+                    {
+                        info.ProbeError = ex.Message;
+                    }
+                }
             }
         }
 
@@ -168,7 +212,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             {
                 GUILayout.Space(10);
                 EditorGUILayout.LabelField(
-                    $"Source:  {_sourceAsset?.name ?? "none"}",
+                    "Source:  " + (_sourceAsset != null ? _sourceAsset.name : "none"),
                     EditorStyles.boldLabel);
             }
 
@@ -178,7 +222,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             {
                 GUILayout.Space(10);
                 EditorGUILayout.LabelField(
-                    "Pick a [MdixBakeable] type to bake this asset into:",
+                    "Pick a [MdixBakeable] type to bake this asset into. The type that reads the most of this file is listed first:",
                     EditorStyles.wordWrappedLabel);
                 GUILayout.Space(10);
             }
@@ -229,7 +273,7 @@ namespace MidManStudio.Mdix.Unity.Editor
 
                 for (int i = 0; i < _filteredTypes.Length; i++)
                 {
-                    var info     = _filteredTypes[i];
+                    var info       = _filteredTypes[i];
                     var isSelected = i == _selectedIndex;
 
                     var style = new GUIStyle(EditorStyles.label)
@@ -250,11 +294,10 @@ namespace MidManStudio.Mdix.Unity.Editor
                         EditorGUILayout.BeginHorizontal();
                     }
 
-                    var label = isSelected
-                        ? $"<b>{info.DisplayName}</b>  " +
-                          $"<color=#7A98C4><size=10>{info.Type.FullName}</size></color>"
-                        : $"{info.DisplayName}  " +
-                          $"<color=#7A98C4><size=10>{info.Type.FullName}</size></color>";
+                    var title = isSelected ? "<b>" + info.DisplayName + "</b>" : info.DisplayName;
+                    var label = title + "  " +
+                                "<color=#7A98C4><size=10>" + info.Type.FullName + "</size></color>" +
+                                info.FitMarkup;
 
                     if (GUILayout.Button(
                         new GUIContent(label),
@@ -280,12 +323,23 @@ namespace MidManStudio.Mdix.Unity.Editor
                     GUILayout.Space(10);
                     var dataPathLabel = string.IsNullOrEmpty(selected.DataPath)
                         ? "root DATA section"
-                        : $"@DATA path: \"{selected.DataPath}\"";
+                        : "@DATA path: \"" + selected.DataPath + "\"";
 
                     EditorGUILayout.LabelField(
-                        $"Assembly: {selected.AssemblyName}    {dataPathLabel}",
+                        "Assembly: " + selected.AssemblyName + "    " + dataPathLabel,
                         EditorStyles.miniLabel);
                     GUILayout.Space(10);
+                }
+
+                var fit = selected.FitDetail;
+                if (fit.Length > 0)
+                {
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        GUILayout.Space(10);
+                        EditorGUILayout.LabelField(fit, EditorStyles.miniLabel);
+                        GUILayout.Space(10);
+                    }
                 }
             }
         }
@@ -305,11 +359,11 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             // Show output path preview
             var outputDir = _sourceAsset != null
-                ? System.IO.Path.GetDirectoryName(_sourceAsset.ProjectRelativePath)
+                ? OutputDirectory()
                 : "Assets";
 
             EditorGUILayout.LabelField(
-                $"→  {outputDir}/{_outputFileName}.asset",
+                "→  " + outputDir + "/" + _outputFileName + ".asset",
                 EditorStyles.miniLabel);
 
             EditorGUILayout.Space(6);
@@ -319,9 +373,11 @@ namespace MidManStudio.Mdix.Unity.Editor
         {
             if (string.IsNullOrEmpty(_statusMessage)) return;
 
-            EditorGUILayout.HelpBox(
-                _statusMessage,
-                _statusIsError ? MessageType.Error : MessageType.Info);
+            var type = _statusKind == StatusKind.Error   ? MessageType.Error
+                     : _statusKind == StatusKind.Warning ? MessageType.Warning
+                     :                                     MessageType.Info;
+
+            EditorGUILayout.HelpBox(_statusMessage, type);
         }
 
         private void DrawActionButtons()
@@ -365,6 +421,12 @@ namespace MidManStudio.Mdix.Unity.Editor
 
         // ── Bake ──────────────────────────────────────────────────────────────
 
+        private string OutputDirectory()
+        {
+            var dir = System.IO.Path.GetDirectoryName(_sourceAsset.ProjectRelativePath);
+            return string.IsNullOrEmpty(dir) ? "Assets" : dir.Replace('\\', '/');
+        }
+
         private void TryBake()
         {
             if (_sourceAsset == null || _selectedIndex >= _filteredTypes.Length)
@@ -376,178 +438,138 @@ namespace MidManStudio.Mdix.Unity.Editor
             var loadResult = _sourceAsset.Load();
             if (loadResult.IsFailure)
             {
-                _statusMessage = $"Parse failed: {loadResult.Error.Message}";
-                _statusIsError = true;
+                SetStatus(StatusKind.Error, "Parse failed: " + loadResult.Error.Message);
                 return;
             }
 
-            using var db = loadResult.SuccessResult;
+            // CreateInstance, not new: a ScriptableObject cannot be built with its constructor.
+            ScriptableObject instance = null;
+            MdixBindReport   report;
 
-            // Deserialize into the target type via reflection — the serializer
-            // handles all the property mapping exactly as it would for a plain POCO.
-            object? instance;
-            List<string> copiedPropertyNames = new();
-            try
+            using (var db = loadResult.SuccessResult)
             {
-                instance = ScriptableObject.CreateInstance(typeInfo.Type);
-
-                var prefix = string.IsNullOrEmpty(typeInfo.DataPath)
-                    ? null
-                    : typeInfo.DataPath;
-
-                // Use MdixSerializer via the database Deserialize path.
-                // We need to call the generic method via reflection because
-                // the type is only known at runtime.
-                var deserializeMethod = typeof(MdixDatabase)
-                    .GetMethod(nameof(MdixDatabase.Deserialize))!
-                    .MakeGenericMethod(typeInfo.Type);
-
-                var result = deserializeMethod.Invoke(
-                    db, new object?[] { prefix });
-
-                // result is MdixResult<T> — check IsSuccess via reflection.
-                var resultType  = result!.GetType();
-                var isSuccess   = (bool)resultType
-                    .GetProperty("IsSuccess")!
-                    .GetValue(result)!;
-
-                if (!isSuccess)
+                try
                 {
-                    var error = resultType
-                        .GetProperty("Error")!
-                        .GetValue(result)!
-                        .ToString();
+                    instance = ScriptableObject.CreateInstance(typeInfo.Type);
+                    report   = MdixBinder.Bind(db, instance, typeInfo.DataPath);
+                }
+                catch (Exception ex)
+                {
+                    if (instance != null) DestroyImmediate(instance);
+                    SetStatus(StatusKind.Error, "Bake error: " + ex.Message);
+                    return;
+                }
+            }
 
-                    _statusMessage = $"Deserialization failed: {error}";
-                    _statusIsError = true;
+            if (report.NothingMatched)
+            {
+                DestroyImmediate(instance);
+                SetStatus(StatusKind.Error,
+                    "Nothing in this file fits " + typeInfo.Type.Name + ", so there is nothing to bake.\n" +
+                    Describe(report));
+                return;
+            }
 
-                    DestroyImmediate((ScriptableObject)instance);
+            if (report.Problems.Count > 0)
+            {
+                DestroyImmediate(instance);
+                SetStatus(StatusKind.Error,
+                    "Not baked: some values could not be converted, and the asset would hold defaults " +
+                    "in their place.\n" + Describe(report));
+                return;
+            }
+
+            var outputPath = OutputDirectory() + "/" + _outputFileName + ".asset";
+
+            ScriptableObject saved;
+            var existing = AssetDatabase.LoadAssetAtPath<ScriptableObject>(outputPath);
+
+            if (existing != null)
+            {
+                if (existing.GetType() != typeInfo.Type)
+                {
+                    DestroyImmediate(instance);
+                    SetStatus(StatusKind.Error,
+                        "'" + outputPath + "' already exists and is a " + existing.GetType().Name +
+                        ", not a " + typeInfo.Type.Name + ". Pick another file name.");
                     return;
                 }
 
-                var deserialized = resultType
-                    .GetProperty("SuccessResult")!
-                    .GetValue(result)!;
-
-                // Copy deserialized property values onto the ScriptableObject.
-                // We instantiated the SO first so Unity serialization works —
-                // now we copy all public properties from the deserialized POCO.
-                foreach (var prop in typeInfo.Type.GetProperties(
-                    BindingFlags.Public | BindingFlags.Instance))
-                {
-                    if (!prop.CanWrite || !prop.CanRead) continue;
-                    try
-                    {
-                        prop.SetValue(instance, prop.GetValue(deserialized));
-                        copiedPropertyNames.Add(prop.Name);
-                    }
-                    catch { /* property may not be serializable — skip */ }
-                }
-            }
-            catch (Exception ex)
-            {
-                _statusMessage = $"Bake error: {ex.Message}";
-                _statusIsError = true;
-                return;
-            }
-
-            // Save as .asset file.
-            var outputDir  = System.IO.Path.GetDirectoryName(
-                _sourceAsset.ProjectRelativePath) ?? "Assets";
-            var outputPath = $"{outputDir}/{_outputFileName}.asset";
-
-            // Warn before overwrite.
-            if (AssetDatabase.LoadAssetAtPath<ScriptableObject>(outputPath) != null)
-            {
                 if (!EditorUtility.DisplayDialog(
                     "Overwrite?",
-                    $"'{outputPath}' already exists. Overwrite it?",
-                    "Overwrite", "Cancel"))
+                    "'" + outputPath + "' already exists. Replace its data with this bake?\n" +
+                    "References to the asset are kept.",
+                    "Replace", "Cancel"))
+                {
+                    DestroyImmediate(instance);
                     return;
+                }
+
+                // Update in place, so scenes and prefabs that point at the asset keep working.
+                var keepName  = existing.name;
+                var keepFlags = existing.hideFlags;
+                EditorUtility.CopySerialized(instance, existing);
+                existing.name      = keepName;
+                existing.hideFlags = keepFlags;
+                EditorUtility.SetDirty(existing);
+                DestroyImmediate(instance);
+                saved = existing;
+            }
+            else
+            {
+                AssetDatabase.CreateAsset(instance, outputPath);
+                saved = instance;
             }
 
-            AssetDatabase.CreateAsset((ScriptableObject)instance, outputPath);
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
             EditorUtility.FocusProjectWindow();
-            Selection.activeObject = AssetDatabase.LoadAssetAtPath<ScriptableObject>(outputPath);
+            Selection.activeObject = saved;
 
-            // ── Post-bake serialization check ────────────────────────────────
-            // The data above is copied via reflection onto C# properties, which
-            // is invisible to Unity's own field-based serializer unless each
-            // property is backed by [field: SerializeField]. Catching this here,
-            // right after a successful bake, is far more useful than the user
-            // discovering an empty Inspector later with no idea why.
-            var unserialized = FindUnserializedProperties(typeInfo.Type, copiedPropertyNames);
+            // Anything Unity itself would drop when it saves this type.
+            var warnings = new List<string>();
+            AppendGroup(warnings, "Left at their defaults, the file has no value for", report.MissingMembers);
+            AppendGroup(warnings, "In the file but read by nothing", report.UnusedKeys);
+            AppendGroup(warnings, "Unity will not store", MdixBinder.FindSerializationGaps(typeInfo.Type));
 
-            if (unserialized.Count > 0)
+            var head = "Generated: " + outputPath + "\n" + report.BoundValues + " values read.";
+
+            if (warnings.Count == 0)
             {
-                _statusMessage =
-                    $"Generated: {outputPath}\n\n" +
-                    $"⚠ These properties won't show up (or survive a reload) in the Inspector " +
-                    $"because they aren't backed by [field: SerializeField]:\n" +
-                    string.Join(", ", unserialized) +
-                    "\n\nAdd [field: SerializeField] to each on " + typeInfo.Type.Name + " to fix.";
-                _statusIsError = true;
-                // Deliberately not auto-closing — the user needs to actually see this.
+                SetStatus(StatusKind.Info, head);
+
+                // Auto-close after a short delay so the person sees the success message.
+                EditorApplication.delayCall += Close;
             }
             else
             {
-                _statusMessage = $"Generated: {outputPath}";
-                _statusIsError = false;
-
-                // Auto-close after a short delay so the user sees the success message.
-                EditorApplication.delayCall += Close;
+                // Deliberately not auto-closing: the list needs to be read.
+                SetStatus(StatusKind.Warning, head + "\n\n" + string.Join("\n", warnings));
             }
         }
 
-        /// <summary>
-        /// Returns the names of properties (from <paramref name="copiedPropertyNames"/>,
-        /// i.e. ones the bake step actually populated) that Unity's serializer will
-        /// silently drop: no compiler-generated backing field carrying
-        /// [SerializeField] (the [field: SerializeField] pattern), and no manually
-        /// declared [SerializeField] field matching the usual `_camelCase` /
-        /// exact-name backing-field conventions.
-        /// </summary>
-        private static List<string> FindUnserializedProperties(
-            Type type, List<string> copiedPropertyNames)
+        private static void AppendGroup(List<string> lines, string heading, List<string> items)
         {
-            var offenders = new List<string>();
+            if (items.Count == 0) return;
 
-            foreach (var propName in copiedPropertyNames)
-            {
-                // [field: SerializeField] compiles to a backing field named
-                // "<PropName>k__BackingField" carrying the SerializeField attribute.
-                var autoBackingField = type.GetField(
-                    $"<{propName}>k__BackingField",
-                    BindingFlags.NonPublic | BindingFlags.Instance);
+            var sb = new StringBuilder();
+            sb.Append(heading).Append(": ");
+            sb.Append(string.Join("; ", items.Take(MaxListedPerGroup)));
+            if (items.Count > MaxListedPerGroup)
+                sb.Append("; and ").Append(items.Count - MaxListedPerGroup).Append(" more");
 
-                var isAutoFieldSerialized =
-                    autoBackingField != null &&
-                    autoBackingField.GetCustomAttribute<SerializeField>() != null;
+            lines.Add(sb.ToString());
+        }
 
-                if (isAutoFieldSerialized) continue;
-
-                // Manually-written property over an explicit [SerializeField] field —
-                // check both the `_camelCase` and exact-name conventions.
-                var camelName = char.ToLowerInvariant(propName[0]) + propName.Substring(1);
-
-                var manualField =
-                    type.GetField("_" + camelName, BindingFlags.NonPublic | BindingFlags.Instance) ??
-                    type.GetField(camelName,        BindingFlags.NonPublic | BindingFlags.Instance) ??
-                    type.GetField(propName,         BindingFlags.NonPublic | BindingFlags.Instance) ??
-                    type.GetField(propName,         BindingFlags.Public    | BindingFlags.Instance);
-
-                var isManualFieldSerialized =
-                    manualField != null &&
-                    (manualField.IsPublic || manualField.GetCustomAttribute<SerializeField>() != null);
-
-                if (!isManualFieldSerialized)
-                    offenders.Add(propName);
-            }
-
-            return offenders;
+        /// <summary>The full picture of a refused bake, in a few lines.</summary>
+        private static string Describe(MdixBindReport report)
+        {
+            var lines = new List<string>();
+            AppendGroup(lines, "Cannot convert", report.Problems);
+            AppendGroup(lines, "No value in the file for", report.MissingMembers);
+            AppendGroup(lines, "In the file but read by nothing", report.UnusedKeys);
+            return string.Join("\n", lines);
         }
 
         // ── Data types ────────────────────────────────────────────────────────
@@ -559,6 +581,14 @@ namespace MidManStudio.Mdix.Unity.Editor
             public string DataPath     { get; }
             public string AssemblyName { get; }
 
+            // Filled by ProbeTypes: how much of the source file this type reads.
+            public bool   Probed     { get; set; }
+            public int    Matched    { get; set; }
+            public int    Seen       { get; set; }
+            public int    Unused     { get; set; }
+            public int    Problems   { get; set; }
+            public string ProbeError { get; set; }
+
             public BakeableTypeInfo(
                 Type   type,
                 string displayName,
@@ -569,6 +599,40 @@ namespace MidManStudio.Mdix.Unity.Editor
                 DisplayName  = displayName;
                 DataPath     = dataPath;
                 AssemblyName = assemblyName;
+            }
+
+            public bool IsPerfect =>
+                Probed && Seen > 0 && Matched == Seen && Unused == 0 && Problems == 0;
+
+            /// <summary>0 to 1: the share of this type's members that find data. Each unconvertible value costs a little.</summary>
+            public float Score =>
+                !Probed || Seen <= 0 ? 0f : Math.Max(0f, (float)Matched / Seen - Problems * 0.01f);
+
+            /// <summary>Short coloured tag for the list: green when it fits exactly, amber when partly, grey when not at all.</summary>
+            public string FitMarkup
+            {
+                get
+                {
+                    if (!Probed) return string.Empty;
+
+                    var colour = IsPerfect ? "#7FD28A" : (Matched > 0 ? "#E6B450" : "#8A8F98");
+                    var text   = IsPerfect ? "fits exactly" : "reads " + Matched + " of " + Seen;
+                    return "  <color=" + colour + "><size=10>" + text + "</size></color>";
+                }
+            }
+
+            /// <summary>One line under the list for the selected type.</summary>
+            public string FitDetail
+            {
+                get
+                {
+                    if (!string.IsNullOrEmpty(ProbeError)) return "Could not compare with this file: " + ProbeError;
+                    if (!Probed)                           return string.Empty;
+                    if (IsPerfect)                         return "Every member of this type finds its value, and every key in the file is read.";
+
+                    return "Reads " + Matched + " of " + Seen + " members; " + Unused + " key(s) in the file are not read" +
+                           (Problems > 0 ? "; " + Problems + " value(s) cannot be converted." : ".");
+                }
             }
         }
     }

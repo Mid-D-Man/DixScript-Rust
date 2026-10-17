@@ -12,6 +12,69 @@ bindings, and per-language wrappers (WASM/Python/C#/Go/Java/Lua/PHP) are
 separate, independently-versioned packages in this same workspace with
 their own release history.
 
+## [2.0.0] — Unreleased
+
+Breaking release.
+
+### Added
+
+- **`Compiler::AST::arena`**, an index arena for the `Value`, `Expression` and
+  `QuickFuncStatement` family: `Arena`, the node types `ValueNode`, `ExprNode` and `StmtNode`
+  (40, 48 and 48 bytes, against 144, 160 and 384 for the owned types), and lossless
+  `import_*` and `export_*` between an owned tree and the arena, and the handles `ValueRef`,
+  `ExprRef` and `StmtRef` (`Arena::value_ref` and friends) whose `Display` and `Debug` print
+  exactly what the owned types print and whose `==` compares trees structurally, across
+  arenas. `arena::Document` is the arena-resident form of a whole `DixScript`
+  (`Document::from_owned`, `Document::export`, structural `==`), with `Doc*` twins of the five
+  sections that hold values, each with its own `from_owned` and `export`. Nothing in the compiler uses it yet; it is the first piece of the
+  arena AST described in `docs/dixscript/arena-ast.md`.
+
+### Removed
+
+- **`DCompressor.bzip2` and `DCompressor.lzma`.** gzip is the only DLM
+  compression codec. The `bzip2` and `lzma-rust2` dependencies are gone
+  (10 fewer crates in the default build). A file that names either codec
+  now fails analysis with a `DLM004` "no longer supported" error, and a key
+  file that records one fails to decompress with the same kind of message.
+  The `bzip2-support` and `xz-support` Cargo features are removed too, so a
+  `features = [...]` list that names either one no longer resolves. Files
+  written by 1.0.0 with these codecs can still be read with 1.0.0.
+- `binary_serialization_benchmark` compares gzip only.
+
+### Performance
+
+- **Parser reservations are capped.** The section parsers sized the Vec for every nested
+  call argument list, array, object and statement block from the length of the whole token
+  stream. Those reservations are now capped at 16 elements; the one vector that holds a
+  whole section keeps its full estimate. Compiling `elements_database.mdix` (445 KB)
+  requests 159 MB instead of 7.50 GB, and its parse stage takes about 30 to 45 percent
+  less time. Output is unchanged. A new test, `parser_alloc_budget`, guards the figure.
+
+- **Value resolution is linear in the number of resolved calls.** Writing each resolved
+  call back into the data tree searched the whole tree for the call's position, so a 4x
+  larger input took 16x as long in that step. Positions are now indexed once. Compiling
+  `elements_database.mdix` (445 KB, debug mode off) takes about a third of the time it did,
+  and a 32x scaled input takes about a sixth. Output is unchanged. A new test,
+  `value_resolution_scaling`, guards the growth rate.
+
+### Changed
+
+- **Language version 2.0.0.** `@CONFIG` `version -> "2.0.0"` is now a recognized
+  language version. Before, the version manager accepted the string but treated the
+  file as 1.0.0. 1.0.0 files still load. The two versions differ only in the DLM
+  codecs: bzip2 and lzma are valid in 1.0.0 and invalid in 2.0.0, where the version
+  check says they were removed. `VersionManager::is_compatible_with` now means "can
+  read files up to that version", and `get_version_constraints` gains a
+  `RemovedDLMModules` entry. The defaults (`OperationalSettings`, the config schema
+  and the manager's fallback) stay at 1.0.0 for now.
+- **Minimum supported Rust version is 1.75** (was 1.85). The crate and its tests build
+  and pass on Rust 1.75.0. Four code changes made that possible: `std::sync::LazyLock`
+  is replaced by a small `Lazy` type on `OnceLock`, two `Option::is_none_or` calls
+  became `map_or(true, ..)`, one `Result::inspect_err` became `map_err`, and a
+  temporary-lifetime pattern in `Runtime/format_options.rs` that only Rust 1.79 and
+  later accepts was rewritten. The repository's `Cargo.lock` pins seven dependencies
+  below their newest versions to stay inside 1.75.
+
 ## [1.0.0] — 2026-07-21
 
 ### Added

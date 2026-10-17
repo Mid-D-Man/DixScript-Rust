@@ -1,6 +1,15 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/AST/mod.rs"
+// ============================================================================
 //! # AST - Abstract Syntax Tree for DixScript
 //!
 //! This module contains all AST node definitions for DixScript v1.0.0
+//!
+//! The types of each submodule are re-exported flat, so `Compiler::AST::Value` and
+//! `Compiler::AST::DixScript` are the usual paths. The one exception is [`arena`]: an index
+//! arena for the `Value` family and an arena-resident form of a whole `DixScript`. It is
+//! reached as `Compiler::AST::arena` and is not used by the compiler yet.
 
 pub mod position;
 pub mod data_types;
@@ -18,13 +27,14 @@ pub mod statements;
 pub mod quickfuncs;
 pub mod root;
 pub mod helpers;
+pub mod arena;
 pub mod Visitors;
 
 // Re-exports for convenience
 pub use position::Position;
 pub use data_types::{
     DataType,
-    ElemType,            // ← new typed-collection element type
+    ElemType,
     ErrorHandlingStrategy,
     CompatibilityMode,
     DebugMode,

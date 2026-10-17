@@ -17,6 +17,9 @@
       <ui:VisualElement name="tab-editor" class="mdix-tab">
         <ui:Label text="• Editor"/>
       </ui:VisualElement>
+      <ui:VisualElement name="tab-search" class="mdix-tab">
+        <ui:Label text="• Search"/>
+      </ui:VisualElement>
       <ui:VisualElement name="tab-templates" class="mdix-tab">
         <ui:Label text="• Templates"/>
       </ui:VisualElement>
@@ -34,6 +37,7 @@
     <!-- Main content — swapped by tab selection -->
     <ui:VisualElement name="panel-explorer"  class="mdix-panel" style="flex-grow:1;"/>
     <ui:VisualElement name="panel-editor"    class="mdix-panel" style="flex-grow:1; display:none;"/>
+    <ui:VisualElement name="panel-search"    class="mdix-panel" style="flex-grow:1; display:none;"/>
     <ui:VisualElement name="panel-templates" class="mdix-panel" style="flex-grow:1; display:none;"/>
 
     <!-- Status bar -->

@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/ValueResolution/value_resolver.rs"
+// ============================================================================
 //! Orchestrates compile-time value resolution across five phases.
 //!
 //! Phase 1: Enum pre-resolution — EnumValue/EnumAccess → Integer.
@@ -7,12 +11,12 @@
 //! Phase 5: Remaining Identifier reference resolution.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use web_time::Instant;
 
 use chrono::Utc;
-use rustc_hash::FxHashMap;
+use crate::Utilities::RustcHash::FxHashMap;
 
 use crate::Builtins::Core::{DixType, DixValue};
 use crate::Builtins::Resolver;
@@ -1467,6 +1471,11 @@ fn execute_iterative_resolution(
 ) -> (usize, Vec<String>) {
     let total = function_calls.len();
 
+    // Where each call sits in the data tree, found once. Replacing a resolved call then costs
+    // the depth of its node instead of a search of the whole tree.
+    let target_positions: HashSet<Position> = function_calls.iter().map(|c| c.position).collect();
+    let replace_index = self.index_call_targets(&target_positions);
+
     let dynamic_limit = (total * 3).max(MIN_CAPACITY * 4);
     let max_iterations = dynamic_limit.min(MAX_RESOLUTION_ITERATIONS);
 
@@ -1532,7 +1541,7 @@ fn execute_iterative_resolution(
                         .collect();
 
                     let new_value = Self::convert_dix_value_to_value(&dix_value, pos);
-                    self.replace_value_in_ast_by_location(&location, pos, new_value);
+                    self.replace_value_at(&replace_index, pos, new_value);
                     self.data_context
                         .borrow_mut()
                         .insert(location.clone(), dix_value.clone());
@@ -2103,6 +2112,143 @@ fn resolve_value_to_dix(
     }
 }
     // ==================== AST REPLACEMENT ====================
+
+    /// Path to the first node (depth first, the order the search below uses) at each target
+    /// position: the entry index, then at every level the index of the child to step into
+    /// (property, item, array element or constructor argument).
+    fn index_call_targets(&self, targets: &HashSet<Position>) -> HashMap<Position, Vec<u32>> {
+        let mut found = HashMap::with_capacity(targets.len());
+        let Some(data) = self.ast.data.as_ref() else {
+            return found;
+        };
+        let mut path: Vec<u32> = Vec::with_capacity(16);
+        for (i, entry) in data.entries.iter().enumerate() {
+            if found.len() == targets.len() {
+                break;
+            }
+            path.push(i as u32);
+            Self::index_entry(entry, targets, &mut path, &mut found);
+            path.pop();
+        }
+        found
+    }
+
+    fn index_entry(
+        entry: &DataEntry,
+        targets: &HashSet<Position>,
+        path: &mut Vec<u32>,
+        found: &mut HashMap<Position, Vec<u32>>,
+    ) {
+        match entry {
+            DataEntry::SimpleProperty { value, .. } => Self::index_value(value, targets, path, found),
+            DataEntry::TableProperty { properties, .. } => {
+                for (i, prop) in properties.iter().enumerate() {
+                    path.push(i as u32);
+                    Self::index_value(&prop.value, targets, path, found);
+                    path.pop();
+                }
+            }
+            DataEntry::GroupArray { items, .. } => {
+                for (i, item) in items.iter().enumerate() {
+                    path.push(i as u32);
+                    Self::index_value(item, targets, path, found);
+                    path.pop();
+                }
+            }
+            DataEntry::ObjectProperty { object, .. } => Self::index_value(object, targets, path, found),
+        }
+    }
+
+    fn index_value(
+        value: &Value,
+        targets: &HashSet<Position>,
+        path: &mut Vec<u32>,
+        found: &mut HashMap<Position, Vec<u32>>,
+    ) {
+        if let Some(pos) = Self::value_position(value) {
+            if targets.contains(&pos) && !found.contains_key(&pos) {
+                found.insert(pos, path.clone());
+            }
+        }
+        match value {
+            Value::Array { values, .. } | Value::NestedArray { values, .. } => {
+                for (i, item) in values.iter().enumerate() {
+                    path.push(i as u32);
+                    Self::index_value(item, targets, path, found);
+                    path.pop();
+                }
+            }
+            Value::Object { properties, .. } => {
+                for (i, prop) in properties.iter().enumerate() {
+                    path.push(i as u32);
+                    Self::index_value(&prop.value, targets, path, found);
+                    path.pop();
+                }
+            }
+            Value::PrefixedConstructor { arguments, .. } => {
+                for (i, arg) in arguments.iter().enumerate() {
+                    path.push(i as u32);
+                    Self::index_value(arg, targets, path, found);
+                    path.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The node a path from `index_call_targets` points at, or `None` if the tree no longer has
+    /// that shape.
+    fn slot_at_path<'s>(entries: &'s mut [DataEntry], path: &[u32]) -> Option<&'s mut Value> {
+        let (&first, rest) = path.split_first()?;
+        let entry = entries.get_mut(first as usize)?;
+        let (mut value, rest): (&mut Value, &[u32]) = match entry {
+            DataEntry::SimpleProperty { value, .. } => (value, rest),
+            DataEntry::ObjectProperty { object, .. } => (object, rest),
+            DataEntry::TableProperty { properties, .. } => {
+                let (&i, rest) = rest.split_first()?;
+                (&mut properties.get_mut(i as usize)?.value, rest)
+            }
+            DataEntry::GroupArray { items, .. } => {
+                let (&i, rest) = rest.split_first()?;
+                (items.get_mut(i as usize)?, rest)
+            }
+        };
+        for &i in rest {
+            value = match value {
+                Value::Array { values, .. } | Value::NestedArray { values, .. } => {
+                    values.get_mut(i as usize)?
+                }
+                Value::Object { properties, .. } => &mut properties.get_mut(i as usize)?.value,
+                Value::PrefixedConstructor { arguments, .. } => arguments.get_mut(i as usize)?,
+                _ => return None,
+            };
+        }
+        Some(value)
+    }
+
+    /// Replace the node at `target`. Uses the indexed path and checks that the node there still
+    /// has the target position. If an earlier replacement changed the tree under the index, it
+    /// falls back to the search, so the result is the same as searching every time.
+    fn replace_value_at(
+        &mut self,
+        index: &HashMap<Position, Vec<u32>>,
+        target: Position,
+        new_value: Value,
+    ) {
+        let Some(path) = index.get(&target) else {
+            // Not in the tree when the index was built, so a search would not find it either.
+            return;
+        };
+        if let Some(data) = self.ast.data.as_mut() {
+            if let Some(slot) = Self::slot_at_path(&mut data.entries, path) {
+                if Self::value_position(slot) == Some(target) {
+                    *slot = new_value;
+                    return;
+                }
+            }
+        }
+        self.replace_value_in_ast_by_location("", target, new_value);
+    }
 
     fn replace_value_in_ast_by_location(
         &mut self,

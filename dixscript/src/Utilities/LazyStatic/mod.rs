@@ -11,4 +11,4 @@
 //! dependency, not to grow the crate's own public API.
 
 pub(crate) mod lazy_static_macro;
-pub(crate) use lazy_static_macro::lazy_static;
+pub(crate) use lazy_static_macro::{lazy_static, Lazy};

@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/runtime.md, section "Runtime/format_options.rs"
+// ============================================================================
 /// Formatting options for DixScript conversion and export
 /// 
 /// Controls how DixData is serialized to MDIX format:
@@ -126,10 +130,14 @@ impl DixFormatOptions {
             return String::new();
         }
         
-        let unit = if self.use_tabs {
+        // The `else` arm needs an owned String that outlives the `if`, so it is
+        // declared first and assigned there.
+        let spaces;
+        let unit: &str = if self.use_tabs {
             "\t"
         } else {
-            &" ".repeat(self.indent_size)
+            spaces = " ".repeat(self.indent_size);
+            &spaces
         };
         
         unit.repeat(level)

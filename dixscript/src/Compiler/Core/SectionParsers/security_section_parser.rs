@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/SectionParsers/security_section_parser.rs"
+// ============================================================================
 //! Parser for the `@SECURITY(...)` section.
 //!
 //! ```text
@@ -11,17 +15,39 @@
 //!
 //! Commas between SecurityEntry blocks are optional.
 //! Commas between SecurityField entries within a block are required.
+//!
+//! # Values are built in an arena
+//!
+//! The parser owns an [`Arena`]. Every field value is built there as a node, the entries and
+//! fields are kept as [`DocSecurityEntry`] and [`DocSecurityField`] records that hold the
+//! value ids, and [`SecuritySectionParser::parse_section`] exports the finished section once,
+//! at the end, as the owned [`SecuritySection`]. The public interface and the result are the
+//! same as before the parser used an arena; `tests/security_section_tests.rs` pins them.
 
-use crate::Compiler::AST::{SecuritySection, SecurityEntry, SecurityField, Position, Value};
+use crate::Compiler::AST::{SecuritySection, Position};
+use crate::Compiler::AST::arena::{
+    Arena, DocSecurity, DocSecurityEntry, DocSecurityField, ValueId, ValueNode,
+};
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::ErrorManager::{ErrorManager, ParseErrorType, DebugConfig};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::Core::Tokenizer::token::SectionId;
 
+/// Returned in place of a token when the position is past the end of the slice.
+static EOF: Token = Token {
+    token_type: TokenType::EndOfFile,
+    line: 1,
+    column: 1,
+    section: SectionId::None,
+};
+
 const MAX_ITERATIONS_PER_TOKEN: usize = 3;
 const ABSOLUTE_MAX_ITERATIONS: usize = 500_000;
 const MAX_STUCK_COUNT: usize = 3;
 
+/// Parser for the `@SECURITY(...)` section.
+///
+/// Create it over the section's tokens and call [`parse_section`](Self::parse_section).
 pub struct SecuritySectionParser<'a> {
     tokens: &'a [Token],
     operational_settings: &'a OperationalSettings,
@@ -33,14 +59,23 @@ pub struct SecuritySectionParser<'a> {
     iteration_count: usize,
     max_iterations: usize,
     has_encountered_errors: bool,
+    /// Every value of the section is built here; `parse_section` exports the finished section.
+    arena: Arena,
 }
 
 impl<'a> SecuritySectionParser<'a> {
+    /// Creates a parser that reports diagnostics to the process-wide shared [`ErrorManager`].
+    ///
+    /// Use [`new_with_error_manager`](Self::new_with_error_manager) to report to a specific one.
     pub fn new(tokens: &'a [Token], operational_settings: &'a OperationalSettings) -> Self {
         Self::new_with_error_manager(tokens,operational_settings,ErrorManager::get_shared_instance())
 
     }
 
+    /// Creates a parser that reports diagnostics to `error_manager`.
+    ///
+    /// The parser stops after three times the token count in steps, capped at 500,000, so
+    /// malformed input cannot make it loop forever.
     pub fn new_with_error_manager(
         tokens: &'a [Token],
         operational_settings: &'a OperationalSettings,
@@ -71,14 +106,20 @@ impl<'a> SecuritySectionParser<'a> {
             iteration_count: 0,
             max_iterations,
             has_encountered_errors: false,
+            arena: Arena::new(),
         }
     }
 
+    /// Parses the section and returns it.
+    ///
+    /// Under the `halt` error strategy a parse error ends the section and the result is `None`.
+    /// Under `continue` and `recover` the parser keeps going and returns the entries it could
+    /// read, with a `Value::Error` standing in for a field whose value is missing.
     pub fn parse_section(&mut self) -> Option<SecuritySection> {
         let section_start_pos = Position::from_token(self.current());
         self.reset_parse_state();
 
-        let mut security_entries = Vec::with_capacity(4);
+        let mut security_entries: Vec<DocSecurityEntry> = Vec::with_capacity(4);
 
         if !self.match_and_consume_symbol('(') {
             let current = self.current().clone();
@@ -97,7 +138,7 @@ impl<'a> SecuritySectionParser<'a> {
 
         if self.is_current_symbol(')') {
             self.advance();
-            return Some(SecuritySection::new(security_entries, section_start_pos));
+            return Some(self.finish_section(security_entries, section_start_pos));
         }
 
         while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
@@ -163,10 +204,15 @@ impl<'a> SecuritySectionParser<'a> {
             ));
         }
 
-        Some(SecuritySection::new(security_entries, section_start_pos))
+        Some(self.finish_section(security_entries, section_start_pos))
     }
 
-    fn parse_security_entry(&mut self) -> Option<SecurityEntry> {
+    /// Exports the section built in the arena as the owned `SecuritySection`.
+    fn finish_section(&self, entries: Vec<DocSecurityEntry>, position: Position) -> SecuritySection {
+        DocSecurity { entries, position }.export(&self.arena)
+    }
+
+    fn parse_security_entry(&mut self) -> Option<DocSecurityEntry> {
         let entry_start_pos = Position::from_token(self.current());
 
         let block_key = self.parse_identifier_or_keyword(
@@ -296,10 +342,10 @@ impl<'a> SecuritySectionParser<'a> {
             }
         }
 
-        Some(SecurityEntry::new(block_key, fields, entry_start_pos))
+        Some(DocSecurityEntry { block_key, fields, position: entry_start_pos })
     }
 
-    fn parse_security_field(&mut self) -> Option<SecurityField> {
+    fn parse_security_field(&mut self) -> Option<DocSecurityField> {
         let field_start_pos = Position::from_token(self.current());
 
         let key =
@@ -334,14 +380,12 @@ impl<'a> SecuritySectionParser<'a> {
                 if self.should_halt_section() {
                     return None;
                 }
-                Value::Error {
-                    message: format!("Missing value for key '{}'", key),
-                    position: field_start_pos,
-                }
+                let message = self.arena.alloc_str(&format!("Missing value for key '{}'", key));
+                self.arena.alloc_value(ValueNode::Error { message, position: field_start_pos })
             }
         };
 
-        Some(SecurityField::new(key, value, field_start_pos))
+        Some(DocSecurityField { key, value, position: field_start_pos })
     }
 
     fn parse_identifier_or_keyword(&mut self, context: &str) -> Option<String> {
@@ -364,65 +408,37 @@ impl<'a> SecuritySectionParser<'a> {
         }
     }
 
-    fn parse_security_value(&mut self) -> Option<Value> {
-        let pos = Position::from_token(self.current());
+    fn parse_security_value(&mut self) -> Option<ValueId> {
+        // `tokens` is a copy of the shared slice reference, so `token` does not borrow `self`
+        // and the arena can be borrowed mutably while the token is still read.
+        let tokens: &'a [Token] = self.tokens;
+        let token: &'a Token = tokens.get(self.position).unwrap_or(&EOF);
+        let pos = Position::from_token(token);
+        let arena = &mut self.arena;
 
-        let value = match &self.current().token_type {
-            TokenType::String(s) => Some(Value::String {
-                value: s.clone(),
-                position: pos,
-            }),
-            TokenType::StringSingle(s) => Some(Value::String {
-                value: s.clone(),
-                position: pos,
-            }),
-            TokenType::Integer(i) => Some(Value::Integer {
-                value: *i,
-                position: pos,
-            }),
-            TokenType::Long(i) => Some(Value::Long {
-                value: *i,
-                position: pos,
-            }),
-            TokenType::Float(fl) => Some(Value::Float {
-                value: *fl,
-                position: pos,
-            }),
-            TokenType::Double(d) => Some(Value::Double {
-                value: *d,
-                position: pos,
-            }),
-            TokenType::Bool(b) => Some(Value::Boolean {
-                value: *b,
-                position: pos,
-            }),
-            TokenType::HexColor(h) => Some(Value::HexColor {
-                value: h.clone(),
-                position: pos,
-            }),
+        let node = match &token.token_type {
+            TokenType::String(s) => Some(ValueNode::String { value: arena.alloc_str(s), position: pos }),
+            TokenType::StringSingle(s) => Some(ValueNode::String { value: arena.alloc_str(s), position: pos }),
+            TokenType::Integer(i) => Some(ValueNode::Integer { value: *i, position: pos }),
+            TokenType::Long(i) => Some(ValueNode::Long { value: *i, position: pos }),
+            TokenType::Float(fl) => Some(ValueNode::Float { value: *fl, position: pos }),
+            TokenType::Double(d) => Some(ValueNode::Double { value: *d, position: pos }),
+            TokenType::Bool(b) => Some(ValueNode::Boolean { value: *b, position: pos }),
+            TokenType::HexColor(h) => Some(ValueNode::HexColor { value: arena.alloc_str(h), position: pos }),
             TokenType::Identifier(id) if id.eq_ignore_ascii_case("auto") => {
-                Some(Value::String {
-                    value: "auto".to_string(),
-                    position: pos,
-                })
+                Some(ValueNode::String { value: arena.alloc_str("auto"), position: pos })
             }
-            TokenType::Keyword(k) if *k == "true" => Some(Value::Boolean {
-                value: true,
-                position: pos,
-            }),
-            TokenType::Keyword(k) if *k == "false" => Some(Value::Boolean {
-                value: false,
-                position: pos,
-            }),
-            TokenType::Keyword(k) if *k == "null" => Some(Value::Null { position: pos }),
+            TokenType::Keyword(k) if *k == "true" => Some(ValueNode::Boolean { value: true, position: pos }),
+            TokenType::Keyword(k) if *k == "false" => Some(ValueNode::Boolean { value: false, position: pos }),
+            TokenType::Keyword(k) if *k == "null" => Some(ValueNode::Null { position: pos }),
             _ => None,
         };
 
-        if value.is_some() {
+        let id = node.map(|n| self.arena.alloc_value(n));
+        if id.is_some() {
             self.advance();
         }
-
-        value
+        id
     }
 
     /// Consume a `->` token (`TokenType::SwitchCase`), with a two-symbol fallback.
@@ -466,7 +482,7 @@ impl<'a> SecuritySectionParser<'a> {
         if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt {
             None
         } else {
-            Some(SecuritySection::new(Vec::new(), start_pos))
+            Some(self.finish_section(Vec::new(), start_pos))
         }
     }
 
@@ -546,12 +562,6 @@ impl<'a> SecuritySectionParser<'a> {
 
     #[inline]
     fn current(&self) -> &Token {
-        static EOF: Token = Token {
-            token_type: TokenType::EndOfFile,
-            line: 1,
-            column: 1,
-            section: SectionId::None,
-        };
         self.tokens.get(self.position).unwrap_or(&EOF)
     }
 

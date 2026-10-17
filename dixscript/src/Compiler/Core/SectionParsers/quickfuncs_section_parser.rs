@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/SectionParsers/quickfuncs_section_parser.rs"
+// ============================================================================
 //!  Parser for the `@QuickFunctions(...)`
 //! ```text,no_run
 //! SPEC (BENF grammar):
@@ -23,7 +27,7 @@ use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::ErrorManager::{ErrorManager, ParseErrorType, DebugConfig};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::Core::Tokenizer::token::SectionId;
-use crate::Utilities::{Keywords, estimate_statements_count, estimate_properties_count};
+use crate::Utilities::{Keywords, bounded_estimate, section_estimate, estimate_statements_count, estimate_properties_count};
 use std::collections::HashMap;
 
 const MAX_ITERATIONS_PER_TOKEN: usize = 3;
@@ -141,7 +145,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
         let section_start_token = self.current().clone();
         let section_start_pos = Position::from_token(&section_start_token);
 
-        let mut functions = Vec::with_capacity(usize::max(2, self.tokens.len() / 50));
+        let mut functions = Vec::with_capacity(section_estimate(2, self.tokens.len(), 50));
 
         if self.check_symbol('(') {
             self.advance();
@@ -389,7 +393,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
     /// Parse `(x<int>, y<float> = 42, z)`.
 fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
-    let mut parameters = Vec::with_capacity(usize::max(2, self.tokens.len() / 100));
+    let mut parameters = Vec::with_capacity(bounded_estimate(2, self.tokens.len(), 100));
 
     if !self.expect_symbol('(') {
         return parameters;
@@ -2063,7 +2067,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             return Value::Array { values: Vec::new(), position: arr_pos };
         }
 
-        let mut items = Vec::with_capacity(usize::max(4, self.tokens.len() / 40));
+        let mut items = Vec::with_capacity(bounded_estimate(4, self.tokens.len(), 40));
 
         while !self.is_at_end() && !self.check_symbol(']') {
             self.skip_whitespace();
@@ -2426,7 +2430,7 @@ fn parse_blob_constructor(&mut self) -> Expression {
     // =============================================================================
 
     fn parse_function_arguments(&mut self) -> Vec<Expression> {
-        let mut args = Vec::with_capacity(usize::max(2, self.tokens.len() / 50));
+        let mut args = Vec::with_capacity(bounded_estimate(2, self.tokens.len(), 50));
 
         if !self.expect_symbol('(') {
             return args;

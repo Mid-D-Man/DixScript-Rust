@@ -45,7 +45,7 @@ use std::hash::{BuildHasher, Hasher};
 
 /// The hasher. Almost never named directly -- use [`FxHashMap`] / [`FxHashSet`].
 #[derive(Clone)]
-pub(crate) struct FxHasher {
+pub struct FxHasher {
     hash: usize,
 }
 
@@ -60,7 +60,7 @@ const K: usize = 0x93d765dd;
 impl FxHasher {
     /// A hasher starting from `seed` instead of zero.
     #[allow(dead_code)]
-    pub(crate) const fn with_seed(seed: usize) -> FxHasher {
+    pub const fn with_seed(seed: usize) -> FxHasher {
         FxHasher { hash: seed }
     }
 
@@ -219,7 +219,7 @@ fn hash_bytes(bytes: &[u8]) -> u64 {
 
 /// Builds [`FxHasher`]s. A unit struct, as upstream's is.
 #[derive(Copy, Clone, Default)]
-pub(crate) struct FxBuildHasher;
+pub struct FxBuildHasher;
 
 impl BuildHasher for FxBuildHasher {
     type Hasher = FxHasher;
@@ -229,10 +229,10 @@ impl BuildHasher for FxBuildHasher {
 }
 
 /// Drop-in replacement for `rustc_hash::FxHashMap`.
-pub(crate) type FxHashMap<K, V> = HashMap<K, V, FxBuildHasher>;
+pub type FxHashMap<K, V> = HashMap<K, V, FxBuildHasher>;
 
 /// Drop-in replacement for `rustc_hash::FxHashSet`.
-pub(crate) type FxHashSet<V> = HashSet<V, FxBuildHasher>;
+pub type FxHashSet<V> = HashSet<V, FxBuildHasher>;
 
 #[cfg(test)]
 mod tests {

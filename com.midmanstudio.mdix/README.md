@@ -4,7 +4,7 @@
 More powerful than PlayerPrefs. Lighter than SQLite.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Unity 2023.1+](https://img.shields.io/badge/Unity-2023.1%2B-black)](https://unity.com/)
+[![Unity 2022.3+](https://img.shields.io/badge/Unity-2022.3%2B-black)](https://unity.com/)
 
 ---
 
@@ -86,25 +86,60 @@ var enemies = _enemyData
     .UnwrapOr(new List<EnemyConfig>());
 ```
 
+`LoadAs` reads public fields, `[SerializeField]` fields and properties, and fills lists, arrays, sets,
+dictionaries, nested classes and enums to any depth. `Bind<T>` does the same with the path of the data
+as its argument:
+```csharp
+[System.Serializable]
+public class EnemyConfig { public string Name; public int Health; }
+
+public class EnemyTable
+{
+    public int SpawnCap;
+    public List<EnemyConfig> Enemies;
+}
+
+var result = _enemyData.Bind<EnemyTable>();          // whole file; Bind<T>("server") for one object
+if (result.IsSuccess) Debug.Log(result.SuccessResult.Enemies.Count);
+else                  Debug.LogError(result.Error.Message);
+```
+A key such as `spawn_cap` is read by a member called `SpawnCap`, `spawnCap` or `spawn_cap`. Unity's
+`Vector2`, `Vector3`, `Vector4`, `Vector2Int`, `Vector3Int`, `Quaternion`, `Matrix4x4`, `Rect` and `Bounds` are
+read from objects such as `{ x = 1.0, y = 2.0, z = 3.0 }`, and `Color` and `Color32` from a hex colour such as
+`#FF8000FF` (a `Color` also from `{ r = 1.0, g = 0.5, b = 0.0, a = 1.0 }`). `Bind<T>`
+fails only when data exists but cannot be converted; a member with no data keeps the value its
+constructor gave it. For a report of members without data and keys nothing reads, call
+`MdixBinder.ReadAs<T>(db, "", out var report)` on a database you loaded yourself and print
+`report.Describe()`. `T` is a class or struct (a positional record works) or a ScriptableObject type; to fill
+an instance you already have, use `MdixBinder.Bind(db, instance, "")`.
+
+`Bind<T>` works by reflection. On IL2CPP builds (iOS, Android, WebGL, consoles) keep your data
+classes from being stripped: mark them `[UnityEngine.Scripting.Preserve]`, or add their assembly to
+a `link.xml` in your project (`<assembly fullname="YourAssembly" preserve="all"/>`). The package's
+own `link.xml` already preserves the Mdix assemblies.
+
 ---
 
 ## Save System
 
-Mdix replaces PlayerPrefs for structured save data:
+Mdix replaces PlayerPrefs for structured save data. Any class or struct works as it is: no attributes,
+no conversion code, no splitting a `Vector3` into three floats.
 ```csharp
 using MidManStudio.Mdix.Unity;
 
-// Define your save data
-[MdixObject]
 public class PlayerSave
 {
-    public string PlayerName { get; set; } = "Player";
-    public int    Level      { get; set; } = 1;
-    public int    Health     { get; set; } = 100;
+    public string Name = "Player";
+    public int Level = 1;
+    public Vector3 Position;
+    public Quaternion Rotation;
+    public Color Tint = Color.white;
+    public List<ItemStack> Items = new List<ItemStack>();
+    public Dictionary<string, int> Flags = new Dictionary<string, int>();
+    public DateTime LastSaved;
 }
 
 // Save
-var data = new PlayerSave { PlayerName = "Hero", Level = 5, Health = 80 };
 MdixUnityExtensions.Save("slot1", data);
 // Writes to: persistentDataPath/mdix/saves/slot1.mdix
 
@@ -117,6 +152,55 @@ var save = MdixUnityExtensions
 bool exists = MdixUnityExtensions.SaveExists("slot1");
 MdixUnityExtensions.DeleteSave("slot1");
 ```
+
+The file is plain text you can read and edit:
+```
+@DATA(
+  name = "Kai"
+  level = 3
+  position = { x = 1.25f, y = -2.0f, z = 3.5f }
+  rotation = { x = 0.1f, y = 0.2f, z = 0.3f, w = 0.9f }
+  tint = { r = 1.0f, g = 0.5f, b = 0.25f, a = 1.0f }
+  items = [{ id = "sword", count = 1 }, { id = "potion", count = 5 }]
+  flags = [{ key = "door_open", value = 1 }]
+  last_saved = "2026-10-10T08:00:00.0000000Z"
+)
+```
+
+**What is stored.** Public fields, `[SerializeField]` private fields, and properties with a public getter
+and any setter (`{ get; private set; }` included). Mark a field `[NonSerialized]` or a property
+`[MdixIgnore]` to leave it out.
+
+| Kind | Types |
+|---|---|
+| Numbers and text | `int`, `uint`, `long`, `ulong`, `short`, `ushort`, `byte`, `sbyte`, `float`, `double`, `decimal`, `bool`, `char`, `string`, enums (by name), nullables |
+| Time and ids | `DateTime` (its Kind is kept), `DateTimeOffset`, `TimeSpan`, `Guid` |
+| Collections | arrays, `List<T>`, `HashSet<T>`, `Dictionary<K, V>` with any key type, any nesting of them, `byte[]` (as base64) |
+| Your types | classes, structs and records (positional ones too), nested up to 32 levels |
+| Unity | `Vector2`, `Vector3`, `Vector4`, `Vector2Int`, `Vector3Int`, `Quaternion`, `Matrix4x4`, `Rect`, `RectInt`, `Bounds`, `BoundsInt`, `Color`, `Color32` |
+
+**What is not stored.** References to Unity objects (`GameObject`, `Transform`, `Sprite`, a
+`ScriptableObject` reference: save a name or an id instead), delegates and events, members typed `object`,
+as an interface or as an abstract class, multi-dimensional arrays, and references that loop back on
+themselves. These are left out and a warning names each one once. A derived object kept in a base-typed
+member is saved with the base members only. Classes need a parameterless constructor or to be a record;
+members missing from a file keep the value the constructor gave them.
+
+**Safe writes.** The text is checked before anything is touched, then written to `slot1.mdix.tmp` and swapped
+in, and the previous save is kept as `slot1.mdix.bak`. If the main file is missing, cut off or damaged,
+`LoadSave` reads the backup and says so in the log. A failed save never replaces a good one.
+
+**Slots and prefixes.** `Save("all", data, "slot2")` stores the object under the key `slot2` (`"a.b"` nests
+further), so one file can hold several saves; pass the same prefix to `LoadSave`. A class marked
+`[MdixObject("player")]` uses that prefix when you pass none.
+
+`Save`, `LoadSave`, `SaveConfig` and `LoadConfig` are thin wrappers. `MdixWriter.ToText(data)` gives you the
+text (and a report of what was not stored) and `MdixBinder.ReadAs<T>(db, path)` reads it back, if you want
+to keep saves somewhere else (cloud, a database field). Both use reflection: on IL2CPP keep your save classes
+from being stripped (`[UnityEngine.Scripting.Preserve]` or a `link.xml` entry). Expect on the order of a tenth
+of a millisecond per stored object on a desktop CPU, several times that on a phone.
+
+Files written by earlier versions of the package still load.
 
 ---
 
@@ -170,41 +254,99 @@ StreamingAssets/
 For data that never changes at runtime, bake your `.mdix` into a typed
 Unity ScriptableObject for zero-cost access:
 ```csharp
-// 1. Mark your ScriptableObject
-[MdixBakeable("enemies")]
-public class EnemyDataAsset : ScriptableObject
+// 1. Describe the data. Public fields are what Unity stores. A key such as
+//    spawn_cap is read by a member called SpawnCap, spawnCap or spawn_cap.
+[Serializable]
+public class EnemyConfig
 {
-    public List<EnemyConfig> enemies;
+    public string Name;
+    public int Health;
+}
+
+[MdixBakeable]
+public class EnemyDatabase : ScriptableObject
+{
+    public int SpawnCap;
+    public List<EnemyConfig> Enemies;
 }
 
 // 2. Right-click the .mdix asset in the Project window
-//    → Generate ScriptableObject
-//    → Pick EnemyDataAsset from the list
+//    → MDIX → Generate ScriptableObject
+//    → the class that fits this file best is already selected
 //    → Click Generate
 
 // 3. Use the baked asset directly — no parsing, no FFI
 public class Spawner : MonoBehaviour
 {
-    [SerializeField] private EnemyDataAsset _enemies;
+    [SerializeField] private EnemyDatabase _enemies;
 
-    void Start()
-    {
-        var goblin = _enemies.enemies[0];
-        Debug.Log(goblin.Name);
-    }
+    void Start() => Debug.Log(_enemies.Enemies[0].Name);
 }
 ```
+
+What the bake reads: public fields and `[SerializeField]` fields, writable properties, lists and
+arrays, nested `[Serializable]` classes and structs, and enums, to any depth. Enums are matched by
+their number, so keep the numbers of a C# enum equal to those in the file's `@ENUMS` section.
+Numbers convert between int, float and double; a value that does not fit refuses the bake instead
+of being rounded.
+
+After each bake the wizard lists the members the file has no value for, the keys nothing reads, and
+the members Unity would not store (a property without `[field: SerializeField]`, a nested class that
+is not `[Serializable]`). Baking again updates the same asset in place, so scenes and prefabs that
+point at it keep working. The class list shows how much of the file each class reads, best first.
 
 ---
 
 ## MDIX Studio
 
-Open via **Window → MDIX Studio** or double-click any `.mdix` asset.
+Open via **MidManStudio → MDIX Studio**, double-click any `.mdix` asset, or right-click one and
+choose **MDIX → Open in MDIX Studio**.
 
-- **Explorer tab** — compiled data viewer. Flat properties shown as
-  key-value rows. Arrays shown as Supabase-style tables with typed columns.
-- **Editor tab** — source text editor with live compile status.
+- **Explorer tab** — compiled data viewer. Plain values are key-value rows. An array of flat
+  objects is a table with typed columns. Objects and arrays nest to any depth; each one folds when
+  you click its header, and **Fold All** / **Unfold All** does every one at once. Large data is
+  capped (200 items per array) and says so.
+
+  **Editing values in place.** A value written out in the file as a plain number, text, `true` /
+  `false` or colour is highlighted when you hover it. Click it, type, and press Enter: the change
+  is made in the text of the Editor tab and compiled, and Esc (or clicking away) cancels. A number
+  keeps its type (a `Long` keeps its `L`, a `Float` its `f`, a `Double` stays a double), and text is
+  escaped for you. The new text is compiled before it is accepted, and the edit is refused unless
+  the value reads back exactly as entered and the data keeps the same paths. Values calculated
+  from the one you changed are allowed to move, and the status bar names them. Nothing is written to
+  disk until **Save**.
+
+  Only plain literals can be edited: a value produced by a function call (the `createEnemy("Goblin",
+  50, ...)` kind), an enum member, an expression, a `raw` string, a date, `null` or a hex or binary
+  number stays read-only, because there is no single piece of text behind it. Change those in the
+  Editor tab, where a function argument is the thing to edit.
+- **Editor tab** — source text editor with live compile status, syntax highlighting and
+  language-server features (diagnostics, completion, hover — see below). **Save** on an
+  unsaved scratch document asks where to put it.
+- **Search tab** — find text in every `.mdix` file of the project, packages included. Typing
+  searches after a short pause and Enter searches at once. **Match case**, **Regex** and
+  **Names only** (keys, sections, enums and functions, skipping values and comments) narrow it. Click
+  a result to open the file at the match. The open document is searched as you have it, unsaved
+  edits included.
 - **Templates tab** — create new files from built-in templates.
+
+### Language server
+
+The Editor tab talks to `mdix-lsp`, which ships inside the package (`Editor/Bin/<platform>/`), so
+there is nothing to install.
+
+| Feature | How it works |
+|---|---|
+| Diagnostics | Problem underlines appear after a short typing pause; click a row in the problems list to jump to that line |
+| Completion | Opens on `@ . < ~ { ( [`; **Ctrl+Space** (or **Cmd/Ctrl+I**) opens it on demand. Up/Down/PageUp/PageDown to choose, **Enter** or **Tab** to accept, **Esc** to dismiss |
+| Snippets | After accepting one, **Tab** / **Shift+Tab** move between its placeholders; **Esc** ends it |
+| Hover | Leave the caret still for a moment and the docs for the symbol under it appear |
+| Highlighting | Toggle under **MidManStudio → MDIX Language Server → Syntax Highlighting** |
+
+The Editor tab shows the server's state (starting, ready, how many problems, or the error). The
+**MidManStudio → MDIX Language Server** menu also has **Restart**, **Verbose Server Log** and
+**Set Server Path...**. The server is looked up in this order: the path set from that menu, the
+`MDIX_LSP_PATH` environment variable, the bundled binary, then your `PATH`.
 
 ---
 
@@ -271,6 +413,9 @@ com.midmanstudio.mdix/
 │   ├── MdixAssetEditor.cs                    ← inside MdixImporter.cs
 │   ├── MdixBakeWizard.cs
 │   ├── MdixEditorWindow.cs
+│   ├── MdixEditorWindow.Explorer.cs          ← tree view, folding, in-place editing
+│   ├── MdixSourceMap.cs                      ← where each plain literal sits in the text
+│   ├── MdixLiteralEdit.cs                    ← formats, applies and checks one edit
 │   ├── CreateMdixMenuItems.cs
 │   └── UI/
 │       ├── MdixEditorWindow.uxml

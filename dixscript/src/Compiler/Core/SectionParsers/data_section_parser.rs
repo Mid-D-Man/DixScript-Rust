@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/SectionParsers/data_section_parser.rs"
+// ============================================================================
 //! Parser for the `@DATA(...)` section.
 //!
 //! Two-tier system (TOML-inspired): flat Tier-1 properties must precede all
@@ -19,7 +23,7 @@ use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::Core::Tokenizer::token::SectionId;
 use crate::Compiler::Utilities::{IdentifierPatternAnalyzer, IdentifierPatternType};
 use crate::ErrorManager::{ErrorManager, ParseErrorType, DebugConfig};
-use crate::Utilities::{estimate_properties_count, estimate_array_items_count};
+use crate::Utilities::{estimate_properties_count, estimate_array_items_count, section_estimate};
 
 
 pub struct DataSectionParser<'a> {
@@ -99,7 +103,7 @@ pub fn new_with_error_manager(
         let section_start_pos = Position::from_token(self.current());
         self.reset_parse_state();
 
-        let estimated_entries = estimate_properties_count(self.tokens.len());
+        let estimated_entries = section_estimate(8, self.tokens.len(), 5);
         let mut data_entries = Vec::with_capacity(estimated_entries);
 
         if !self.match_and_consume_symbol('(') {

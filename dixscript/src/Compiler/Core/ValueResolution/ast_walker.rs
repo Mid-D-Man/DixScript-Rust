@@ -17,7 +17,7 @@
 //!   - Namespace splitting uses a single `find('.')` + length check instead
 //!     of allocating a split array.
 
-use rustc_hash::FxHashMap;
+use crate::Utilities::RustcHash::FxHashMap;
 
 use crate::Compiler::AST::{
     DataEntry, DataSection, Expression, ObjectProperty, Position,

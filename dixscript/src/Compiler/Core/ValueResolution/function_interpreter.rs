@@ -9,7 +9,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use rustc_hash::FxHashMap;
+use crate::Utilities::RustcHash::FxHashMap;
 
 use crate::Builtins::Core::{DixType, DixValue};
 use crate::Builtins::Resolver::builtin_call_resolver;

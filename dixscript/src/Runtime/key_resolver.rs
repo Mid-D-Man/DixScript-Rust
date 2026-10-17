@@ -3,6 +3,7 @@ use crate::Compiler::DLM::KeyManagement::{KeyFileManager, KeyFileData, Encryptio
 use crate::ErrorManager::{ErrorManager, DlmErrorType, ErrorSeverity};
 use crate::Runtime::load_options::DixLoadOptions;
 use crate::Utilities::Base64::{Engine as _, general_purpose::STANDARD as BASE64};
+#[cfg(feature = "argon2-support")]
 use argon2::{Argon2, Algorithm, Version, Params};
 use std::path::{Path, PathBuf};
 
@@ -282,20 +283,7 @@ impl KeyResolver {
             m_cost, t_cost, p_cost, key_length
         ));
 
-        let params = Params::new(m_cost, t_cost, p_cost, Some(key_length)).map_err(|e| {
-            let msg = format!("Invalid Argon2 parameters: {}", e);
-            self.report_error(&msg);
-            msg
-        })?;
-
-        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-        let mut key_bytes = vec![0u8; key_length];
-        argon2.hash_password_into(password.as_bytes(), &salt, &mut key_bytes)
-            .map_err(|e| {
-                let msg = format!("Key derivation failed: {}", e);
-                self.report_error(&msg);
-                msg
-            })?;
+        let key_bytes = self.derive_key_argon2id(password, &salt, m_cost, t_cost, p_cost, key_length)?;
 
         let iv_bytes = self.decode_iv(enc, key_file_path)?;
 
@@ -305,6 +293,55 @@ impl KeyResolver {
             algorithm:  enc.algorithm.clone(),
             key_length: enc.key_length as u32,
         })
+    }
+
+    /// Argon2id (v0x13) key derivation -- the only place this module touches
+    /// the `argon2` crate, so the dependency can sit behind `argon2-support`.
+    #[cfg(feature = "argon2-support")]
+    fn derive_key_argon2id(
+        &self,
+        password:   &str,
+        salt:       &[u8],
+        m_cost:     u32,
+        t_cost:     u32,
+        p_cost:     u32,
+        key_length: usize,
+    ) -> Result<Vec<u8>, String> {
+        let params = Params::new(m_cost, t_cost, p_cost, Some(key_length)).map_err(|e| {
+            let msg = format!("Invalid Argon2 parameters: {}", e);
+            self.report_error(&msg);
+            msg
+        })?;
+
+        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+        let mut key_bytes = vec![0u8; key_length];
+        argon2.hash_password_into(password.as_bytes(), salt, &mut key_bytes)
+            .map_err(|e| {
+                let msg = format!("Key derivation failed: {}", e);
+                self.report_error(&msg);
+                msg
+            })?;
+        Ok(key_bytes)
+    }
+
+    /// Without `argon2-support` there is no Argon2: password-protected key
+    /// files cannot be opened, and say why instead of failing obscurely.
+    #[cfg(not(feature = "argon2-support"))]
+    fn derive_key_argon2id(
+        &self,
+        _password:   &str,
+        _salt:       &[u8],
+        _m_cost:     u32,
+        _t_cost:     u32,
+        _p_cost:     u32,
+        _key_length: usize,
+    ) -> Result<Vec<u8>, String> {
+        let msg = "This key file is password-protected (Argon2id), but this build of dixscript \
+                   was compiled without the 'argon2-support' feature. Rebuild with \
+                   `--features argon2-support` (or default features) to open it."
+            .to_string();
+        self.report_error(&msg);
+        Err(msg)
     }
 
     fn resolve_from_raw_bytes(

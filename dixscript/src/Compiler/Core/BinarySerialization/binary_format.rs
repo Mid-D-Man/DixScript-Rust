@@ -26,7 +26,7 @@ pub const OFFSET_ENTRY_SIZE: usize = 12;
 
 // ==================== SECTION FLAGS (1 byte) ====================
 
-bitflags::bitflags! {
+crate::Utilities::Bitflags::bitflags! {
     /// Section presence flags
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct SectionFlags: u8 {

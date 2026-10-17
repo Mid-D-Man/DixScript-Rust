@@ -101,7 +101,9 @@ impl ConfigSchema {
     }
 
     fn validate_version(value: &str) -> Result<(), String> {
-        if value == "1.0.0" || value == "1.0" || value.starts_with("x_1.") {
+        if value == "1.0.0" || value == "1.0" || value == "2.0.0" || value == "2.0"
+            || value.starts_with("x_1.") || value.starts_with("x_2.")
+        {
             return Ok(());
         }
         if VERSION_REGEX.is_match(value) {

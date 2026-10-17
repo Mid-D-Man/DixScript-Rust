@@ -2,15 +2,34 @@
 //! Trait and error types for pluggable cloud storage backends.
 
 use std::fmt;
+use crate::Utilities::AsyncTrait::BoxFuture;
 
 /// Abstraction over HTTP, S3, Azure, and GCP storage backends.
 ///
-/// The `async_trait` attribute desugars async methods into boxed futures,
-/// making the trait dyn-compatible for use behind `Arc<dyn CloudStorageProvider>`.
-#[async_trait::async_trait]
+/// The methods return boxed futures (what `#[async_trait]` used to generate),
+/// which keeps the trait dyn-compatible for use behind
+/// `Arc<dyn CloudStorageProvider>`. The signatures are the exact expansion of
+/// `async fn download_file_async(&self, cloud_url: &str) -> Result<String,
+/// CloudStorageError>;` (and likewise `file_exists_async`) so an external
+/// `#[async_trait]` impl still compiles. See `Utilities::AsyncTrait`.
 pub trait CloudStorageProvider {
-    async fn download_file_async(&self, cloud_url: &str) -> Result<String, CloudStorageError>;
-    async fn file_exists_async(&self, cloud_url: &str) -> Result<bool, CloudStorageError>;
+    fn download_file_async<'life0, 'life1, 'async_trait>(
+        &'life0 self,
+        cloud_url: &'life1 str,
+    ) -> BoxFuture<'async_trait, Result<String, CloudStorageError>>
+    where
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        Self: 'async_trait;
+
+    fn file_exists_async<'life0, 'life1, 'async_trait>(
+        &'life0 self,
+        cloud_url: &'life1 str,
+    ) -> BoxFuture<'async_trait, Result<bool, CloudStorageError>>
+    where
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        Self: 'async_trait;
 }
 
 #[derive(Debug, Clone)]

@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/dlm.md, section "dlm_pipeline_executor.rs"
+// ============================================================================
 //! Main orchestrator for DLM forward pipeline execution during compilation.
 //!
 //! Execution order: Auditor (start) → Compressor → Encryptor → Auditor (finalize).
@@ -6,22 +10,32 @@
 
 use crate::Compiler::AST::{DixScript, DLMModuleType, DLMModuleSubtype};
 use crate::Compiler::DLM::{
-    Auditor::{IAuditor, DiyAuditor, EnhancedAuditor},
-    Compressor::{ICompressor, GzipCompressor},
-    Encryptor::{IEncryptor, XorEncryptor, Aes128Encryptor, Aes256Encryptor, Chacha20Encryptor},
+    Auditor::IAuditor,
+    Compressor::ICompressor,
+    Encryptor::IEncryptor,
     KeyManagement::KeyFileManager,
     dlm_pipeline_result::DLMPipelineResult,
 };
-use crate::Compiler::Utilities::{SecurityUtilities, file_permissions};
+use crate::Compiler::Utilities::file_permissions;
+#[cfg(feature = "dlm-encryptor")]
+use crate::Compiler::Utilities::SecurityUtilities;
 use crate::ErrorManager::{ErrorManager, DebugConfig, DlmErrorType, ErrorSeverity};
 use std::path::{Path, PathBuf};
 use web_time::Instant;
 use std::fs;
 
-#[cfg(feature = "bzip2-support")]
-use crate::Compiler::DLM::Compressor::Bzip2Compressor;
-#[cfg(feature = "xz-support")]
-use crate::Compiler::DLM::Compressor::LzmaCompressor;
+#[cfg(feature = "dlm-auditor")]
+use crate::Compiler::DLM::Auditor::{DiyAuditor, EnhancedAuditor};
+#[cfg(feature = "dlm-compressor")]
+use crate::Compiler::DLM::Compressor::GzipCompressor;
+#[cfg(feature = "dlm-encryptor")]
+use crate::Compiler::DLM::Encryptor::XorEncryptor;
+#[cfg(feature = "aes128-support")]
+use crate::Compiler::DLM::Encryptor::Aes128Encryptor;
+#[cfg(feature = "aes256-support")]
+use crate::Compiler::DLM::Encryptor::Aes256Encryptor;
+#[cfg(feature = "chacha20-support")]
+use crate::Compiler::DLM::Encryptor::Chacha20Encryptor;
 
 pub struct DLMPipelineExecutor {
     error_manager:    ErrorManager,
@@ -30,6 +44,8 @@ pub struct DLMPipelineExecutor {
     output_directory: PathBuf,
     /// Password read once from MDIX_DLM_PASSWORD at construction time.
     /// Present only when the environment variable is set.
+    // Only read when an encryptor is built (password-mode key derivation).
+    #[cfg_attr(not(feature = "dlm-encryptor"), allow(dead_code))]
     password:         Option<String>,
 }
 
@@ -291,6 +307,7 @@ impl DLMPipelineExecutor {
         Ok((auditor, compressor, encryptor))
     }
 
+    #[cfg(feature = "dlm-auditor")]
     fn create_auditor(
         &self,
         subtype: Option<DLMModuleSubtype>,
@@ -312,6 +329,21 @@ impl DLMPipelineExecutor {
         Ok(aud)
     }
 
+    /// This build has no `dlm-auditor`: report it instead of silently skipping the module.
+    #[cfg(not(feature = "dlm-auditor"))]
+    fn create_auditor(
+        &self,
+        _subtype: Option<DLMModuleSubtype>,
+        _ast:     &DixScript,
+    ) -> Result<Box<dyn IAuditor>, String> {
+        Err(
+            "This file uses a DAuditor module, but this build of dixscript was compiled \
+             without the 'dlm-auditor' feature. Rebuild with default features \
+             (or `--features dlm-auditor`) to run this file, or remove the DAuditor module.".to_string()
+        )
+    }
+
+    #[cfg(feature = "dlm-compressor")]
     fn create_compressor(
         &self,
         subtype: Option<DLMModuleSubtype>,
@@ -319,32 +351,35 @@ impl DLMPipelineExecutor {
         match subtype {
             Some(DLMModuleSubtype::Gzip) | None => Ok(Box::new(GzipCompressor::new())),
 
-            #[cfg(feature = "bzip2-support")]
-            Some(DLMModuleSubtype::Bzip2) => Ok(Box::new(Bzip2Compressor::new())),
-            #[cfg(not(feature = "bzip2-support"))]
+            // bzip2 and lzma still parse so a file that names them gets this
+            // message instead of an unknown-keyword error.
             Some(DLMModuleSubtype::Bzip2) => Err(
-                "This file requires bzip2 compression (DCompressor.bzip2), but \
-                 this build of dixscript was compiled without the \
-                 'bzip2-support' feature. Rebuild with `--features \
-                 bzip2-support` (or default features) to read this file, or \
-                 use DCompressor.gzip in files you control.".to_string()
+                "DCompressor.bzip2 is no longer supported: the bzip2 codec was \
+                 removed from dixscript. Use DCompressor.gzip.".to_string()
             ),
-
-            #[cfg(feature = "xz-support")]
-            Some(DLMModuleSubtype::Lzma) => Ok(Box::new(LzmaCompressor::new())),
-            #[cfg(not(feature = "xz-support"))]
             Some(DLMModuleSubtype::Lzma) => Err(
-                "This file requires XZ/LZMA compression (DCompressor.lzma), but \
-                 this build of dixscript was compiled without the 'xz-support' \
-                 feature. Rebuild with `--features xz-support` (or default \
-                 features) to read this file, or use DCompressor.gzip in \
-                 files you control.".to_string()
+                "DCompressor.lzma is no longer supported: the lzma codec was \
+                 removed from dixscript. Use DCompressor.gzip.".to_string()
             ),
 
             Some(other) => Err(format!("Unknown compressor subtype: {:?}", other)),
         }
     }
 
+    /// This build has no `dlm-compressor`: report it instead of silently skipping the module.
+    #[cfg(not(feature = "dlm-compressor"))]
+    fn create_compressor(
+        &self,
+        _subtype: Option<DLMModuleSubtype>,
+    ) -> Result<Box<dyn ICompressor>, String> {
+        Err(
+            "This file uses a DCompressor module, but this build of dixscript was compiled \
+             without the 'dlm-compressor' feature. Rebuild with default features \
+             (or `--features dlm-compressor`) to run this file, or remove the DCompressor module.".to_string()
+        )
+    }
+
+    #[cfg(feature = "dlm-encryptor")]
     fn create_encryptor(
         &self,
         subtype: Option<DLMModuleSubtype>,
@@ -365,9 +400,36 @@ impl DLMPipelineExecutor {
 
         let mut enc: Box<dyn IEncryptor> = match subtype {
             Some(DLMModuleSubtype::Xor)                => Box::new(XorEncryptor::new(Some(security.clone()))),
+            #[cfg(feature = "aes128-support")]
             Some(DLMModuleSubtype::Aes128)             => Box::new(Aes128Encryptor::new(Some(security.clone()))),
+            #[cfg(feature = "aes256-support")]
             Some(DLMModuleSubtype::Aes256) | None      => Box::new(Aes256Encryptor::new(Some(security.clone()))),
+            #[cfg(feature = "chacha20-support")]
             Some(DLMModuleSubtype::Chacha20)           => Box::new(Chacha20Encryptor::new(Some(security.clone()))),
+            #[cfg(not(feature = "aes128-support"))]
+            Some(DLMModuleSubtype::Aes128) => return Err(
+                "This file uses AES-128-GCM encryption (DEncryptor.aes128), but this \
+                 build of dixscript was compiled without the \
+                 'aes128-support' feature. Rebuild with `--features \
+                 aes128-support` (or default features), or use \
+                 DEncryptor.xor in files you control.".to_string()
+            ),
+            #[cfg(not(feature = "aes256-support"))]
+            Some(DLMModuleSubtype::Aes256) | None => return Err(
+                "This file uses AES-256-GCM (the default) encryption (DEncryptor.aes256), but this \
+                 build of dixscript was compiled without the \
+                 'aes256-support' feature. Rebuild with `--features \
+                 aes256-support` (or default features), or use \
+                 DEncryptor.xor in files you control.".to_string()
+            ),
+            #[cfg(not(feature = "chacha20-support"))]
+            Some(DLMModuleSubtype::Chacha20) => return Err(
+                "This file uses ChaCha20-Poly1305 encryption (DEncryptor.chacha20), but this \
+                 build of dixscript was compiled without the \
+                 'chacha20-support' feature. Rebuild with `--features \
+                 chacha20-support` (or default features), or use \
+                 DEncryptor.xor in files you control.".to_string()
+            ),
             Some(other) => return Err(format!("Unknown encryptor subtype: {:?}", other)),
         };
 
@@ -406,6 +468,20 @@ impl DLMPipelineExecutor {
         }
 
         Ok(enc)
+    }
+
+    /// This build has no `dlm-encryptor`: report it instead of silently skipping the module.
+    #[cfg(not(feature = "dlm-encryptor"))]
+    fn create_encryptor(
+        &self,
+        _subtype: Option<DLMModuleSubtype>,
+        _ast:     &mut DixScript,
+    ) -> Result<Box<dyn IEncryptor>, String> {
+        Err(
+            "This file uses a DEncryptor module, but this build of dixscript was compiled \
+             without the 'dlm-encryptor' feature. Rebuild with default features \
+             (or `--features dlm-encryptor`) to run this file, or remove the DEncryptor module.".to_string()
+        )
     }
 
     // ── Output file generation ────────────────────────────────────────────────

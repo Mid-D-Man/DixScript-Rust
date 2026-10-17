@@ -22,8 +22,20 @@ as not yet documented rather than assumed undocumented-on-purpose.
   what was audited and why each crate was kept, removed or hand-rolled, plus
   the hand-rolled replacements themselves (`Utilities/AsyncTrait`, `Base64`,
   `Bitflags`, `Hex`, `Hostname`, `LazyStatic`, `RustcHash`, `Uuid`), tested
-  against the real crates; five are wired in, three are held back pending a
-  public-API decision
+  against the real crates; all eight are wired in, plus the `Utilities/Url`
+  replacement for the `url` crate
+- [Features](dixscript/features.md) — the Cargo feature graph: the DLM
+  families (`dlm`, `dlm-auditor`, `dlm-compressor`, `dlm-encryptor`), the heavy
+  algorithms (`encryption-support`), `toml-support`,
+  what each costs in crates, and what a build without one does
+- [DLM](dixscript/dlm.md) — the compressor module, the pipeline and reverse
+  executors, the DLM analyzer, and the removal of the bzip2 and lzma codecs
+- [Runtime](dixscript/runtime.md) — `format_options.rs`
+- [Arena AST scoping](dixscript/arena-ast.md) — measurements and blast radius for
+  an arena-allocated AST: how much of a compile the AST is (under 4% of allocations),
+  where compile time goes, the arena benchmark, the parser over-reservation and
+  value-resolution scaling findings, the three design options, and a recommended
+  sequence
 - Benchmarks comparing DixScript against JSON/TOML live in
   `dixscript/benches/format_comparison_benchmark.rs` (synthetic small/
   medium/large fixtures) and `dixscript/benches/chemistry_db_comparison_benchmark.rs`

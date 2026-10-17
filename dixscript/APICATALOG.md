@@ -125,7 +125,10 @@ plus the sections, with the owned types reused for `@CONFIG`, `@IMPORTS`, `@DLM`
 `DocData`, `DocRawBlock`, `DocSecurity`, `DocSchema` and `DocQuickFuncs` (with their entry,
 field and parameter types) for the five sections that hold values. `Document::from_owned` and
 `Document::export` convert exactly in both directions, each `Doc*` section twin has its own
-`from_owned` and `export`, and `Document` has a structural `PartialEq`. Nothing in the compiler uses it yet.
+`from_owned` and `export`, and `Document` has a structural `PartialEq`. `Arena::alloc_value_list(&[ValueId]) -> ValueList` stores
+a run of value ids. The `@SECURITY`, `@RAW` and `@SCHEMA` section parsers build into an arena
+internally and return the owned section, so their public interfaces are unchanged; the rest of the
+compiler still uses the owned types.
 
 `Compiler::AST::Visitors` is also re-exported (`pub use Visitors::*`) but
 not catalogued in detail here — check the module directly if you need a

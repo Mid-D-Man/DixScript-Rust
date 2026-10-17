@@ -279,6 +279,38 @@ impl Arena {
         Str::new(start, s.len())
     }
 
+    /// Copies `ids` into the value-list store and returns the run that names them.
+    ///
+    /// A parser uses this for a list whose length is only known once it has been read, such as
+    /// the arguments of a call: build each child, collect the ids, and store the run once.
+    /// The run is stored as one contiguous block, so it is read back with
+    /// [`value_list`](Self::value_list).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store would grow past what a `u32` offset can address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::{Arena, ValueNode};
+    /// use dixscript::Compiler::AST::Position;
+    ///
+    /// let mut arena = Arena::new();
+    /// let a = arena.alloc_value(ValueNode::Integer { value: 1, position: Position::new(1, 1) });
+    /// let b = arena.alloc_value(ValueNode::Boolean { value: true, position: Position::new(1, 4) });
+    /// let list = arena.alloc_value_list(&[a, b]);
+    ///
+    /// assert_eq!(list.len(), 2);
+    /// assert_eq!(arena.value_list(list), &[a, b]);
+    /// ```
+    #[inline]
+    pub fn alloc_value_list(&mut self, ids: &[ValueId]) -> ValueList {
+        let start = self.value_lists.len();
+        self.value_lists.extend_from_slice(ids);
+        ValueList::new(start, ids.len())
+    }
+
     // -- access -------------------------------------------------------------
 
     /// Returns the value node `id` names.

@@ -18,37 +18,57 @@
 //! ```
 //!
 //! ## Why the method names are capitalised
-//! The lowercase spellings (`int`, `string`, `bool`, …) are all lexer
-//! keywords, and the dotted-pattern analyzer only accepts a plain
-//! `Identifier` after `.` — so `Schema.int(...)` can't be written in source.
-//! `Schema.Int(...)` lexes as `Identifier("Schema") . Identifier("Int")`.
-//! A lowercase name is still recognised here and reported with a
-//! "did you mean `Int`?" message rather than a bare syntax error.
+//!
+//! The lowercase spellings (`int`, `string`, `bool`, and so on) are all lexer keywords, and
+//! the dotted-pattern analyzer only accepts a plain `Identifier` after `.`, so
+//! `Schema.int(...)` cannot be written in source. `Schema.Int(...)` lexes as
+//! `Identifier("Schema") . Identifier("Int")`. A lowercase name is still recognised here and
+//! reported with a "did you mean `Int`?" message instead of a bare syntax error.
 //!
 //! ## Why this is its own mini-parser and not `DataSectionParser`
-//! `@DATA`'s value grammar has no static-builtin-call arm
-//! (`IdentifierPatternType::StaticMethodCall` is only handled inside
-//! QuickFuncs), so wrapping it can't parse `Schema.Int(...)`. The
-//! descriptor here is deliberately narrow — a fixed `Schema.<Method>(...)`
-//! call with literal arguments — so no expression grammar is needed.
 //!
-//! ## What this parser does NOT do
-//! It stores each descriptor as written (`method` + literal `arguments`)
-//! and never evaluates it. Whether the method exists, whether its
-//! arguments fit, duplicate paths, and the actual checking against
-//! `@DATA` are all `schema_section_analyzer.rs`'s job — the same
-//! parse/semantic split every other section uses.
+//! `@DATA`'s value grammar has no static-builtin-call arm
+//! (`IdentifierPatternType::StaticMethodCall` is only handled inside QuickFuncs), so wrapping
+//! it cannot parse `Schema.Int(...)`. The descriptor here is deliberately narrow, a fixed
+//! `Schema.<Method>(...)` call with literal arguments, so no expression grammar is needed.
+//!
+//! ## What this parser does not do
+//!
+//! It stores each descriptor as written (`method` plus literal `arguments`) and never
+//! evaluates it. Whether the method exists, whether its arguments fit, duplicate paths and
+//! the checking against `@DATA` are all `schema_section_analyzer.rs`'s job, the same parse
+//! and semantic split every other section uses.
+//!
+//! # Values are built in an arena
+//!
+//! The parser owns an [`Arena`]. Every literal argument is built there as a node, each field
+//! is kept as a [`DocSchemaField`] record whose arguments are a run of value ids, and
+//! [`SchemaSectionParser::parse_section`] exports the finished section once, at the end, as
+//! the owned [`SchemaBlock`]. The public interface and the result are the same as before the
+//! parser used an arena; `tests/schema_parser_tests.rs` pins them.
 
-use crate::Compiler::AST::{Position, SchemaBlock, SchemaField, TablePath, Value};
+use crate::Compiler::AST::{Position, SchemaBlock, TablePath};
+use crate::Compiler::AST::arena::{Arena, DocSchema, DocSchemaField, ValueId, ValueList, ValueNode};
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::ErrorManager::{ErrorManager, ParseErrorType, DebugConfig};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::Core::Tokenizer::token::SectionId;
 
+/// Returned in place of a token when the position is past the end of the slice.
+static EOF: Token = Token {
+    token_type: TokenType::EndOfFile,
+    line: 1,
+    column: 1,
+    section: SectionId::None,
+};
+
 const MAX_ITERATIONS_PER_TOKEN: usize = 3;
 const ABSOLUTE_MAX_ITERATIONS: usize = 500_000;
 const MAX_STUCK_COUNT: usize = 3;
 
+/// Parser for the `@SCHEMA(...)` section.
+///
+/// Create it over the section's tokens and call [`parse_section`](Self::parse_section).
 pub struct SchemaSectionParser<'a> {
     tokens: &'a [Token],
     operational_settings: &'a OperationalSettings,
@@ -60,17 +80,25 @@ pub struct SchemaSectionParser<'a> {
     iteration_count: usize,
     max_iterations: usize,
     has_encountered_errors: bool,
-    /// First syntax error reported, with its position. `GeneralParser` reads
-    /// this to refuse a malformed `@SCHEMA` outright under the Halt strategy
-    /// — see `first_error`.
+    /// First syntax error reported, with its position. See [`first_error`](Self::first_error).
     first_error: Option<String>,
+    /// Every literal argument of the section is built here; `parse_section` exports the
+    /// finished section.
+    arena: Arena,
 }
 
 impl<'a> SchemaSectionParser<'a> {
+    /// Creates a parser that reports diagnostics to the process-wide shared [`ErrorManager`].
+    ///
+    /// Use [`new_with_error_manager`](Self::new_with_error_manager) to report to a specific one.
     pub fn new(tokens: &'a [Token], operational_settings: &'a OperationalSettings) -> Self {
         Self::new_with_error_manager(tokens, operational_settings, ErrorManager::get_shared_instance())
     }
 
+    /// Creates a parser that reports diagnostics to `error_manager`.
+    ///
+    /// The parser stops after three times the token count in steps, capped at 500,000, so
+    /// malformed input cannot make it loop forever.
     pub fn new_with_error_manager(
         tokens: &'a [Token],
         operational_settings: &'a OperationalSettings,
@@ -101,26 +129,30 @@ impl<'a> SchemaSectionParser<'a> {
             max_iterations,
             has_encountered_errors: false,
             first_error: None,
+            arena: Arena::new(),
         }
     }
 
-    /// The first syntax error this parser reported, if any (`"message (line L, column C)"`).
+    /// The first syntax error this parser reported, if any, as `"message (line L, column C)"`.
     ///
-    /// Why this exists: `parse_section` returns `None` on a Halt-strategy
-    /// error, and `GeneralParser` turns a `None` section into an absent
-    /// section — not a compile error. For most sections that is a
-    /// diagnostics-only loss, but for `@SCHEMA` it would mean a typo
-    /// silently *disables validation of the whole file*. `GeneralParser`
-    /// uses this to fail loudly instead.
+    /// `parse_section` returns `None` on a halt-strategy error, and `GeneralParser` turns a
+    /// `None` section into an absent section instead of a compile error. For most sections
+    /// that only loses diagnostics, but for `@SCHEMA` a typo would silently disable validation
+    /// of the whole file, so `GeneralParser` reads this to fail loudly instead.
     pub fn first_error(&self) -> Option<&str> {
         self.first_error.as_deref()
     }
 
+    /// Parses the section and returns it.
+    ///
+    /// Under the `halt` error strategy a parse error ends the section and the result is `None`.
+    /// Under `continue` and `recover` the parser keeps going and returns the fields it could
+    /// read. [`first_error`](Self::first_error) reports the first error under every strategy.
     pub fn parse_section(&mut self) -> Option<SchemaBlock> {
         let section_start_pos = Position::from_token(self.current());
         self.reset_parse_state();
 
-        let mut fields: Vec<SchemaField> = Vec::with_capacity(8);
+        let mut fields: Vec<DocSchemaField> = Vec::with_capacity(8);
 
         if !self.match_and_consume_symbol('(') {
             let current = self.current().clone();
@@ -135,7 +167,7 @@ impl<'a> SchemaSectionParser<'a> {
 
         if self.is_current_symbol(')') {
             self.advance();
-            return Some(SchemaBlock::new(fields, section_start_pos));
+            return Some(self.finish_section(fields, section_start_pos));
         }
 
         while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
@@ -182,14 +214,17 @@ impl<'a> SchemaSectionParser<'a> {
             ));
         }
 
-        Some(SchemaBlock::new(fields, section_start_pos))
+        Some(self.finish_section(fields, section_start_pos))
     }
 
-    // ═════════════════════════════════════════════════════════════════════
-    // One field:  path = Schema.Method(args)
-    // ═════════════════════════════════════════════════════════════════════
+    /// Exports the section built in the arena as the owned `SchemaBlock`.
+    fn finish_section(&self, fields: Vec<DocSchemaField>, position: Position) -> SchemaBlock {
+        DocSchema { fields, position }.export(&self.arena)
+    }
 
-    fn parse_schema_field(&mut self) -> Option<SchemaField> {
+    // One field: `path = Schema.Method(args)`.
+
+    fn parse_schema_field(&mut self) -> Option<DocSchemaField> {
         let field_start_pos = Position::from_token(self.current());
 
         let segments = self.parse_field_path()?;
@@ -209,10 +244,10 @@ impl<'a> SchemaSectionParser<'a> {
 
         let (method, arguments) = self.parse_descriptor_call(&path_text)?;
 
-        Some(SchemaField::new(TablePath::new(segments), method, arguments, field_start_pos))
+        Some(DocSchemaField { path: TablePath::new(segments), method, arguments, position: field_start_pos })
     }
 
-    /// `segment ("." segment)*` — the same dotted addressing `@DATA` uses.
+    /// `segment ("." segment)*` , the same dotted addressing `@DATA` uses.
     fn parse_field_path(&mut self) -> Option<Vec<String>> {
         let mut segments: Vec<String> = Vec::with_capacity(3);
 
@@ -246,7 +281,7 @@ impl<'a> SchemaSectionParser<'a> {
     }
 
     /// `Schema "." Method "(" ArgList? ")"`
-    fn parse_descriptor_call(&mut self, path_text: &str) -> Option<(String, Vec<Value>)> {
+    fn parse_descriptor_call(&mut self, path_text: &str) -> Option<(String, ValueList)> {
         let is_schema = matches!(&self.current().token_type, TokenType::Identifier(id) if id == "Schema");
         if !is_schema {
             let current = self.current().clone();
@@ -269,9 +304,8 @@ impl<'a> SchemaSectionParser<'a> {
         let method = match &self.current().token_type {
             TokenType::Identifier(id) => { let m = id.clone(); self.advance(); m }
             TokenType::Keyword(k) => {
-                // The lowercase spelling is a lexer keyword. Say so, and say
-                // what to write instead — this is the one mistake people
-                // will make.
+                // The lowercase spelling is a lexer keyword. Say so, and say what to write
+                // instead, since this is the mistake people are most likely to make.
                 let lower = k.to_string();
                 let current = self.current().clone();
                 let msg = format!(
@@ -299,7 +333,7 @@ impl<'a> SchemaSectionParser<'a> {
             return None;
         }
 
-        let mut arguments: Vec<Value> = Vec::with_capacity(3);
+        let mut arguments: Vec<ValueId> = Vec::with_capacity(3);
 
         while !self.is_at_end() && !self.is_current_symbol(')') {
             match self.parse_argument() {
@@ -335,34 +369,40 @@ impl<'a> SchemaSectionParser<'a> {
             return None;
         }
 
+        let arguments = self.arena.alloc_value_list(&arguments);
         Some((method, arguments))
     }
 
     /// One literal argument. Negative numbers arrive as a single signed
     /// numeric token from the lexer, so no unary-minus handling is needed.
-    fn parse_argument(&mut self) -> Option<Value> {
-        let pos = Position::from_token(self.current());
-        let value = match &self.current().token_type {
-            TokenType::String(s)             => Some(Value::String  { value: s.clone(), position: pos }),
-            TokenType::StringSingle(s)       => Some(Value::String  { value: s.clone(), position: pos }),
-            TokenType::Integer(i)            => Some(Value::Integer { value: *i, position: pos }),
-            TokenType::Long(i)               => Some(Value::Long    { value: *i, position: pos }),
-            TokenType::Float(fl)             => Some(Value::Float   { value: *fl, position: pos }),
-            TokenType::Double(d)             => Some(Value::Double  { value: *d, position: pos }),
-            TokenType::ScientificNotation(d) => Some(Value::ScientificNotation { value: *d, position: pos }),
-            TokenType::Bool(b)               => Some(Value::Boolean { value: *b, position: pos }),
-            TokenType::Keyword(k) if *k == "true"  => Some(Value::Boolean { value: true,  position: pos }),
-            TokenType::Keyword(k) if *k == "false" => Some(Value::Boolean { value: false, position: pos }),
+    fn parse_argument(&mut self) -> Option<ValueId> {
+        // `tokens` is a copy of the shared slice reference, so `token` does not borrow `self`
+        // and the arena can be borrowed mutably while the token is still read.
+        let tokens: &'a [Token] = self.tokens;
+        let token: &'a Token = tokens.get(self.position).unwrap_or(&EOF);
+        let pos = Position::from_token(token);
+        let arena = &mut self.arena;
+
+        let node = match &token.token_type {
+            TokenType::String(s)             => Some(ValueNode::String  { value: arena.alloc_str(s), position: pos }),
+            TokenType::StringSingle(s)       => Some(ValueNode::String  { value: arena.alloc_str(s), position: pos }),
+            TokenType::Integer(i)            => Some(ValueNode::Integer { value: *i, position: pos }),
+            TokenType::Long(i)               => Some(ValueNode::Long    { value: *i, position: pos }),
+            TokenType::Float(fl)             => Some(ValueNode::Float   { value: *fl, position: pos }),
+            TokenType::Double(d)             => Some(ValueNode::Double  { value: *d, position: pos }),
+            TokenType::ScientificNotation(d) => Some(ValueNode::ScientificNotation { value: *d, position: pos }),
+            TokenType::Bool(b)               => Some(ValueNode::Boolean { value: *b, position: pos }),
+            TokenType::Keyword(k) if *k == "true"  => Some(ValueNode::Boolean { value: true,  position: pos }),
+            TokenType::Keyword(k) if *k == "false" => Some(ValueNode::Boolean { value: false, position: pos }),
             _ => None,
         };
-        if value.is_some() { self.advance(); }
-        value
+
+        let id = node.map(|n| self.arena.alloc_value(n));
+        if id.is_some() { self.advance(); }
+        id
     }
 
-    // ═════════════════════════════════════════════════════════════════════
-    // Error handling / recovery / cursor helpers
-    // (same shape as raw_section_parser.rs — see it for the reasoning)
-    // ═════════════════════════════════════════════════════════════════════
+    // Error handling, recovery and cursor helpers, the same shape as in raw_section_parser.rs.
 
     fn report_error(&mut self, error_type: ParseErrorType, message: &str, token: &Token) {
         self.has_encountered_errors = true;
@@ -381,11 +421,11 @@ impl<'a> SchemaSectionParser<'a> {
             && self.has_encountered_errors
     }
 
-    fn partial_or_none(&self, start_pos: Position, fields: Vec<SchemaField>) -> Option<SchemaBlock> {
+    fn partial_or_none(&self, start_pos: Position, fields: Vec<DocSchemaField>) -> Option<SchemaBlock> {
         if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt {
             None
         } else {
-            Some(SchemaBlock::new(fields, start_pos))
+            Some(self.finish_section(fields, start_pos))
         }
     }
 
@@ -439,9 +479,6 @@ impl<'a> SchemaSectionParser<'a> {
 
     #[inline]
     fn current(&self) -> &Token {
-        static EOF: Token = Token {
-            token_type: TokenType::EndOfFile, line: 1, column: 1, section: SectionId::None,
-        };
         self.tokens.get(self.position).unwrap_or(&EOF)
     }
 

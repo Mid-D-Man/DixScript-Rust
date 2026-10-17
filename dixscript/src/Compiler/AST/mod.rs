@@ -9,7 +9,8 @@
 //! The types of each submodule are re-exported flat, so `Compiler::AST::Value` and
 //! `Compiler::AST::DixScript` are the usual paths. The one exception is [`arena`]: an index
 //! arena for the `Value` family and an arena-resident form of a whole `DixScript`. It is
-//! reached as `Compiler::AST::arena` and is not used by the compiler yet.
+//! reached as `Compiler::AST::arena`. So far only the `@SECURITY`, `@RAW` and `@SCHEMA` section
+//! parsers use it, and each exports the owned types again at the end of its section.
 
 pub mod position;
 pub mod data_types;

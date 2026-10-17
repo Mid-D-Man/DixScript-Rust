@@ -75,26 +75,32 @@ one `@RAW(...)` occurrence.
 
 ### `Compiler/Core/SectionParsers/raw_section_parser.rs`
 
-**What it does:** Parses one `@RAW(...)` occurrence's tokens into a
-`RawBlock`.
+**What it does:** Parses one `@RAW(...)` occurrence's tokens into a `RawBlock`.
 
 **Decisions:**
-- Structure mirrors `security_section_parser.rs` closely (same recovery
-  helpers, same field-list parsing for `meta_data`/`using`). `content`'s
-  right-hand side is different from every other section value: it is
-  never `{`/`}` tokens at the parser level, because the lexer already
-  consumed the whole delimited block into one `RawContent` token — so
-  parsing `content -> …` is just "consume the arrow, consume exactly one
-  `RawContent` token."
-- Unlike `@SECURITY`, `meta_data`/`using`/`content` are the only three
-  recognized block names — an unrecognized key is a parse error here
-  rather than silently accepted.
+- Structure mirrors `security_section_parser.rs` closely (same recovery helpers, same field-list
+  parsing for `meta_data` and `using`). `content`'s right-hand side is different from every other
+  section value: it is never `{` or `}` tokens at the parser level, because the lexer already
+  consumed the whole delimited block into one `RawContent` token. Parsing `content -> ...` is just
+  "consume the arrow, consume exactly one `RawContent` token".
+- Unlike `@SECURITY`, `meta_data`, `using` and `content` are the only three recognized block
+  names. An unrecognized key is a parse error here rather than silently accepted.
+- This is the second parser built on the arena AST. The parser owns an `Arena`, builds every field
+  value as a node there, keeps the fields as `DocRawField` records that hold the value ids, and
+  exports the finished block once, at the end of `parse_section`, through `DocRawBlock::export`.
+  The `content` token is a plain `RawContent` that the arena does not touch. The public interface
+  and the result are unchanged.
+- As in the `@SECURITY` parser, it exports at the end of the section because sections are parsed in
+  parallel, and `parse_raw_value` reads the current token through a copy of the shared slice so the
+  arena can be borrowed mutably while the token is read. The end-of-file token is a module-level
+  `static` shared by `current()` and `parse_raw_value`.
+- The public items now carry doc comments, and the module documentation describes the arena.
 
-**Tests:** `tests/raw_section_tests.rs` — multiple distinct blocks, and
-the feature-gating tests (`raw_section_allowed_by_default_advanced_mode`,
-`raw_section_allowed_with_explicit_feature`,
-`raw_section_rejected_without_feature_enabled`) exercise this parser
-through the full `DixLoader` pipeline.
+**Tests:** `tests/raw_parser_tests.rs` pins the parser itself (positions, error strategies and
+diagnostics). `tests/raw_section_tests.rs` has multiple distinct blocks and the feature-gating
+tests (`raw_section_allowed_by_default_advanced_mode`, `raw_section_allowed_with_explicit_feature`,
+`raw_section_rejected_without_feature_enabled`), which exercise this parser through the full
+`DixLoader` pipeline.
 
 ### `Compiler/Core/SectionAnalyzers/raw_section_analyzer.rs`
 
@@ -160,24 +166,35 @@ constraint keys were supplied).
 `path = Schema.<Type>(literal, ...)`, commas between fields optional.
 
 **Decisions:**
-- Its own mini-parser rather than wrapping `DataSectionParser`. The
-  original plan was to reuse `@DATA`'s value grammar, but `@DATA`'s parser
-  has no static-builtin-call arm (`IdentifierPatternType::StaticMethodCall`
-  is only handled inside QuickFuncs), so it cannot parse `Schema.Int(...)`.
-  The descriptor is narrow enough — a fixed call with literal arguments —
-  that no expression grammar is needed.
-- A lowercase type name is caught and reported with the capitalised
-  spelling as a hint, since it is the one mistake people will make.
-- `first_error()` exists so `GeneralParser` can fail loudly. A section
-  parser returning `None` becomes an **absent section**, not a compile
-  error — harmless for most sections, but an absent `@SCHEMA` means *no
-  validation at all*, so a typo would silently switch checking off for the
-  whole file. Under Halt, `GeneralParser` now turns a malformed `@SCHEMA`
-  into an error instead.
+- Its own mini-parser rather than wrapping `DataSectionParser`. The original plan was to reuse
+  `@DATA`'s value grammar, but `@DATA`'s parser has no static-builtin-call arm
+  (`IdentifierPatternType::StaticMethodCall` is only handled inside QuickFuncs), so it cannot parse
+  `Schema.Int(...)`. The descriptor is narrow enough, a fixed call with literal arguments, that no
+  expression grammar is needed.
+- A lowercase type name is caught and reported with the capitalised spelling as a hint, since it is
+  the one mistake people will make.
+- `first_error()` exists so `GeneralParser` can fail loudly. A section parser returning `None`
+  becomes an **absent section**, not a compile error. That is harmless for most sections, but an
+  absent `@SCHEMA` means *no validation at all*, so a typo would silently switch checking off for
+  the whole file. Under Halt, `GeneralParser` now turns a malformed `@SCHEMA` into an error
+  instead.
+- This is the third parser built on the arena AST. The parser owns an `Arena`, builds every literal
+  argument as a node there, keeps each field as a `DocSchemaField` record whose arguments are a run
+  of value ids, and exports the finished section once, at the end of `parse_section`, through
+  `DocSchema::export`. The arguments of one call are collected in a scratch `Vec<ValueId>` and
+  stored once with `Arena::alloc_value_list`, because their count is unknown until the closing
+  parenthesis. A call that fails part way leaves its nodes unreferenced in the arena, which is
+  harmless because the arena is append-only and is dropped with the parser. The public interface,
+  including `first_error()`, and the result are unchanged.
+- As in the other converted parsers, it exports at the end of the section, `parse_argument` reads
+  the current token through a copy of the shared slice, and the end-of-file token is a module-level
+  `static` shared by `current()` and `parse_argument`.
+- The public items now carry doc comments, and the module documentation describes the arena.
 
-**Tests:** `tests/schema_section_tests.rs` — flat/dotted paths, optional
-commas, keyword-named path segments, negative bounds, lowercase type name,
-malformed section, non-literal argument.
+**Tests:** `tests/schema_parser_tests.rs` pins the parser itself (positions, literal kinds, error
+strategies and the halt message). `tests/schema_section_tests.rs` has flat and dotted paths,
+optional commas, keyword-named path segments, negative bounds, lowercase type name, malformed
+section and non-literal argument, through the loader.
 
 ### `Compiler/Core/SectionAnalyzers/schema_section_analyzer.rs`
 
@@ -313,8 +330,8 @@ is declared here and is the one submodule that is not re-exported flat, so it is
 **Decisions:**
 - The arena is not re-exported flat, so its names (`Arena`, `Document`, `ValueNode`) cannot
   collide with the owned AST names.
-- The module documentation now says that `arena` exists and that the compiler does not use it
-  yet.
+- The module documentation now says that `arena` exists and which parsers use it so far (the
+  `@SECURITY`, `@RAW` and `@SCHEMA` section parsers).
 
 ### `Compiler/Core/SectionParsers/security_section_parser.rs`
 
@@ -363,6 +380,53 @@ corpus.
 
 **Tests:** `cargo test -p dixscript --test security_section_tests`. Ten tests, all passing on
 Rust 1.75.
+
+### `tests/raw_parser_tests.rs`
+
+**What it does:** Pins the behaviour of the `@RAW` parser itself. `raw_section_tests.rs` reaches
+the parser only through `DixLoader`, which cannot show source positions, what each error strategy
+does with malformed input, or the diagnostics. The helper runs the loader's first four stages
+(tokenize, split `@CONFIG`, process `@CONFIG`, parse) with an isolated error manager so the parse
+diagnostics can be read back. The fourteen tests cover a full block with exact positions and the
+content payload read back through its byte range, every scalar value kind with positions, an empty
+section, optional commas between entries and after the last field, two sections in one file, the
+`Value::Error` stand-in for a missing value under `continue` and `recover`, `halt` giving up on a
+malformed block, a missing brace under each strategy, duplicate `meta_data` and `content` blocks,
+an unknown key, an unclosed section, a `content` that is not a raw block, and a missing comma
+between fields.
+
+**Decisions:**
+- Every expectation was taken from the original, pre-arena parser's output, and the tests were run
+  against that parser as well as the converted one.
+- The payload is compared through the `content` token's byte range into the parsed source, not
+  through absolute offsets, because the offsets depend on the length of the `@CONFIG` header.
+- The `continue` and `recover` cases put a fourth line in the `@CONFIG` header (the
+  `error_handling` key), which shifts every source line by one compared with the `halt` cases.
+
+**Tests:** `cargo test -p dixscript --test raw_parser_tests`. Fourteen tests, all passing on Rust
+1.75.
+
+### `tests/schema_parser_tests.rs`
+
+**What it does:** Pins the behaviour of the `@SCHEMA` parser itself. `schema_section_tests.rs`
+reaches the parser only through `DixLoader`. The helper is the same as in `raw_parser_tests.rs`,
+except that it returns the error the parser raised, which is what the `halt` strategy does with a
+malformed `@SCHEMA`. The ten tests cover literal arguments of every kind with exact positions,
+negative numbers as single literals, an empty argument list and an empty section, dotted paths and
+keyword path segments, optional commas between fields, ten fields in order, eleven malformed inputs
+under `halt` (each checked against the full message with its line and column), `continue` against
+`recover` after a bad field, a bad argument under both, and an unclosed section keeping its fields.
+
+**Decisions:**
+- Every expectation was taken from the original, pre-arena parser's output, and the tests were run
+  against that parser as well as the converted one.
+- The `halt` messages are checked in full, with line and column, because the message is what the
+  user sees and `first_error()` is the only thing that makes `GeneralParser` raise it.
+- The tests record that `continue` ends the section at the first bad field, while `recover` resumes
+  at the next one. They record the behaviour that existed and do not change it.
+
+**Tests:** `cargo test -p dixscript --test schema_parser_tests`. Ten tests, all passing on Rust
+1.75.
 
 ## Fixes and Problems
 
@@ -593,3 +657,40 @@ requires the larger to take less than 7 times as long.
 - **Where the arena stops paying:** the sections are parsed in parallel, so each parser builds
   into its own arena and exports at the end of its section. That adds a copy, and it stays until
   the arenas can be merged by id offset and consumers read a `Document`.
+
+### Fixes and Problems: arena AST RAW and SCHEMA parsers
+
+- **`Compiler/Core/SectionParsers/raw_section_parser.rs` and `schema_section_parser.rs`:** both
+  conversions were checked with a throwaway before and after harness: the loader's tokenize,
+  config and parse stages run over 22 crafted `@RAW` sources and 21 crafted `@SCHEMA` sources, each
+  under all three error strategies (129 runs), dumping the parsed section and the parse and
+  lexical diagnostics. The baseline came from the original parsers and was identical across two
+  runs. The converted parsers' output was byte-identical to it. Six of the runs contain the
+  `Value::Error` fallback's message, so a change to it would show in the diff. The corpus holds no
+  `@RAW` and no `@SCHEMA` section, so no corpus file was run through this check.
+- **Every strategy is run.** Under the default `halt` strategy the `@RAW` parser gives up on a
+  block with a missing value before it reaches the fallback, so a halt-only harness would not cover
+  it. The harness runs `halt`, `continue` and `recover` for every source, as the pilot's did.
+- **`tests/raw_parser_tests.rs` and `tests/schema_parser_tests.rs`:** neither parser had direct
+  tests, only loader tests that cannot see positions or diagnostics. The new files hold fourteen
+  and ten tests, and all of them passed on the original parsers before the conversion and on the
+  converted ones after it. Six deliberate bugs were injected to check them: a `Long` value off by
+  one, an error message that dropped the key, a `using` block dropped on export, a
+  `first_error()` that never recorded, the arguments reversed, and an `alloc_value_list` that
+  returned a run one entry short. Each was caught by the tests that check that behaviour, and the
+  last one also by the `alloc_value_list` doctest.
+- **`Compiler/AST/arena/mod.rs`:** the only code that built a list run was `import_value_list`,
+  which is private to the arena module, so a parser could not allocate the argument list of a call.
+  `Arena::alloc_value_list` was added, with documentation, a `# Panics` section and a doctest. The
+  other list kinds get the same kind of allocator when the parser that needs one is converted.
+- **Behaviour recorded, not changed:** under `halt` a `@RAW` block with a missing field value is
+  dropped whole, a duplicate block name is reported and the later block wins, `@SCHEMA` raises the
+  error through `first_error()`, and under `continue` the `@SCHEMA` parser ends the section at the
+  first bad field while `recover` resumes at the next one.
+- **Comments:** the history and the em dashes were removed from the comments in both parsers.
+  Three diagnostic strings that contain an em dash were left as they are, because the text is
+  shown to users and a change would alter the diagnostics.
+- **Where the arena stops paying:** the same as in the pilot. Each converted parser builds into its
+  own arena and exports at the end of its section, which adds a copy until the arenas can be merged
+  by id offset and consumers read a `Document`. The `@RAW` and `@SCHEMA` sections are small, so the
+  cost is small too.

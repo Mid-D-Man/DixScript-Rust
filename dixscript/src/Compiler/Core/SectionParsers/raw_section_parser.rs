@@ -13,29 +13,47 @@
 //! RawValue      ::= StringLiteral | Integer | Long | Float | Double | Boolean | HexLiteral
 //! ```
 //!
-//! `content`'s right-hand side is always exactly one `TokenType::RawContent`
-//! token, never `{`/`}` — the lexer already consumed the whole delimited
-//! block by the time this parser sees it. `meta_data`/`using`'s field-list
-//! parsing otherwise mirrors `security_section_parser.rs`.
+//! `content`'s right-hand side is always exactly one `TokenType::RawContent` token, never
+//! `{` or `}`, because the lexer has already consumed the whole delimited block by the time
+//! this parser sees it. The field-list parsing of `meta_data` and `using` otherwise mirrors
+//! `security_section_parser.rs`.
 //!
-//! This parser builds the most complete `RawBlock` it can from whatever's
-//! actually in the source — a missing `content`, a missing `meta_data.id`,
-//! or a duplicate block name are all left as `None`/absent here rather
-//! than failing the whole block, and become clear semantic errors from
-//! `raw_section_analyzer.rs` instead. Cross-block checks (unique `id`,
-//! unique delimiter tag) aren't attempted here either — this parser only
-//! ever sees one `@RAW(...)` occurrence at a time.
+//! The parser builds the most complete `RawBlock` it can from what is in the source. A
+//! missing `content`, a missing `meta_data.id` or a duplicate block name is left as `None` or
+//! absent here instead of failing the block, and `raw_section_analyzer.rs` reports it as a
+//! semantic error. Cross-block checks (unique `id`, unique delimiter tag) are not attempted
+//! here either, because this parser only ever sees one `@RAW(...)` occurrence at a time.
+//!
+//! # Values are built in an arena
+//!
+//! The parser owns an [`Arena`]. Every field value is built there as a node, the fields are
+//! kept as [`DocRawField`] records that hold the value ids, and
+//! [`RawSectionParser::parse_section`] exports the finished block once, at the end, as the
+//! owned [`RawBlock`]. The public interface and the result are the same as before the parser
+//! used an arena; `tests/raw_parser_tests.rs` pins them.
 
-use crate::Compiler::AST::{RawBlock, RawField, RawContent, Position, Value};
+use crate::Compiler::AST::{RawBlock, RawContent, Position};
+use crate::Compiler::AST::arena::{Arena, DocRawBlock, DocRawField, ValueId, ValueNode};
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::ErrorManager::{ErrorManager, ParseErrorType, DebugConfig};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::Core::Tokenizer::token::SectionId;
 
+/// Returned in place of a token when the position is past the end of the slice.
+static EOF: Token = Token {
+    token_type: TokenType::EndOfFile,
+    line: 1,
+    column: 1,
+    section: SectionId::None,
+};
+
 const MAX_ITERATIONS_PER_TOKEN: usize = 3;
 const ABSOLUTE_MAX_ITERATIONS: usize = 500_000;
 const MAX_STUCK_COUNT: usize = 3;
 
+/// Parser for the `@RAW(...)` section.
+///
+/// Create it over the section's tokens and call [`parse_section`](Self::parse_section).
 pub struct RawSectionParser<'a> {
     tokens: &'a [Token],
     operational_settings: &'a OperationalSettings,
@@ -47,13 +65,22 @@ pub struct RawSectionParser<'a> {
     iteration_count: usize,
     max_iterations: usize,
     has_encountered_errors: bool,
+    /// Every field value of the block is built here; `parse_section` exports the finished block.
+    arena: Arena,
 }
 
 impl<'a> RawSectionParser<'a> {
+    /// Creates a parser that reports diagnostics to the process-wide shared [`ErrorManager`].
+    ///
+    /// Use [`new_with_error_manager`](Self::new_with_error_manager) to report to a specific one.
     pub fn new(tokens: &'a [Token], operational_settings: &'a OperationalSettings) -> Self {
         Self::new_with_error_manager(tokens, operational_settings, ErrorManager::get_shared_instance())
     }
 
+    /// Creates a parser that reports diagnostics to `error_manager`.
+    ///
+    /// The parser stops after three times the token count in steps, capped at 500,000, so
+    /// malformed input cannot make it loop forever.
     pub fn new_with_error_manager(
         tokens: &'a [Token],
         operational_settings: &'a OperationalSettings,
@@ -83,15 +110,21 @@ impl<'a> RawSectionParser<'a> {
             iteration_count: 0,
             max_iterations,
             has_encountered_errors: false,
+            arena: Arena::new(),
         }
     }
 
+    /// Parses the section and returns its block.
+    ///
+    /// Under the `halt` error strategy a parse error ends the section and the result is `None`.
+    /// Under `continue` and `recover` the parser keeps going and returns the fields it could
+    /// read, with a `Value::Error` standing in for a field whose value is missing.
     pub fn parse_section(&mut self) -> Option<RawBlock> {
         let section_start_pos = Position::from_token(self.current());
         self.reset_parse_state();
 
-        let mut meta_data: Vec<RawField> = Vec::with_capacity(4);
-        let mut using:     Vec<RawField> = Vec::with_capacity(4);
+        let mut meta_data: Vec<DocRawField> = Vec::with_capacity(4);
+        let mut using:     Vec<DocRawField> = Vec::with_capacity(4);
         let mut content:   Option<RawContent> = None;
 
         if !self.match_and_consume_symbol('(') {
@@ -107,7 +140,7 @@ impl<'a> RawSectionParser<'a> {
 
         if self.is_current_symbol(')') {
             self.advance();
-            return Some(RawBlock::new(meta_data, using, content, section_start_pos));
+            return Some(self.finish_block(meta_data, using, content, section_start_pos));
         }
 
         while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
@@ -242,13 +275,23 @@ impl<'a> RawSectionParser<'a> {
             ));
         }
 
-        Some(RawBlock::new(meta_data, using, content, section_start_pos))
+        Some(self.finish_block(meta_data, using, content, section_start_pos))
     }
 
-    /// Parses `{ key = value, key = value }` for `meta_data`/`using`.
-    /// Structurally identical to `security_section_parser.rs`'s field-list
-    /// parsing — see that file for the recovery-strategy reasoning.
-    fn parse_raw_field_block(&mut self, block_name: &str) -> Option<Vec<RawField>> {
+    /// Exports the block built in the arena as the owned `RawBlock`.
+    fn finish_block(
+        &self,
+        meta_data: Vec<DocRawField>,
+        using: Vec<DocRawField>,
+        content: Option<RawContent>,
+        position: Position,
+    ) -> RawBlock {
+        DocRawBlock { meta_data, using, content, position }.export(&self.arena)
+    }
+
+    /// Parses `{ key = value, key = value }` for `meta_data` and `using`. The field-list
+    /// handling is the same as in `security_section_parser.rs`.
+    fn parse_raw_field_block(&mut self, block_name: &str) -> Option<Vec<DocRawField>> {
         if !self.match_and_consume_symbol('{') {
             let current = self.current().clone();
             let msg = format!("Expected '{{' after '{} ->'", block_name);
@@ -317,7 +360,7 @@ impl<'a> RawSectionParser<'a> {
         Some(fields)
     }
 
-    fn parse_raw_field(&mut self) -> Option<RawField> {
+    fn parse_raw_field(&mut self) -> Option<DocRawField> {
         let field_start_pos = Position::from_token(self.current());
         let key = self.parse_identifier_or_keyword("Expected field key identifier in RAW block")?;
 
@@ -342,11 +385,12 @@ impl<'a> RawSectionParser<'a> {
                 );
                 self.report_error(ParseErrorType::UnexpectedToken, &msg, &current);
                 if self.should_halt_section() { return None; }
-                Value::Error { message: format!("Missing value for key '{}'", key), position: field_start_pos }
+                let message = self.arena.alloc_str(&format!("Missing value for key '{}'", key));
+                self.arena.alloc_value(ValueNode::Error { message, position: field_start_pos })
             }
         };
 
-        Some(RawField::new(key, value, field_start_pos))
+        Some(DocRawField { key, value, position: field_start_pos })
     }
 
     fn parse_identifier_or_keyword(&mut self, context: &str) -> Option<String> {
@@ -361,29 +405,36 @@ impl<'a> RawSectionParser<'a> {
         }
     }
 
-    fn parse_raw_value(&mut self) -> Option<Value> {
-        let pos = Position::from_token(self.current());
-        let value = match &self.current().token_type {
-            TokenType::String(s)       => Some(Value::String  { value: s.clone(), position: pos }),
-            TokenType::StringSingle(s) => Some(Value::String  { value: s.clone(), position: pos }),
-            TokenType::Integer(i)      => Some(Value::Integer { value: *i, position: pos }),
-            TokenType::Long(i)         => Some(Value::Long    { value: *i, position: pos }),
-            TokenType::Float(fl)       => Some(Value::Float   { value: *fl, position: pos }),
-            TokenType::Double(d)       => Some(Value::Double  { value: *d, position: pos }),
-            TokenType::Bool(b)         => Some(Value::Boolean { value: *b, position: pos }),
-            TokenType::HexColor(h)     => Some(Value::HexColor { value: h.clone(), position: pos }),
-            TokenType::Keyword(k) if *k == "true"  => Some(Value::Boolean { value: true,  position: pos }),
-            TokenType::Keyword(k) if *k == "false" => Some(Value::Boolean { value: false, position: pos }),
-            TokenType::Keyword(k) if *k == "null"  => Some(Value::Null { position: pos }),
+    fn parse_raw_value(&mut self) -> Option<ValueId> {
+        // `tokens` is a copy of the shared slice reference, so `token` does not borrow `self`
+        // and the arena can be borrowed mutably while the token is still read.
+        let tokens: &'a [Token] = self.tokens;
+        let token: &'a Token = tokens.get(self.position).unwrap_or(&EOF);
+        let pos = Position::from_token(token);
+        let arena = &mut self.arena;
+
+        let node = match &token.token_type {
+            TokenType::String(s)       => Some(ValueNode::String  { value: arena.alloc_str(s), position: pos }),
+            TokenType::StringSingle(s) => Some(ValueNode::String  { value: arena.alloc_str(s), position: pos }),
+            TokenType::Integer(i)      => Some(ValueNode::Integer { value: *i, position: pos }),
+            TokenType::Long(i)         => Some(ValueNode::Long    { value: *i, position: pos }),
+            TokenType::Float(fl)       => Some(ValueNode::Float   { value: *fl, position: pos }),
+            TokenType::Double(d)       => Some(ValueNode::Double  { value: *d, position: pos }),
+            TokenType::Bool(b)         => Some(ValueNode::Boolean { value: *b, position: pos }),
+            TokenType::HexColor(h)     => Some(ValueNode::HexColor { value: arena.alloc_str(h), position: pos }),
+            TokenType::Keyword(k) if *k == "true"  => Some(ValueNode::Boolean { value: true,  position: pos }),
+            TokenType::Keyword(k) if *k == "false" => Some(ValueNode::Boolean { value: false, position: pos }),
+            TokenType::Keyword(k) if *k == "null"  => Some(ValueNode::Null { position: pos }),
             _ => None,
         };
-        if value.is_some() { self.advance(); }
-        value
+
+        let id = node.map(|n| self.arena.alloc_value(n));
+        if id.is_some() { self.advance(); }
+        id
     }
 
-    /// `content -> …` — the right-hand side is always exactly one
-    /// `TokenType::RawContent` token, never `{`/`}`. See this file's top
-    /// doc comment for why.
+    /// Parses the right-hand side of `content ->`, which is always one `RawContent` token (see
+    /// the module docs).
     fn parse_raw_content(&mut self, entry_start_pos: Position) -> Option<RawContent> {
         match &self.current().token_type {
             TokenType::RawContent { tag, start, end } => {
@@ -438,14 +489,14 @@ impl<'a> RawSectionParser<'a> {
     fn partial_or_none(
         &self,
         start_pos: Position,
-        meta_data: Vec<RawField>,
-        using: Vec<RawField>,
+        meta_data: Vec<DocRawField>,
+        using: Vec<DocRawField>,
         content: Option<RawContent>,
     ) -> Option<RawBlock> {
         if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt {
             None
         } else {
-            Some(RawBlock::new(meta_data, using, content, start_pos))
+            Some(self.finish_block(meta_data, using, content, start_pos))
         }
     }
 
@@ -504,9 +555,6 @@ impl<'a> RawSectionParser<'a> {
 
     #[inline]
     fn current(&self) -> &Token {
-        static EOF: Token = Token {
-            token_type: TokenType::EndOfFile, line: 1, column: 1, section: SectionId::None,
-        };
         self.tokens.get(self.position).unwrap_or(&EOF)
     }
 

@@ -1,12 +1,26 @@
-// Updates the Rust version badge in the repo-root README.md from 1.85+ to 1.75+.
+// Brought to u by MidManStudio
 //
-// Why this is a patch and not part of the replacements archive: the root README.md
-// would be a flat archive member, and "README.md" matches many files in this repo,
-// so it needs a manifest override. A one-line edit does not justify that.
+// Removes the stale copies of docs/ and others/schema_section_spec.md that
+// ended up INSIDE the Unity package (com.midmanstudio.mdix/Editor/docs and
+// com.midmanstudio.mdix/Editor/others). They arrived via the two earlier
+// replacements deliveries (commits eef92017 and 308e8f84), which were applied
+// with target_root = com.midmanstudio.mdix/Editor instead of the repo root.
+// Unity then reports every one of them as "has no meta file, but it's in an
+// immutable folder" because package folders installed from git are read-only.
 //
-// Put this at .mdix/patches/patch.mdix and run "Apply Surgical Patch" (dry_run = true
-// first). It touches one line and deletes nothing. The other README (dixscript/README.md)
-// is already updated by the replacements archive.
+// Nothing is lost by deleting them:
+//   - Editor/docs/** is OLDER than the real docs/ at the repo root (it still
+//     documents bzip2-support / xz-support, which root docs/dixscript/features.md
+//     has since replaced).
+//   - Editor/others/schema_section_spec.md is byte-identical to
+//     others/schema_section_spec.md at the repo root.
+//   - No C# file in the package reads either folder.
+//
+// delete_files:: removes FILES only, never directories, so every file in both
+// folders is listed. The emptied folders vanish from git on commit because git
+// does not track empty directories.
+//
+// Run "Apply Surgical Patch" with dry_run = true first.
 @CONFIG(
   version    -> "1.0.0"
   features   -> "quickfuncs,data"
@@ -14,12 +28,16 @@
 )
 
 @QUICKFUNCS(
-  ~patch_replace_text<object>(path, anchor, content) {
-    return { path = path, op = "replace_text", anchor = anchor, content = content }
+  ~delete_file<object>(_path) {
+    return { path = _path }
   }
 )
 
 @DATA(
-  patch_files::
-    patch_replace_text("README.md", "rust-1.85+", "rust-1.75+")
+  delete_files::
+    delete_file("com.midmanstudio.mdix/Editor/docs/dixscript.md")
+    delete_file("com.midmanstudio.mdix/Editor/docs/dixscript/compiler.md")
+    delete_file("com.midmanstudio.mdix/Editor/docs/dixscript/features.md")
+    delete_file("com.midmanstudio.mdix/Editor/docs/dixscript/utilities.md")
+    delete_file("com.midmanstudio.mdix/Editor/others/schema_section_spec.md")
 )

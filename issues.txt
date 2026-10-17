@@ -2,3 +2,47 @@ Library/PackageCache/com.midmanstudio.mdix@1b692eca4a/Editor/MdixEditorWindow.Se
 
 Library/PackageCache/com.midmanstudio.mdix@1b692eca4a/Editor/MdixEditorWindow.Search.cs(64,43): error CS0121: The call is ambiguous between the following methods or properties: 'StyleLength.StyleLength(float)' and 'StyleLength.StyleLength(StyleKeyword)'
 
+Library/PackageCache/com.midmanstudio.mdix@1b692eca4a/Editor/MdixEditorWindow.Search.cs(63,43): error CS0121: The call is ambiguous between the following methods or properties: 'StyleLength.StyleLength(float)' and 'StyleLength.StyleLength(StyleKeyword)'
+
+Library/PackageCache/com.midmanstudio.mdix@1b692eca4a/Editor/MdixEditorWindow.Search.cs(64,43): error CS0121: The call is ambiguous between the following methods or properties: 'StyleLength.StyleLength(float)' and 'StyleLength.StyleLength(StyleKeyword)'
+
+Asset Packages/com.midmanstudio.alembic/docs has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.alembic/docs/com.midmanstudio.alembic.md has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/docs has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/docs/dixscript has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/docs/dixscript.md has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/docs/dixscript/compiler.md has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/docs/dixscript/features.md has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/docs/dixscript/utilities.md has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/others has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/others/schema_section_spec.md has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.alembic/docs has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.alembic/docs/com.midmanstudio.alembic.md has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/docs has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/docs/dixscript has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/docs/dixscript.md has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/docs/dixscript/compiler.md has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/docs/dixscript/features.md has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/docs/dixscript/utilities.md has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/others has no meta file, but it's in an immutable folder. The asset will be ignored.
+
+Asset Packages/com.midmanstudio.mdix/Editor/others/schema_section_spec.md has no meta file, but it's in an immutable folder. The asset will be ignored.
+

@@ -60,8 +60,8 @@ namespace MidManStudio.Mdix.Unity.Editor
                 style =
                 {
                     flexGrow        = new StyleFloat(1f),
-                    marginLeft      = new StyleLength(0),
-                    marginRight     = new StyleLength(0),
+                    marginLeft      = new StyleLength(0f),
+                    marginRight     = new StyleLength(0f),
                     marginBottom    = new StyleLength(4),
                 },
             };

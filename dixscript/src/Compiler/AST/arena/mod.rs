@@ -315,6 +315,69 @@ impl Arena {
         ValueList::new(start, ids.len())
     }
 
+    /// Copies `ids` into the expression-list store and returns the run that names them.
+    ///
+    /// The counterpart of [`alloc_value_list`](Self::alloc_value_list) for lists of expressions,
+    /// such as the arguments of a function call. Read the run back with
+    /// [`expr_list`](Self::expr_list).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store would grow past what a `u32` offset can address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::{Arena, ExprNode};
+    /// use dixscript::Compiler::AST::Position;
+    ///
+    /// let mut arena = Arena::new();
+    /// let name = arena.alloc_str("x");
+    /// let a = arena.alloc_expr(ExprNode::Identifier { name, position: Position::new(1, 1) });
+    /// let b = arena.alloc_expr(ExprNode::Identifier { name, position: Position::new(1, 4) });
+    /// let list = arena.alloc_expr_list(&[a, b]);
+    ///
+    /// assert_eq!(list.len(), 2);
+    /// assert_eq!(arena.expr_list(list), &[a, b]);
+    /// ```
+    #[inline]
+    pub fn alloc_expr_list(&mut self, ids: &[ExprId]) -> ExprList {
+        let start = self.expr_lists.len();
+        self.expr_lists.extend_from_slice(ids);
+        ExprList::new(start, ids.len())
+    }
+
+    /// Copies `props` into the object-property store and returns the run that names them.
+    ///
+    /// An object literal collects its finished properties and stores the run once, when its
+    /// closing brace is reached. Read the run back with [`prop_list`](Self::prop_list).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store would grow past what a `u32` offset can address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::{Arena, ObjectPropNode, ValueNode};
+    /// use dixscript::Compiler::AST::Position;
+    ///
+    /// let mut arena = Arena::new();
+    /// let key = arena.alloc_str("port");
+    /// let value = arena.alloc_value(ValueNode::Integer { value: 8080, position: Position::new(1, 8) });
+    /// let prop = ObjectPropNode { key, value, position: Position::new(1, 1) };
+    /// let list = arena.alloc_prop_list(&[prop]);
+    ///
+    /// assert_eq!(list.len(), 1);
+    /// assert_eq!(arena.text(arena.prop_list(list)[0].key), "port");
+    /// ```
+    #[inline]
+    pub fn alloc_prop_list(&mut self, props: &[ObjectPropNode]) -> PropList {
+        let start = self.props.len();
+        self.props.extend_from_slice(props);
+        PropList::new(start, props.len())
+    }
+
     // -- access -------------------------------------------------------------
 
     /// Returns the value node `id` names.

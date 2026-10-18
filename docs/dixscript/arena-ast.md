@@ -36,7 +36,7 @@ which design options exist, and what has to be decided before any code moves.
   `Expression` and `QuickFuncStatement`, and a corpus round trip through the real compiler
   returns equal trees. Handles that pair a node with its arena print and compare exactly
   like the owned types, and an arena-resident `Document` holds a whole file and converts to and
-  from the owned `DixScript` exactly. The `@SECURITY`, `@RAW` and `@SCHEMA` section parsers build
+  from the owned `DixScript` exactly. The `@SECURITY`, `@RAW`, `@SCHEMA` and `@DATA` section parsers build
   their values in an arena and export the owned section at the end; nothing else in the compiler
   uses it yet.
 
@@ -618,9 +618,7 @@ all instructions.
   (`ValueRef`, `ExprRef`, `StmtRef`), the arena-resident `Document`, and `Display` for `Document`
   and the `Doc*` section twins. Planned drops, each compiling with the tests intact:
   1. The rest of the parsers building into the arena. The `@SECURITY` parser is done and is the
-     pilot, and `@RAW` and `@SCHEMA` are done. Next come `@DATA` (`data_section_parser.rs`, 3,325
-     lines) and `@QUICKFUNCS` (`quickfuncs_section_parser.rs`, 3,361 lines), which hold most of
-     the construction sites (52 `Value`, 25 `Expression` in the first; 79, 81 and 21 statements
+     pilot, and `@RAW` and `@SCHEMA` are done. `@DATA` (`data_section_parser.rs`, 3,325 lines) is done too. Next comes `@QUICKFUNCS` (`quickfuncs_section_parser.rs`, 3,361 lines), which holds the statements and the rest of the construction sites (52 `Value`, 25 `Expression` in the first; 79, 81 and 21 statements
      in the second). Lists need scratch stacks there, since child counts are unknown while
      parsing. The sections are parsed in parallel, so each section parser builds into its own
      arena and exports at the end of its section; merging the arenas by id offset comes after
@@ -731,13 +729,14 @@ The module re-exports everything under it and carries the crate-facing documenta
 - **Documentation follows the Rust conventions for a library crate.** The module sets
   `#![warn(missing_docs)]`, every public item has a doc comment, accessors and allocators carry
   a `# Panics` section, and the module, `Arena`, `import_value`, `export_value`, `ValueRef` and
-  `Document` carry runnable examples, and so does `alloc_value_list` (seven doctests). `cargo doc`
+  `Document` carry runnable examples, and so do `alloc_value_list`, `alloc_expr_list` and `alloc_prop_list` (nine doctests). `cargo doc`
   reports no warnings for the module.
-- **Parsers allocate list runs through `alloc_value_list`.** A parser that builds a list node by
-  node collects the child ids and stores the run once. Import stays the only other way to build a
-  run. The other list kinds get an allocator like it when the parser that needs one is converted.
+- **Parsers allocate list runs through `alloc_value_list`, `alloc_expr_list` and
+  `alloc_prop_list`.** A parser that builds a list node by node collects the child ids and stores
+  the run once. Import stays the only other way to build a run. Statement, case and string lists
+  get an allocator like these when the parser that needs one is converted.
 
-**Tests:** The seven doctests (`cargo test -p dixscript --doc arena`), plus
+**Tests:** The nine doctests (`cargo test -p dixscript --doc arena`), plus
 `tests/arena_roundtrip.rs` and `tests/arena_document.rs`.
 
 ### `Compiler/AST/arena/nodes.rs`
@@ -1017,7 +1016,8 @@ and 11 doctests (26 ignored, as before).
   reads the wrong node or panics. Each accessor documents this under `# Panics`.
 - A parser outside the module had no way to build a list run, because `import_value_list` is
   private to the arena module. `alloc_value_list` was added for the `@SCHEMA` parser's call
-  arguments (see `compiler.md`).
+  arguments, and `alloc_expr_list` and `alloc_prop_list` for the `@DATA` parser's call arguments
+  and object literals (see `compiler.md`).
 
 ### `Compiler/AST/arena/nodes.rs`
 - The `missing_docs` lint is satisfied for fields by `#[allow(missing_docs)]` on each variant,

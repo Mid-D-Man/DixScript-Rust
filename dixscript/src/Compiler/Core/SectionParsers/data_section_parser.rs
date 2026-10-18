@@ -13,19 +13,38 @@
 //! DataContent  ::= SimpleProperty* GroupedEntry*
 //! GroupedEntry ::= TableProperty | GroupArray
 //! ```
+//!
+//! # Values are built in an arena
+//!
+//! The parser owns an [`Arena`]. Every value and expression is built there as a node, the
+//! entries are kept as [`DocDataEntry`] records that hold the ids, and
+//! [`DataSectionParser::parse_section`] exports the finished section once, at the end, as the
+//! owned [`DataSection`]. The public interface and the result are the same as before the
+//! parser used an arena; `tests/data_parser_tests.rs` pins them.
+//!
+//! A list is only known to be complete when its closing token is reached, so the lists
+//! (array literals, object literals, tuple constructors, group arrays and call arguments)
+//! collect the ids of their finished children on a scratch stack and store the run in the
+//! arena once. Each list parser records the stack height when it starts and truncates the stack
+//! back to it on every way out, so an early return cannot leave stray entries for the list that
+//! encloses it.
 
-use crate::Compiler::AST::{
-    DataSection, DataEntry, TablePath, PropertyAssignment, Position,
-    Value, ObjectProperty, Expression, DataType, ElemType,
+use crate::Compiler::AST::{DataSection, TablePath, Position, DataType, ElemType};
+use crate::Compiler::AST::arena::{
+    Arena, DocData, DocDataEntry, DocPropertyAssignment, ExprId, ExprNode, ObjectPropNode,
+    ValueId, ValueNode,
 };
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::Core::Tokenizer::token::SectionId;
 use crate::Compiler::Utilities::{IdentifierPatternAnalyzer, IdentifierPatternType};
 use crate::ErrorManager::{ErrorManager, ParseErrorType, DebugConfig};
-use crate::Utilities::{estimate_properties_count, estimate_array_items_count, section_estimate};
+use crate::Utilities::{estimate_properties_count, section_estimate};
 
 
+/// Parser for the `@DATA(...)` section.
+///
+/// Create it over the section's tokens and call [`parse_section`](Self::parse_section).
 pub struct DataSectionParser<'a> {
     tokens: &'a [Token],
     operational_settings: &'a OperationalSettings,
@@ -40,7 +59,14 @@ pub struct DataSectionParser<'a> {
     current_container_nesting_depth: usize,
     current_function_call_depth: usize,
     pending_angle: bool,
-    pending_equal: bool, // set when '=' was consumed as part of a '>>=' token
+        pending_equal: bool, // set when '=' was consumed as part of a '>>=' token
+    /// Every value and expression of the section is built here; `parse_section` exports the
+    /// finished section.
+    arena: Arena,
+    /// Ids of the finished children of the list being parsed. See the module docs.
+    scratch_values: Vec<ValueId>,
+    scratch_exprs: Vec<ExprId>,
+    scratch_props: Vec<ObjectPropNode>,
 }
 
 // Shared between object literals ({...}) and array literals ([...]) --
@@ -55,12 +81,19 @@ const ABSOLUTE_MAX_ITERATIONS: usize = 500_000;
 const MAX_STUCK_COUNT: usize = 3;
 
 impl<'a> DataSectionParser<'a> {
-   pub fn new(
+       /// Creates a parser that reports diagnostics to the process-wide shared [`ErrorManager`].
+    ///
+    /// Use [`new_with_error_manager`](Self::new_with_error_manager) to report to a specific one.
+    pub fn new(
     tokens: &'a [Token],
     operational_settings: &'a OperationalSettings,
 ) -> Self {
    Self::new_with_error_manager(tokens,operational_settings,ErrorManager::get_shared_instance())
 }
+    /// Creates a parser that reports diagnostics to `error_manager`.
+    ///
+    /// The parser stops after three times the token count in steps, capped at 500,000, so
+    /// malformed input cannot make it loop forever.
 pub fn new_with_error_manager(
     tokens: &'a [Token],
     operational_settings: &'a OperationalSettings,
@@ -93,10 +126,19 @@ pub fn new_with_error_manager(
         has_seen_grouped_data: false,
         current_container_nesting_depth: 0,
         current_function_call_depth: 0,
-        pending_angle: false,
+                pending_angle: false,
         pending_equal: false,
+        arena: Arena::new(),
+        scratch_values: Vec::new(),
+        scratch_exprs: Vec::new(),
+        scratch_props: Vec::new(),
     }
 }
+        /// Parses the section and returns it.
+    ///
+    /// Under the `halt` error strategy a parse error ends the section and the result is the
+    /// section failure result. Under `continue` and `recover` the parser keeps going and returns
+    /// the entries it could read.
     pub fn parse_section(&mut self) -> Option<DataSection> {
         self.log_debug("Starting DATA section parse");
 
@@ -176,7 +218,7 @@ pub fn new_with_error_manager(
             ));
         }
 
-        Some(DataSection::new(data_entries, section_start_pos))
+        Some(DocData { entries: data_entries, position: section_start_pos }.export(&self.arena))
     }
 fn reset_parse_state(&mut self) {
     self.last_position = usize::MAX;
@@ -287,7 +329,7 @@ fn reset_parse_state(&mut self) {
         !self.is_at_end()
     }
 
-    fn parse_data_entry(&mut self) -> Option<DataEntry> {
+    fn parse_data_entry(&mut self) -> Option<DocDataEntry> {
         self.log_verbose("Parsing data entry");
 
         let entry_type = self.determine_data_entry_type();
@@ -425,7 +467,7 @@ fn reset_parse_state(&mut self) {
         DataEntryType::Unknown
     }
 
-    fn parse_simple_property(&mut self) -> Option<DataEntry> {
+    fn parse_simple_property(&mut self) -> Option<DocDataEntry> {
     self.log_verbose("Parsing simple property");
 
     let start_pos = Position::from_token(self.current());
@@ -515,7 +557,7 @@ fn reset_parse_state(&mut self) {
             if self.should_halt_section() {
                 return None;
             }
-            Value::Null { position: start_pos }
+            self.arena.alloc_value(ValueNode::Null { position: start_pos })
         }
     };
 
@@ -523,7 +565,7 @@ fn reset_parse_state(&mut self) {
         self.error_manager
             .log_info(&format!("Created simple property AST node: {}", property_name));
     }
-    Some(DataEntry::SimpleProperty {
+    Some(DocDataEntry::SimpleProperty {
         name: property_name,
         data_type,
         value,
@@ -531,7 +573,7 @@ fn reset_parse_state(&mut self) {
     })
 }
 
-fn parse_table_property(&mut self) -> Option<DataEntry> {
+fn parse_table_property(&mut self) -> Option<DocDataEntry> {
     self.log_verbose("Parsing table property");
 
     let start_pos = Position::from_token(self.current());
@@ -625,14 +667,21 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         }
     }
 
-    Some(DataEntry::TableProperty {
+    Some(DocDataEntry::TableProperty {
         path: table_path,
         properties,
         position: start_pos,
     })
 }
 
-    fn parse_group_array(&mut self) -> Option<DataEntry> {
+        fn parse_group_array(&mut self) -> Option<DocDataEntry> {
+        let base = self.scratch_values.len();
+        let result = self.parse_group_array_inner(base);
+        self.scratch_values.truncate(base);
+        result
+    }
+
+    fn parse_group_array_inner(&mut self, base: usize) -> Option<DocDataEntry> {
         self.log_verbose("Parsing group array");
 
         let start_pos = Position::from_token(self.current());
@@ -658,10 +707,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             }
         }
 
-        let estimated_items = estimate_array_items_count(self.tokens.len());
-        let mut items = Vec::with_capacity(estimated_items);
-
-        while !self.is_at_end() && !self.should_terminate_loop() {
+                while !self.is_at_end() && !self.should_terminate_loop() {
             self.track_progress();
 
             if self.is_stuck() {
@@ -688,8 +734,8 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                 return None;
             }
 
-            if let Some(value) = item {
-                items.push(value);
+                        if let Some(value) = item {
+                self.scratch_values.push(value);
                 self.log_verbose("Parsed array item");
             } else {
                 let current = self.current().clone();
@@ -811,8 +857,9 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             }
         }
 
-        let item_count = items.len();
-        let group_array = DataEntry::GroupArray {
+                let item_count = self.scratch_values.len() - base;
+        let items = self.arena.alloc_value_list(&self.scratch_values[base..]);
+        let group_array = DocDataEntry::GroupArray {
             path: table_path,
             items,
             position: start_pos,
@@ -827,7 +874,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         Some(group_array)
     }
 
-    fn parse_data_entry_object_property(&mut self) -> Option<DataEntry> {
+    fn parse_data_entry_object_property(&mut self) -> Option<DocDataEntry> {
     self.log_verbose("Parsing object property");
 
     let start_pos = Position::from_token(self.current());
@@ -875,10 +922,8 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             if self.should_halt_section() {
                 return None;
             }
-            Value::Object {
-                properties: Vec::new(),
-                position: start_pos,
-            }
+                        let properties = self.arena.alloc_prop_list(&[]);
+            self.arena.alloc_value(ValueNode::Object { properties, position: start_pos })
         }
     };
 
@@ -886,97 +931,62 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         self.error_manager
             .log_info(&format!("Created object property AST node: {}", property_name));
     }
-    Some(DataEntry::ObjectProperty {
+    Some(DocDataEntry::ObjectProperty {
         name: property_name,
         data_type,
-        object: Box::new(object_literal),
+        object: object_literal,
         position: start_pos,
     })
 }
 
-    fn parse_property_value(&mut self) -> Option<Value> {
+    fn parse_property_value(&mut self) -> Option<ValueId> {
         self.log_verbose("Parsing property value");
 
         let current_token = self.current();
         let value_pos = Position::from_token(current_token);
 
-        
-
-        match &current_token.token_type {
-            TokenType::Integer(i) => {
-                let val = *i;
-                self.advance();
-                Some(Value::Integer { value: val, position: value_pos })
-            }
-            TokenType::Long(l) => {
-                let val = *l;
-                self.advance();
-                Some(Value::Long { value: val, position: value_pos })
-            }
-            TokenType::Float(f) => {
-                let val = *f;
-                self.advance();
-                Some(Value::Float { value: val, position: value_pos })
-            }
-            TokenType::Double(d) => {
-                let val = *d;
-                self.advance();
-                Some(Value::Double { value: val, position: value_pos })
-            }
+        let node = match &current_token.token_type {
+            TokenType::Integer(i) => ValueNode::Integer { value: *i, position: value_pos },
+            TokenType::Long(l) => ValueNode::Long { value: *l, position: value_pos },
+            TokenType::Float(f) => ValueNode::Float { value: *f, position: value_pos },
+            TokenType::Double(d) => ValueNode::Double { value: *d, position: value_pos },
             TokenType::ScientificNotation(sn) => {
-                let val = *sn;
-                self.advance();
-                Some(Value::ScientificNotation { value: val, position: value_pos })
+                ValueNode::ScientificNotation { value: *sn, position: value_pos }
             }
             TokenType::String(s) => {
-                let val = s.clone();
-                self.advance();
-                Some(Value::String { value: val, position: value_pos })
+                ValueNode::String { value: self.arena.alloc_str(s), position: value_pos }
             }
             TokenType::StringSingle(ss) => {
-                let val = ss.clone();
-                self.advance();
-                Some(Value::String { value: val, position: value_pos })
+                ValueNode::String { value: self.arena.alloc_str(ss), position: value_pos }
             }
-            TokenType::Bool(b) => {
-                let val = *b;
-                self.advance();
-                Some(Value::Boolean { value: val, position: value_pos })
-            }
+            TokenType::Bool(b) => ValueNode::Boolean { value: *b, position: value_pos },
             TokenType::HexColor(hc) => {
-                let val = hc.clone();
-                self.advance();
-                Some(Value::HexColor { value: val, position: value_pos })
+                ValueNode::HexColor { value: self.arena.alloc_str(hc), position: value_pos }
             }
             TokenType::Date(d) => {
-                let val = d.clone();
-                self.advance();
-                Some(Value::Date { value: val, position: value_pos })
+                ValueNode::Date { value: self.arena.alloc_str(d), position: value_pos }
             }
             TokenType::Timestamp(ts) => {
-                let val = ts.clone();
-                self.advance();
-                Some(Value::Timestamp { value: val, position: value_pos })
+                ValueNode::Timestamp { value: self.arena.alloc_str(ts), position: value_pos }
             }
-            _ => {
-                let token_clone = current_token.clone();
-                self.parse_complex_property_value(&token_clone, value_pos)
-            }
-        }
+            _ => return self.parse_complex_property_value(current_token, value_pos),
+        };
+        self.advance();
+        Some(self.arena.alloc_value(node))
     }
 
-    fn parse_complex_property_value(&mut self, current_token: &Token, pos: Position) -> Option<Value> {
+    fn parse_complex_property_value(&mut self, current_token: &Token, pos: Position) -> Option<ValueId> {
         // Keyword literals: null, true, false.
         // kw is &&'static str here; *kw gives &'static str for direct comparison.
         if let TokenType::Keyword(kw) = &current_token.token_type {
             if *kw == "null" {
                 self.advance();
-                return Some(Value::Null { position: pos });
+                return Some(self.arena.alloc_value(ValueNode::Null { position: pos }));
             }
             if *kw == "true" || *kw == "false" {
                 let val = *kw == "true";
                 self.advance();
-                return Some(Value::Boolean { value: val, position: pos });
+                return Some(self.arena.alloc_value(ValueNode::Boolean { value: val, position: pos }));
             }
         }
 
@@ -1023,7 +1033,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         None
     }
 
-    fn parse_identifier_value(&mut self, identifier: &str, pos: Position) -> Option<Value> {
+    fn parse_identifier_value(&mut self, identifier: &str, pos: Position) -> Option<ValueId> {
         if self.debug_config.is_verbose {
             self.error_manager.log_info(&format!(
                 "ParseIdentifierValue: '{}' at position {}",
@@ -1064,11 +1074,9 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                 }
                 self.advance();
                 self.advance();
-                Some(Value::EnumValue {
-                    enum_name: identifier.to_string(),
-                    value: pattern.second_part.unwrap(),
-                    position: pos,
-                })
+                                let enum_name = self.arena.alloc_str(identifier);
+                let value = self.arena.alloc_str(&pattern.second_part.unwrap());
+                Some(self.arena.alloc_value(ValueNode::EnumValue { enum_name, value, position: pos }))
             }
             IdentifierPatternType::ImportedFunctionCall => {
                 if self.debug_config.is_verbose {
@@ -1097,11 +1105,11 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                 self.advance();
                 let enum_value = pattern.third_part.unwrap();
                 self.advance();
-                Some(Value::EnumValue {
-                    enum_name: format!("{}.{}", identifier, pattern.second_part.unwrap()),
-                    value: enum_value,
-                    position: pos,
-                })
+                                let enum_name = self
+                    .arena
+                    .alloc_str(&format!("{}.{}", identifier, pattern.second_part.unwrap()));
+                let value = self.arena.alloc_str(&enum_value);
+                Some(self.arena.alloc_value(ValueNode::EnumValue { enum_name, value, position: pos }))
             }
             IdentifierPatternType::TableOrGroupSyntax => {
                 let current = self.current().clone();
@@ -1116,27 +1124,36 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                 if self.should_halt_section() {
                     return None;
                 }
-                Some(Value::Error {
-                    message: "Invalid table syntax in value context".to_string(),
-                    position: pos,
-                })
+                                let message = self.arena.alloc_str("Invalid table syntax in value context");
+                Some(self.arena.alloc_value(ValueNode::Error { message, position: pos }))
             }
             _ => {
                 self.log_verbose("Simple identifier reference");
-                Some(Value::Identifier {
-                    value: identifier.to_string(),
-                    position: pos,
-                })
+                                let value = self.arena.alloc_str(identifier);
+                Some(self.arena.alloc_value(ValueNode::Identifier { value, position: pos }))
             }
         }
     }
 
-    fn parse_quick_func_call(
+        fn parse_quick_func_call(
+        &mut self,
+        function_name: &str,
+        pos: Position,
+        is_accumulative: bool,
+    ) -> Option<ValueId> {
+        let base = self.scratch_exprs.len();
+        let result = self.parse_quick_func_call_inner(function_name, pos, is_accumulative, base);
+        self.scratch_exprs.truncate(base);
+        result
+    }
+
+    fn parse_quick_func_call_inner(
         &mut self,
         function_name: &str,
         pos: Position,
         _is_accumulative: bool,
-    ) -> Option<Value> {
+        base: usize,
+    ) -> Option<ValueId> {
         self.current_function_call_depth += 1;
 
         if self.current_function_call_depth > MAX_FUNCTION_CALL_DEPTH {
@@ -1174,8 +1191,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             return None;
         }
 
-        let estimated_args = estimate_array_items_count(self.tokens.len());
-        let mut arguments = Vec::with_capacity(estimated_args);
+        
 
         while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
             self.track_progress();
@@ -1207,7 +1223,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             }
 
             if let Some(arg) = argument {
-                arguments.push(arg);
+                self.scratch_exprs.push(arg);
             } else {
                 let current = self.current().clone();
                 self.handle_parse_error(
@@ -1271,24 +1287,35 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         if self.debug_config.is_verbose {
             self.error_manager.log_info(&format!(
                 "Parsed QuickFunc call: {} with {} arguments",
-                function_name,
-                arguments.len()
+                                function_name,
+                self.scratch_exprs.len() - base
             ));
         }
 
-        Some(Value::QuickFuncCall {
-            function_name: function_name.to_string(),
-            arguments,
-            position: pos,
-        })
+                let function_name = self.arena.alloc_str(function_name);
+        let arguments = self.arena.alloc_expr_list(&self.scratch_exprs[base..]);
+        Some(self.arena.alloc_value(ValueNode::QuickFuncCall { function_name, arguments, position: pos }))
     }
 
-    fn parse_imported_function_call(
+        fn parse_imported_function_call(
         &mut self,
         namespace_name: &str,
         function_name: &str,
         pos: Position,
-    ) -> Option<Value> {
+    ) -> Option<ValueId> {
+        let base = self.scratch_exprs.len();
+        let result = self.parse_imported_function_call_inner(namespace_name, function_name, pos, base);
+        self.scratch_exprs.truncate(base);
+        result
+    }
+
+    fn parse_imported_function_call_inner(
+        &mut self,
+        namespace_name: &str,
+        function_name: &str,
+        pos: Position,
+        base: usize,
+    ) -> Option<ValueId> {
         let qualified_name = format!("{}.{}", namespace_name, function_name);
 
         if self.debug_config.is_verbose {
@@ -1329,8 +1356,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             return None;
         }
 
-        let estimated_args = estimate_array_items_count(self.tokens.len());
-        let mut arguments = Vec::with_capacity(estimated_args);
+        
 
         while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
             self.track_progress();
@@ -1362,7 +1388,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             }
 
             if let Some(arg) = argument {
-                arguments.push(arg);
+                self.scratch_exprs.push(arg);
             } else {
                 let current = self.current().clone();
                 self.handle_parse_error(
@@ -1428,19 +1454,32 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         if self.debug_config.is_verbose {
             self.error_manager.log_info(&format!(
                 "Parsed imported function call: {} with {} arguments",
-                qualified_name,
-                arguments.len()
+                                qualified_name,
+                self.scratch_exprs.len() - base
             ));
         }
 
-        Some(Value::QuickFuncCall {
-            function_name: qualified_name,
-            arguments,
-            position: pos,
-        })
+                let function_name = self.arena.alloc_str(&qualified_name);
+        let arguments = self.arena.alloc_expr_list(&self.scratch_exprs[base..]);
+        Some(self.arena.alloc_value(ValueNode::QuickFuncCall { function_name, arguments, position: pos }))
     }
 
-    fn parse_argument_expression(&mut self) -> Option<Expression> {
+    /// Wraps a value node in an expression node at `pos`.
+    fn expr_value(&mut self, node: ValueNode, pos: Position) -> ExprId {
+        let value = self.arena.alloc_value(node);
+        self.arena.alloc_expr(ExprNode::Value { value, position: pos })
+    }
+
+    /// Wraps `value` in an expression node, building `fallback` first when there is no value.
+    fn expr_value_or(&mut self, value: Option<ValueId>, fallback: ValueNode, pos: Position) -> ExprId {
+        let value = match value {
+            Some(v) => v,
+            None => self.arena.alloc_value(fallback),
+        };
+        self.arena.alloc_expr(ExprNode::Value { value, position: pos })
+    }
+
+    fn parse_argument_expression(&mut self) -> Option<ExprId> {
         if self.debug_config.is_verbose {
             self.error_manager.log_info(&format!(
                 "ParseArgumentExpression at position {}",
@@ -1451,111 +1490,38 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         let current_token = self.current();
         let expr_pos = Position::from_token(current_token);
 
-        if let TokenType::Integer(i) = current_token.token_type {
-            let val = i;
-            self.advance();
-            return Some(Expression::Value {
-                value: Value::Integer { value: val, position: expr_pos },
-                position: expr_pos,
-            });
-        }
-        if let TokenType::Long(i) = current_token.token_type {
-            let val = i;
-            self.advance();
-            return Some(Expression::Value {
-                value: Value::Long { value: val, position: expr_pos },
-                position: expr_pos,
-            });
-        }
-        if let TokenType::Float(f) = current_token.token_type {
-            let val = f;
-            self.advance();
-            return Some(Expression::Value {
-                value: Value::Float { value: val, position: expr_pos },
-                position: expr_pos,
-            });
-        }
-
-        if let TokenType::Double(d) = current_token.token_type {
-            let val = d;
-            self.advance();
-            return Some(Expression::Value {
-                value: Value::Double { value: val, position: expr_pos },
-                position: expr_pos,
-            });
-        }
-
-        if let TokenType::String(s) = &current_token.token_type {
-            let val = s.clone();
-            self.advance();
-            return Some(Expression::Value {
-                value: Value::String { value: val, position: expr_pos },
-                position: expr_pos,
-            });
-        }
-
-        if let TokenType::Bool(b) = current_token.token_type {
-            let val = b;
-            self.advance();
-            return Some(Expression::Value {
-                value: Value::Boolean { value: val, position: expr_pos },
-                position: expr_pos,
-            });
-        }
-
-        // kw is &&'static str; *kw gives &'static str for comparison.
-        if let TokenType::Keyword(kw) = &current_token.token_type {
-            if *kw == "true" || *kw == "false" {
-                let val = *kw == "true";
-                self.advance();
-                return Some(Expression::Value {
-                    value: Value::Boolean { value: val, position: expr_pos },
-                    position: expr_pos,
-                });
+        // The literals that become a single value node. A keyword is compared as a string:
+        // `kw` is `&&'static str` here.
+        let literal = match &current_token.token_type {
+            TokenType::Integer(i) => Some(ValueNode::Integer { value: *i, position: expr_pos }),
+            TokenType::Long(i) => Some(ValueNode::Long { value: *i, position: expr_pos }),
+            TokenType::Float(f) => Some(ValueNode::Float { value: *f, position: expr_pos }),
+            TokenType::Double(d) => Some(ValueNode::Double { value: *d, position: expr_pos }),
+            TokenType::String(s) => {
+                Some(ValueNode::String { value: self.arena.alloc_str(s), position: expr_pos })
             }
-            if *kw == "null" {
-                self.advance();
-                return Some(Expression::Value {
-                    value: Value::Null { position: expr_pos },
-                    position: expr_pos,
-                });
+            TokenType::Bool(b) => Some(ValueNode::Boolean { value: *b, position: expr_pos }),
+            TokenType::Keyword(kw) if *kw == "true" || *kw == "false" => {
+                Some(ValueNode::Boolean { value: *kw == "true", position: expr_pos })
             }
-        }
-
-        if let TokenType::Date(d) = &current_token.token_type {
-            let val = d.clone();
+            TokenType::Keyword(kw) if *kw == "null" => Some(ValueNode::Null { position: expr_pos }),
+            TokenType::Date(d) => {
+                Some(ValueNode::Date { value: self.arena.alloc_str(d), position: expr_pos })
+            }
+            TokenType::Timestamp(ts) => {
+                Some(ValueNode::Timestamp { value: self.arena.alloc_str(ts), position: expr_pos })
+            }
+            TokenType::HexColor(hc) => {
+                Some(ValueNode::HexColor { value: self.arena.alloc_str(hc), position: expr_pos })
+            }
+            TokenType::ScientificNotation(sn) => {
+                Some(ValueNode::ScientificNotation { value: *sn, position: expr_pos })
+            }
+            _ => None,
+        };
+        if let Some(node) = literal {
             self.advance();
-            return Some(Expression::Value {
-                value: Value::Date { value: val, position: expr_pos },
-                position: expr_pos,
-            });
-        }
-
-        if let TokenType::Timestamp(ts) = &current_token.token_type {
-            let val = ts.clone();
-            self.advance();
-            return Some(Expression::Value {
-                value: Value::Timestamp { value: val, position: expr_pos },
-                position: expr_pos,
-            });
-        }
-
-        if let TokenType::HexColor(hc) = &current_token.token_type {
-            let val = hc.clone();
-            self.advance();
-            return Some(Expression::Value {
-                value: Value::HexColor { value: val, position: expr_pos },
-                position: expr_pos,
-            });
-        }
-
-        if let TokenType::ScientificNotation(sn) = current_token.token_type {
-            let val = sn;
-            self.advance();
-            return Some(Expression::Value {
-                value: Value::ScientificNotation { value: val, position: expr_pos },
-                position: expr_pos,
-            });
+            return Some(self.expr_value(node, expr_pos));
         }
 
         if matches!(current_token.token_type, TokenType::BlobConstructor(_)) {
@@ -1564,8 +1530,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             if blob_value.is_none() && self.should_halt_section() {
                 return None;
             }
-            let val = blob_value.unwrap_or(Value::Null { position: expr_pos });
-            return Some(Expression::Value { value: val, position: expr_pos });
+            return Some(self.expr_value_or(blob_value, ValueNode::Null { position: expr_pos }, expr_pos));
         }
 
         if matches!(current_token.token_type, TokenType::TupleConstructor(_)) {
@@ -1574,8 +1539,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             if tuple_value.is_none() && self.should_halt_section() {
                 return None;
             }
-            let val = tuple_value.unwrap_or(Value::Null { position: expr_pos });
-            return Some(Expression::Value { value: val, position: expr_pos });
+            return Some(self.expr_value_or(tuple_value, ValueNode::Null { position: expr_pos }, expr_pos));
         }
 
         if matches!(current_token.token_type, TokenType::RegexConstructor(_)) {
@@ -1584,8 +1548,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             if regex_value.is_none() && self.should_halt_section() {
                 return None;
             }
-            let val = regex_value.unwrap_or(Value::Null { position: expr_pos });
-            return Some(Expression::Value { value: val, position: expr_pos });
+            return Some(self.expr_value_or(regex_value, ValueNode::Null { position: expr_pos }, expr_pos));
         }
 
         if self.is_current_symbol('[') {
@@ -1593,11 +1556,12 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             if array_literal.is_none() && self.should_halt_section() {
                 return None;
             }
-            let val = array_literal.unwrap_or(Value::Array {
-                values: Vec::new(),
-                position: expr_pos,
-            });
-            return Some(Expression::Value { value: val, position: expr_pos });
+            let values = self.arena.alloc_value_list(&[]);
+            return Some(self.expr_value_or(
+                array_literal,
+                ValueNode::Array { values, position: expr_pos },
+                expr_pos,
+            ));
         }
 
         if self.is_current_symbol('{') {
@@ -1605,11 +1569,12 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             if obj_literal.is_none() && self.should_halt_section() {
                 return None;
             }
-            let val = obj_literal.unwrap_or(Value::Object {
-                properties: Vec::new(),
-                position: expr_pos,
-            });
-            return Some(Expression::Value { value: val, position: expr_pos });
+            let properties = self.arena.alloc_prop_list(&[]);
+            return Some(self.expr_value_or(
+                obj_literal,
+                ValueNode::Object { properties, position: expr_pos },
+                expr_pos,
+            ));
         }
 
         if let TokenType::Symbol('(') = current_token.token_type {
@@ -1634,7 +1599,6 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
 
         if let TokenType::Identifier(id) = &current_token.token_type {
             let identifier_name = id.clone();
-
             let pattern = IdentifierPatternAnalyzer::analyze_data_pattern(
                 &identifier_name,
                 expr_pos,
@@ -1642,7 +1606,6 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                 self.position,
                 Some(&self.error_manager),
             );
-
             self.advance();
 
             return match pattern.pattern_type {
@@ -1652,12 +1615,14 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                 IdentifierPatternType::LocalEnumAccess => {
                     self.advance();
                     self.advance();
-                    Some(Expression::EnumAccess {
+                    let enum_name = self.arena.alloc_str(&identifier_name);
+                    let value = self.arena.alloc_str(&pattern.second_part.unwrap());
+                    Some(self.arena.alloc_expr(ExprNode::EnumAccess {
                         namespace_name: None,
-                        enum_name: identifier_name,
-                        value: pattern.second_part.unwrap(),
+                        enum_name,
+                        value,
                         position: expr_pos,
-                    })
+                    }))
                 }
                 IdentifierPatternType::ImportedFunctionCall => {
                     self.advance();
@@ -1676,23 +1641,24 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                     self.advance();
                     let enum_value = pattern.third_part.unwrap();
                     self.advance();
-                    Some(Expression::EnumAccess {
-                        namespace_name: Some(identifier_name),
+                    let namespace_name = Some(self.arena.alloc_str(&identifier_name));
+                    let enum_name = self.arena.alloc_str(&enum_name);
+                    let value = self.arena.alloc_str(&enum_value);
+                    Some(self.arena.alloc_expr(ExprNode::EnumAccess {
+                        namespace_name,
                         enum_name,
-                        value: enum_value,
+                        value,
                         position: expr_pos,
-                    })
+                    }))
                 }
                 _ => {
-                    Some(Expression::Identifier {
-                        name: identifier_name,
-                        position: expr_pos,
-                    })
+                    let name = self.arena.alloc_str(&identifier_name);
+                    Some(self.arena.alloc_expr(ExprNode::Identifier { name, position: expr_pos }))
                 }
-            }
+            };
         }
 
-        // ArithmeticOp now holds &'static str; copy it before re-borrowing current_token.
+        // `ArithmeticOp` holds a `&'static str`, so it is copied out before the token is cloned.
         if let TokenType::ArithmeticOp(op) = &current_token.token_type {
             let op_str: &'static str = op;
             let current_clone = current_token.clone();
@@ -1708,13 +1674,8 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                 return None;
             }
             self.advance();
-            return Some(Expression::Value {
-                value: Value::Error {
-                    message: format!("Illegal arithmetic operator: {}", op_str),
-                    position: expr_pos,
-                },
-                position: expr_pos,
-            });
+            let message = self.arena.alloc_str(&format!("Illegal arithmetic operator: {}", op_str));
+            return Some(self.expr_value(ValueNode::Error { message, position: expr_pos }, expr_pos));
         }
 
         if self.debug_config.is_enabled {
@@ -1726,11 +1687,23 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         None
     }
 
-    fn parse_function_call_expression(
+        fn parse_function_call_expression(
         &mut self,
         function_name: &str,
         pos: Position,
-    ) -> Option<Expression> {
+    ) -> Option<ExprId> {
+        let base = self.scratch_exprs.len();
+        let result = self.parse_function_call_expression_inner(function_name, pos, base);
+        self.scratch_exprs.truncate(base);
+        result
+    }
+
+    fn parse_function_call_expression_inner(
+        &mut self,
+        function_name: &str,
+        pos: Position,
+        base: usize,
+    ) -> Option<ExprId> {
         if self.debug_config.is_verbose {
             self.error_manager.log_info(&format!(
                 "ParseFunctionCallExpression: {}",
@@ -1748,16 +1721,13 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             if self.should_halt_section() {
                 return None;
             }
-            return Some(Expression::Identifier {
-                name: function_name.to_string(),
-                position: pos,
-            });
+                        let name = self.arena.alloc_str(function_name);
+            return Some(self.arena.alloc_expr(ExprNode::Identifier { name, position: pos }));
         }
 
         self.advance();
 
-        let estimated_args = estimate_array_items_count(self.tokens.len());
-        let mut arguments = Vec::with_capacity(estimated_args);
+        
 
         while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
             self.track_progress();
@@ -1773,7 +1743,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                 return None;
             }
             if let Some(arg) = argument {
-                arguments.push(arg);
+                self.scratch_exprs.push(arg);
             } else {
                 let current = self.current().clone();
                 self.handle_parse_error(
@@ -1830,19 +1800,31 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             self.advance();
         }
 
-        Some(Expression::QuickFuncCall {
-            name: function_name.to_string(),
-            arguments,
-            position: pos,
-        })
+                let name = self.arena.alloc_str(function_name);
+        let arguments = self.arena.alloc_expr_list(&self.scratch_exprs[base..]);
+        Some(self.arena.alloc_expr(ExprNode::QuickFuncCall { name, arguments, position: pos }))
     }
 
-    fn parse_imported_function_call_expression(
+        fn parse_imported_function_call_expression(
         &mut self,
         namespace_name: &str,
         function_name: &str,
         pos: Position,
-    ) -> Option<Expression> {
+    ) -> Option<ExprId> {
+        let base = self.scratch_exprs.len();
+        let result =
+            self.parse_imported_function_call_expression_inner(namespace_name, function_name, pos, base);
+        self.scratch_exprs.truncate(base);
+        result
+    }
+
+    fn parse_imported_function_call_expression_inner(
+        &mut self,
+        namespace_name: &str,
+        function_name: &str,
+        pos: Position,
+        base: usize,
+    ) -> Option<ExprId> {
         let qualified_name = format!("{}.{}", namespace_name, function_name);
 
         if self.debug_config.is_verbose {
@@ -1865,16 +1847,13 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             if self.should_halt_section() {
                 return None;
             }
-            return Some(Expression::Identifier {
-                name: qualified_name,
-                position: pos,
-            });
+                        let name = self.arena.alloc_str(&qualified_name);
+            return Some(self.arena.alloc_expr(ExprNode::Identifier { name, position: pos }));
         }
 
         self.advance();
 
-        let estimated_args = estimate_array_items_count(self.tokens.len());
-        let mut arguments = Vec::with_capacity(estimated_args);
+        
 
         while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
             self.track_progress();
@@ -1890,7 +1869,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                 return None;
             }
             if let Some(arg) = argument {
-                arguments.push(arg);
+                self.scratch_exprs.push(arg);
             } else {
                 let current = self.current().clone();
                 self.handle_parse_error(
@@ -1950,15 +1929,18 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             self.advance();
         }
 
-        Some(Expression::ImportedFunctionCall {
-            namespace_name: namespace_name.to_string(),
-            function_name: function_name.to_string(),
+                let namespace_name = self.arena.alloc_str(namespace_name);
+        let function_name = self.arena.alloc_str(function_name);
+        let arguments = self.arena.alloc_expr_list(&self.scratch_exprs[base..]);
+        Some(self.arena.alloc_expr(ExprNode::ImportedFunctionCall {
+            namespace_name,
+            function_name,
             arguments,
             position: pos,
-        })
+        }))
     }
 
-    fn parse_array_item(&mut self) -> Option<Value> {
+    fn parse_array_item(&mut self) -> Option<ValueId> {
         if self.debug_config.is_verbose {
             self.error_manager.log_info(&format!(
                 "ParseArrayItem at position {}",
@@ -2016,10 +1998,8 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
 
             if pattern.pattern_type == IdentifierPatternType::SimpleIdentifier {
                 self.advance();
-                return Some(Value::Identifier {
-                    value: function_name,
-                    position: item_pos,
-                });
+                                let value = self.arena.alloc_str(&function_name);
+                return Some(self.arena.alloc_value(ValueNode::Identifier { value, position: item_pos }));
             }
 
             if pattern.pattern_type == IdentifierPatternType::LocalEnumAccess {
@@ -2034,11 +2014,13 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                 self.advance();
                 let enum_value = pattern.second_part.unwrap();
                 self.advance();
-                return Some(Value::EnumValue {
-                    enum_name: function_name,
-                    value: enum_value,
+                                let enum_name = self.arena.alloc_str(&function_name);
+                let value = self.arena.alloc_str(&enum_value);
+                return Some(self.arena.alloc_value(ValueNode::EnumValue {
+                    enum_name,
+                    value,
                     position: item_pos,
-                });
+                }));
             }
         }
 
@@ -2053,7 +2035,14 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         self.parse_property_value()
     }
 
-    fn parse_object_literal(&mut self) -> Option<Value> {
+        fn parse_object_literal(&mut self) -> Option<ValueId> {
+        let base = self.scratch_props.len();
+        let result = self.parse_object_literal_inner(base);
+        self.scratch_props.truncate(base);
+        result
+    }
+
+    fn parse_object_literal_inner(&mut self, base: usize) -> Option<ValueId> {
         self.current_container_nesting_depth += 1;
 
         let obj_pos = Position::from_token(self.current());
@@ -2084,8 +2073,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             return None;
         }
 
-        let estimated_props = estimate_properties_count(self.tokens.len());
-        let mut object_properties = Vec::with_capacity(estimated_props);
+        
 
         while !self.is_at_end() && !self.is_current_symbol('}') && !self.should_terminate_loop() {
             self.track_progress();
@@ -2103,7 +2091,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             }
 
             if let Some(prop) = object_property {
-                object_properties.push(prop);
+                self.scratch_props.push(prop);
             }
 
             if self.is_current_symbol(',') {
@@ -2140,13 +2128,11 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
 
         self.current_container_nesting_depth -= 1;
         self.log_verbose("Successfully parsed object literal");
-        Some(Value::Object {
-            properties: object_properties,
-            position: obj_pos,
-        })
+                let properties = self.arena.alloc_prop_list(&self.scratch_props[base..]);
+        Some(self.arena.alloc_value(ValueNode::Object { properties, position: obj_pos }))
     }
 
- fn parse_object_property(&mut self) -> Option<ObjectProperty> {
+ fn parse_object_property(&mut self) -> Option<ObjectPropNode> {
     self.log_verbose("Parsing object property");
 
     let prop_pos = Position::from_token(self.current());
@@ -2246,7 +2232,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             if self.should_halt_section() {
                 return None;
             }
-            Value::Null { position: prop_pos }
+            self.arena.alloc_value(ValueNode::Null { position: prop_pos })
         }
     };
 
@@ -2256,10 +2242,18 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             property_key
         ));
     }
-    Some(ObjectProperty::new(property_key, property_value, prop_pos))
+    let key = self.arena.alloc_str(&property_key);
+    Some(ObjectPropNode { key, value: property_value, position: prop_pos })
 }
 
-    fn parse_array_literal(&mut self) -> Option<Value> {
+        fn parse_array_literal(&mut self) -> Option<ValueId> {
+        let base = self.scratch_values.len();
+        let result = self.parse_array_literal_inner(base);
+        self.scratch_values.truncate(base);
+        result
+    }
+
+    fn parse_array_literal_inner(&mut self, base: usize) -> Option<ValueId> {
         self.current_container_nesting_depth += 1;
         self.log_verbose("Parsing array literal");
 
@@ -2284,8 +2278,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             return None;
         }
 
-        let estimated_items = estimate_array_items_count(self.tokens.len());
-        let mut array_values = Vec::with_capacity(estimated_items);
+        
 
         while !self.is_at_end() && !self.is_current_symbol(']') && !self.should_terminate_loop() {
             self.track_progress();
@@ -2303,7 +2296,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             }
 
             if let Some(val) = array_value {
-                array_values.push(val);
+                self.scratch_values.push(val);
             } else {
                 let current = self.current().clone();
                 self.handle_parse_error(
@@ -2357,13 +2350,11 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
 
         self.current_container_nesting_depth -= 1;
         self.log_verbose("Successfully parsed array literal");
-        Some(Value::Array {
-            values: array_values,
-            position: array_pos,
-        })
+                let values = self.arena.alloc_value_list(&self.scratch_values[base..]);
+        Some(self.arena.alloc_value(ValueNode::Array { values, position: array_pos }))
     }
 
-    fn parse_blob_constructor(&mut self, pos: Position) -> Option<Value> {
+    fn parse_blob_constructor(&mut self, pos: Position) -> Option<ValueId> {
         self.log_verbose("Parsing blob constructor");
 
         if !self.match_and_consume_symbol('(') {
@@ -2379,10 +2370,10 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         }
 
         let value = if let TokenType::String(s) = &self.current().token_type {
-            let val = s.clone();
-            let str_pos = Position::from_token(self.current());
+                        let str_pos = Position::from_token(self.current());
+            let value = self.arena.alloc_str(s);
             self.advance();
-            Value::String { value: val, position: str_pos }
+            self.arena.alloc_value(ValueNode::String { value, position: str_pos })
         } else {
             let current = self.current().clone();
             self.handle_parse_error(
@@ -2393,7 +2384,8 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             if self.should_halt_section() {
                 return None;
             }
-            Value::String { value: String::new(), position: pos }
+            let value = self.arena.alloc_str("");
+            self.arena.alloc_value(ValueNode::String { value, position: pos })
         };
 
         if !self.match_and_consume_symbol(')') {
@@ -2408,14 +2400,19 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             }
         }
 
-        Some(Value::PrefixedConstructor {
-            prefix: "b".to_string(),
-            arguments: vec![value],
-            position: pos,
-        })
+                let prefix = self.arena.alloc_str("b");
+        let arguments = self.arena.alloc_value_list(&[value]);
+        Some(self.arena.alloc_value(ValueNode::PrefixedConstructor { prefix, arguments, position: pos }))
     }
 
-    fn parse_tuple_constructor(&mut self, pos: Position) -> Option<Value> {
+        fn parse_tuple_constructor(&mut self, pos: Position) -> Option<ValueId> {
+        let base = self.scratch_values.len();
+        let result = self.parse_tuple_constructor_inner(pos, base);
+        self.scratch_values.truncate(base);
+        result
+    }
+
+    fn parse_tuple_constructor_inner(&mut self, pos: Position, base: usize) -> Option<ValueId> {
     self.log_verbose("Parsing tuple constructor");
 
     if !self.match_and_consume_symbol('(') {
@@ -2430,9 +2427,9 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         }
     }
 
-    let mut values = Vec::new();
+    
 
-    // No element-count limit here — MAX_TUPLE_ELEMENTS = 6 is enforced by semantic analysis
+    // No element-count limit here, MAX_TUPLE_ELEMENTS = 6 is enforced by semantic analysis
     while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
         self.track_progress();
         if self.is_stuck() {
@@ -2447,7 +2444,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             return None;
         }
         if let Some(val) = value {
-            values.push(val);
+            self.scratch_values.push(val);
         }
 
         if self.is_current_symbol(',') {
@@ -2480,14 +2477,12 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         }
     }
 
-    Some(Value::PrefixedConstructor {
-        prefix: "t".to_string(),
-        arguments: values,
-        position: pos,
-    })
+        let prefix = self.arena.alloc_str("t");
+    let arguments = self.arena.alloc_value_list(&self.scratch_values[base..]);
+    Some(self.arena.alloc_value(ValueNode::PrefixedConstructor { prefix, arguments, position: pos }))
         }
 
-    fn parse_regex_constructor(&mut self, pos: Position) -> Option<Value> {
+    fn parse_regex_constructor(&mut self, pos: Position) -> Option<ValueId> {
         self.log_verbose("Parsing regex constructor");
 
         if !self.match_and_consume_symbol('(') {
@@ -2503,10 +2498,10 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         }
 
         let pattern = if let TokenType::String(s) = &self.current().token_type {
-            let val = s.clone();
-            let str_pos = Position::from_token(self.current());
+                        let str_pos = Position::from_token(self.current());
+            let value = self.arena.alloc_str(s);
             self.advance();
-            Value::String { value: val, position: str_pos }
+            self.arena.alloc_value(ValueNode::String { value, position: str_pos })
         } else {
             let current = self.current().clone();
             self.handle_parse_error(
@@ -2517,7 +2512,8 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             if self.should_halt_section() {
                 return None;
             }
-            Value::String { value: String::new(), position: pos }
+            let value = self.arena.alloc_str("");
+            self.arena.alloc_value(ValueNode::String { value, position: pos })
         };
 
         if !self.match_and_consume_symbol(')') {
@@ -2532,11 +2528,9 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
             }
         }
 
-        Some(Value::PrefixedConstructor {
-            prefix: "r".to_string(),
-            arguments: vec![pattern],
-            position: pos,
-        })
+                let prefix = self.arena.alloc_str("r");
+        let arguments = self.arena.alloc_value_list(&[pattern]);
+        Some(self.arena.alloc_value(ValueNode::PrefixedConstructor { prefix, arguments, position: pos }))
     }
 
     fn parse_property_name(&mut self) -> Option<String> {
@@ -2714,7 +2708,7 @@ fn parse_typed_collection(&mut self, base_kw: &str) -> Option<DataType> {
                 // skip the inner <...> to stay in sync.
                 // ElemType is intentionally flat and cannot represent nested
                 // collection types, so we discard the inner annotation after
-                // consuming it — semantic analysis enforces limits separately.
+                // consuming it, semantic analysis enforces limits separately.
                 if self.is_current_symbol('<') {
                     self.skip_nested_angle_content();
                 }
@@ -2773,7 +2767,7 @@ fn parse_typed_collection(&mut self, base_kw: &str) -> Option<DataType> {
         Some(TablePath::new(segments))
     }
 
-    fn parse_property_assignment(&mut self) -> Option<PropertyAssignment> {
+    fn parse_property_assignment(&mut self) -> Option<DocPropertyAssignment> {
     if self.debug_config.is_verbose {
         self.error_manager
             .log_info("ParsePropertyAssignment START");
@@ -2823,17 +2817,18 @@ fn parse_typed_collection(&mut self, base_kw: &str) -> Option<DataType> {
             if self.should_halt_section() {
                 return None;
             }
-            Value::Null { position: assign_pos }
+            self.arena.alloc_value(ValueNode::Null { position: assign_pos })
         }
     };
 
     if self.debug_config.is_verbose {
         self.error_manager.log_info(&format!(
             "ParsePropertyAssignment END: {} = {}",
-            assignment_name, value
+            assignment_name, self.arena.value_ref(value)
+
         ));
     }
-    Some(PropertyAssignment::new(assignment_name, data_type, value, assign_pos))
+    Some(DocPropertyAssignment { name: assignment_name, data_type, value, position: assign_pos })
 }
 
     fn handle_data_entry_comma_separation(&mut self) -> bool {
@@ -2958,20 +2953,24 @@ fn parse_typed_collection(&mut self, base_kw: &str) -> Option<DataType> {
     }
 
     #[inline]
-    fn peek_ahead(&self, offset: usize) -> Option<&Token> {
+        fn peek_ahead(&self, offset: usize) -> Option<&'a Token> {
         let target = self.position.checked_add(offset)?;
-        self.tokens.get(target)
+        let tokens: &'a [Token] = self.tokens;
+        tokens.get(target)
     }
 
     #[inline]
-    fn current(&self) -> &Token {
+        fn current(&self) -> &'a Token {
         static EOF_TOKEN: Token = Token {
             token_type: TokenType::EndOfFile,
             line: 1,
             column: 1,
             section: SectionId::None,
         };
-        self.tokens.get(self.position).unwrap_or(&EOF_TOKEN)
+        // A copy of the shared slice reference, so the token does not borrow `self` and the arena
+        // can be written while the token is still read.
+        let tokens: &'a [Token] = self.tokens;
+        tokens.get(self.position).unwrap_or(&EOF_TOKEN)
     }
 
     #[inline]
@@ -3056,10 +3055,10 @@ fn match_and_consume_closing_angle(&mut self) -> bool {
 /// (the opening `<` has NOT yet been consumed when this is called).
 ///
 /// Tokenizer output to keep in mind:
-///   `>`     → Symbol('>')           — one closing angle
-///   `>=`    → ComparisonOp(">=")    — one closing angle + fused '='
-///   `>>`    → BitwiseOp(">>")       — two closing angles (pending_angle mechanism)
-///   `>>=`   → BitwiseOp(">>=")      — two closing angles + fused '='
+///   `>`     → Symbol('>')          , one closing angle
+///   `>=`    → ComparisonOp(">=")   , one closing angle + fused '='
+///   `>>`    → BitwiseOp(">>")      , two closing angles (pending_angle mechanism)
+///   `>>=`   → BitwiseOp(">>=")     , two closing angles + fused '='
 ///
 /// When consuming `>>` would close our innermost level and leave one
 /// spare `>` that belongs to the outer annotation, we advance past the
@@ -3089,10 +3088,10 @@ fn skip_nested_angle_content(&mut self) {
                 }
             }
 
-            // ">=" — one closing angle plus '=' fused by the tokenizer (no space).
+            // ">=", one closing angle plus '=' fused by the tokenizer (no space).
             TokenType::ComparisonOp(op) if op == ">=" => {
                 if depth == 0 {
-                    // The '>' belongs outside our scope — do not consume.
+                    // The '>' belongs outside our scope, do not consume.
                     break;
                 }
                 depth -= 1;
@@ -3105,11 +3104,11 @@ fn skip_nested_angle_content(&mut self) {
                 // pending_equal is set; loop continues for the remaining depth.
             }
 
-            // ">>" — two closing angles fused by the tokenizer.
+            // ">>", two closing angles fused by the tokenizer.
             TokenType::BitwiseOp(op) if op == ">>" => {
                 match depth {
                     0 => {
-                        // Both angles are outside our scope — do not consume.
+                        // Both angles are outside our scope, do not consume.
                         break;
                     }
                     1 => {
@@ -3129,11 +3128,11 @@ fn skip_nested_angle_content(&mut self) {
                 }
             }
 
-            // ">>=" — two closing angles plus assignment fused by the tokenizer.
+            // ">>=", two closing angles plus assignment fused by the tokenizer.
             TokenType::BitwiseOp(op) if op == ">>=" => {
                 match depth {
                     0 => {
-                        // All three chars are outside our scope — do not consume.
+                        // All three chars are outside our scope, do not consume.
                         break;
                     }
                     1 => {
@@ -3185,10 +3184,10 @@ fn consume_equal(&mut self) -> bool {
 /// again as a separate `Symbol('=')`.
 ///
 /// Handles all fused-token forms produced by the tokenizer:
-///   `>`     → Symbol('>')           — one closing angle
-///   `>=`    → ComparisonOp(">=")   — one closing angle + fused '='
-///   `>>`    → BitwiseOp(">>")      — two closing angles
-///   `>>=`   → BitwiseOp(">>=")     — two closing angles + fused '='
+///   `>`     → Symbol('>')          , one closing angle
+///   `>=`    → ComparisonOp(">=")  , one closing angle + fused '='
+///   `>>`    → BitwiseOp(">>")     , two closing angles
+///   `>>=`   → BitwiseOp(">>=")    , two closing angles + fused '='
 fn skip_annotation_lookahead(&self, at: usize) -> (usize, bool) {
     // `at` points to the opening '<'; start scanning from the token after it.
     let mut pos   = at + 1;
@@ -3205,7 +3204,7 @@ fn skip_annotation_lookahead(&self, at: usize) -> (usize, bool) {
                 pos   += 1;
                 if depth == 0 { return (pos, false); }
             }
-            // ">=" — one closing angle with a fused '='
+            // ">=", one closing angle with a fused '='
             TokenType::ComparisonOp(op) if *op == ">=" => {
                 depth -= 1;
                 pos   += 1;
@@ -3213,13 +3212,13 @@ fn skip_annotation_lookahead(&self, at: usize) -> (usize, bool) {
                 // depth > 0: the '=' is embedded inside nested angle content;
                 // keep scanning.
             }
-            // ">>" — two closing angles in one token
+            // ">>", two closing angles in one token
             TokenType::BitwiseOp(op) if *op == ">>" => {
                 depth -= 2;
                 pos   += 1;
                 if depth <= 0 { return (pos, false); }
             }
-            // ">>=" — two closing angles + fused '='
+            // ">>=", two closing angles + fused '='
             TokenType::BitwiseOp(op) if *op == ">>=" => {
                 depth -= 2;
                 pos   += 1;

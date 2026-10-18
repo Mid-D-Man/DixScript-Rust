@@ -331,7 +331,7 @@ is declared here and is the one submodule that is not re-exported flat, so it is
 - The arena is not re-exported flat, so its names (`Arena`, `Document`, `ValueNode`) cannot
   collide with the owned AST names.
 - The module documentation now says that `arena` exists and which parsers use it so far (the
-  `@SECURITY`, `@RAW` and `@SCHEMA` section parsers).
+  `@SECURITY`, `@RAW`, `@SCHEMA` and `@DATA` section parsers).
 
 ### `Compiler/Core/SectionParsers/security_section_parser.rs`
 
@@ -427,6 +427,33 @@ under `halt` (each checked against the full message with its line and column), `
 
 **Tests:** `cargo test -p dixscript --test schema_parser_tests`. Ten tests, all passing on Rust
 1.75.
+
+### `tests/data_parser_tests.rs`
+
+**What it does:** Pins the behaviour of the `@DATA` parser itself. The loader tests reach it only
+through `DixLoader`, which cannot show what each error strategy does with malformed input or
+which diagnostics are reported. The helper runs the loader's first four stages with an isolated
+error manager and sets the strategy on the settings after `@CONFIG` is processed, so the sources
+carry no `error_handling` key. Each of the 35 tests prints the parsed section with the owned
+`Display` and compares it, and the sorted diagnostic messages, with the recorded text, under one
+to three strategies (61 runs). One case also pins the section's `Debug` text, which holds every
+source position.
+
+**Decisions:**
+- The cases cover every value kind and sign, every type annotation form including the fused `>>=`,
+  nested arrays, objects and tuples, group arrays and tables, calls (local and imported) with
+  arguments of every expression kind, entries without commas, a flat property after grouped data,
+  missing values, unclosed arrays, objects and calls, bad object properties and annotations, the
+  nesting depth limit, an unclosed section, a missing opening parenthesis, and stray tokens.
+- **The `does_not_leak` and `keep_their_own` tests are the point of the file.** Each puts a list
+  that fails (or succeeds) inside another list of the same or another kind: an array in an array,
+  an object in an object, a tuple in an array, a call in a call, a call in an array in a call, an
+  imported call in an array. They check that the enclosing list holds only its own children.
+- The expectations were recorded from the converted parser and checked against the output of the
+  original parser, which is byte for byte the same on all 61 runs.
+
+**Tests:** `cargo test -p dixscript --test data_parser_tests`. 35 tests, all passing on Rust 1.75.
+Nine deliberate bugs were injected to check them (see the Fixes entry below).
 
 ## Fixes and Problems
 
@@ -564,14 +591,55 @@ budget test below.
 
 ### `Compiler/Core/SectionParsers/` (data, dlm, enums, quickfuncs)
 
-**What it does:** One parser per section: `data_section_parser.rs` for `@DATA`,
-`quickfuncs_section_parser.rs` for `@QUICKFUNCS`, `dlm_section_parser.rs` for `@DLM` and
-`enums_section_parser.rs` for `@ENUMS`.
+**What it does:** One parser per section: `data_section_parser.rs` for `@DATA` (it has its own
+section below), `quickfuncs_section_parser.rs` for `@QUICKFUNCS`, `dlm_section_parser.rs` for
+`@DLM` and `enums_section_parser.rs` for `@ENUMS`.
 
 **Decisions:**
 - Every token-length-derived reservation goes through the shared helper above.
   `parse_section` uses `section_estimate`, nested constructs use the capped estimates.
-  This is the only change in these files, so the parsing logic is untouched.
+    This was the only change in the `@QUICKFUNCS`, `@DLM` and `@ENUMS` files, so their parsing
+  logic is untouched.
+
+### `Compiler/Core/SectionParsers/data_section_parser.rs`
+
+**What it does:** Parses one `@DATA(...)` into a `DataSection`: simple properties, table
+properties, group arrays and object properties, with scalars, arrays, objects, tuple, blob and
+regex constructors, identifiers, enum values and function calls (local and imported) as values.
+
+**Decisions:**
+- This is the fourth parser built on the arena AST. The parser owns an `Arena`, builds every value
+  and expression there as a node, keeps the entries as `DocDataEntry` records that hold the ids,
+  and exports the finished section once, at the end of `parse_section`, through
+  `DocData::export`. The public interface and the result are unchanged.
+- **Lists use scratch stacks.** A list is complete only when its closing token is reached, so
+  array literals, tuple constructors and group arrays push the ids of their finished children on
+  `scratch_values`, object literals push `ObjectPropNode`s on `scratch_props`, and the four call
+  forms push `ExprId`s on `scratch_exprs`. The list is stored in the arena once, with
+  `alloc_value_list`, `alloc_prop_list` or `alloc_expr_list`. This avoids a temporary `Vec` per
+  list, which the owned parser had to allocate and keep.
+- **Every way out of a list truncates its stack.** A list parser is a thin wrapper that records
+  the stack height, calls the real parser (`..._inner(base)`) and truncates back to the height
+  whatever the result is. The parser has many early returns, and a list that failed part way
+  must not leave entries for the list that encloses it. The enclosing list would take them as its
+  own children, and because the leaked ids name nodes that already contain the same ids, the
+  exported tree grows exponentially. The tests below show it: with the truncation removed, a
+  66-deep array exhausts memory.
+- `current()` and `peek_ahead()` return `&'a Token`, a reference into the token slice and not
+  into the parser, so a token can be held while the arena is written. That is why the
+  conversion needed no copies of the current token.
+- A function call in a value position builds a `ValueNode::QuickFuncCall` whose arguments are
+  expressions, and an argument that is a literal builds two nodes, a value and an expression
+  that wraps it (`expr_value`). The fallbacks that the owned parser wrote as `unwrap_or(...)`
+  build their node only when it is needed (`expr_value_or`).
+- A call that fails part way leaves its nodes unreferenced in the arena. This is harmless: the
+  arena is append-only and is dropped with the parser.
+- The public items now carry doc comments, the module documentation describes the arena and the
+  scratch stacks, and the em dashes were removed from the comments.
+
+**Tests:** `tests/data_parser_tests.rs` pins the parser itself. Every file in `mdix_files/` that
+compiles also goes through this parser in `tests/arena_roundtrip.rs`, `tests/arena_document.rs`
+and `tests/arena_document_display.rs`.
 
 ### `tests/parser_alloc_budget.rs`
 
@@ -694,3 +762,43 @@ requires the larger to take less than 7 times as long.
   own arena and exports at the end of its section, which adds a copy until the arenas can be merged
   by id offset and consumers read a `Document`. The `@RAW` and `@SCHEMA` sections are small, so the
   cost is small too.
+
+### Fixes and Problems: arena AST @DATA parser
+
+- **`Compiler/Core/SectionParsers/data_section_parser.rs`:** the conversion was checked with a
+  throwaway before and after harness: the loader's tokenize, config and parse stages run over
+  the 84 corpus files and 218 crafted sources (89 `@DATA` sources harvested from the existing
+  tests and 129 written for each production and error path), each under all three error
+  strategies (906 runs). The crafted sources dump the parsed section and the diagnostics in full.
+  The corpus files dump the entry count and a hash of the section's `Debug` and `Display` text,
+  because their dumps run to megabytes. Sections parse in parallel, so the diagnostic lines are
+  sorted before they are compared. The original parser's output was identical across two runs,
+  and the converted parser's output was byte-identical to it.
+- **The first crafted sources did not test calls.** They wrote calls as `~f(1)`, the form used to
+  define a function in `@QUICKFUNCS`. In `@DATA` a call is written `f(1)`, so those sources
+  failed at the `~` and never reached the call-argument parsing, which holds one of the three
+  scratch stacks. This was noticed while recording the test cases, because a case that should have
+  parsed gave no section. The sources were corrected, the original parser was swapped back in to
+  record a new baseline, and the comparison was repeated: 906 runs, byte-identical.
+- **`tests/data_parser_tests.rs`:** 35 tests. A first set of six injected bugs (missing truncation
+  in the array, object, call and tuple wrappers, a `Long` off by one, a wrong imported enum name)
+  showed gaps in the tests. The array and tuple truncations and the `Long` were caught. The object
+  and call truncations and the enum name were not caught by a test that could fail only because
+  of them, because no test put an object in an object, a call in a container in a call, or an
+  imported enum in the three-part form the code handles. Tests for each were added and the check
+  was repeated with nine bugs (the four call wrappers counted separately). All nine are now caught:
+  16 tests failed and one was killed by the memory blow-up described above. The four call-wrapper
+  bugs were injected together, so which of them each test catches was not separated.
+- **The group array's truncation cannot be observed.** Group arrays appear only at the top level of
+  the section, never inside another list, so a leaked entry cannot reach an enclosing list. The
+  truncation stays because it costs nothing and keeps the rule simple, but no test can fail without
+  it.
+- **Behaviour recorded, not changed:** an array nested 66 deep reports the limit of 64, a call
+  nested 12 deep parses without a diagnostic, and a failed nested array under `continue` keeps
+  the elements before the error (`[1, [2 3], 4]` gives `[1, [2], 4]`).
+- **`NOTICE` header:** the file's header named the section "Compiler/Core/SectionParsers/
+  data_section_parser.rs", but `compiler.md` only had a combined entry for the four parsers, so the
+  heading did not exist. The section above is that heading.
+- **Where the arena stops paying:** the same as in the earlier parsers. The section is built in its
+  own arena and copied out at the end, which adds a copy until consumers read a `Document`. The
+  scratch stacks do remove a temporary `Vec` per list, but this was not measured.

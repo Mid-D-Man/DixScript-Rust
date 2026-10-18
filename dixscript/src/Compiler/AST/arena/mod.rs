@@ -28,7 +28,9 @@
 //!   cannot be printed or compared. They implement `Display`, `Debug` and `PartialEq` with
 //!   the same output and rules as the owned types.
 //! * [`Document`] is the arena-resident form of a whole `DixScript`: one `Arena` plus the
-//!   sections, with `Doc*` twins of the five sections that hold values.
+//!   sections, with `Doc*` twins of the five sections that hold values. `Document` implements
+//!   `Display` itself, and [`Arena::display`] pairs a `Doc*` section with its arena as an
+//!   [`ArenaDisplay`] that prints. Both print exactly what the owned types print.
 //!
 //! # Examples
 //!
@@ -59,6 +61,7 @@
 
 mod display;
 mod document;
+mod document_display;
 mod equality;
 mod export;
 mod import;
@@ -70,6 +73,7 @@ pub use document::{
     DocQuickFunction, DocRawBlock, DocRawField, DocSchema, DocSchemaField, DocSecurity,
     DocSecurityEntry, DocSecurityField, Document,
 };
+pub use document_display::ArenaDisplay;
 pub use nodes::{ExprNode, ObjectPropNode, StmtNode, SwitchCaseNode, UnknownData, ValueNode};
 pub use view::{ExprRef, StmtRef, ValueRef};
 

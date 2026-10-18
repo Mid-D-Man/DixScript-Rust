@@ -17,7 +17,9 @@
 //! open file.
 //!
 //! The `Doc*` types do not implement `PartialEq`, because their ids mean nothing without the
-//! arena. [`Document`] implements it structurally, across arenas.
+//! arena. [`Document`] implements it structurally, across arenas. They cannot implement
+//! `Display` for the same reason: [`Arena::display`] pairs one with its arena so that it can
+//! print, and [`Document`] implements `Display` directly (see `document_display.rs`).
 
 use super::{Arena, ExprId, StmtList, ValueId, ValueList};
 use crate::Compiler::AST::{

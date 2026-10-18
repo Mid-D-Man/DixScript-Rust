@@ -126,7 +126,9 @@ plus the sections, with the owned types reused for `@CONFIG`, `@IMPORTS`, `@DLM`
 field and parameter types) for the five sections that hold values. `Document::from_owned` and
 `Document::export` convert exactly in both directions, each `Doc*` section twin has its own
 `from_owned` and `export`, and `Document` has a structural `PartialEq`. `Arena::alloc_value_list(&[ValueId]) -> ValueList` stores
-a run of value ids. The `@SECURITY`, `@RAW` and `@SCHEMA` section parsers build into an arena
+a run of value ids. `Document` implements `Display`, and `Arena::display(&item) -> ArenaDisplay`
+pairs a `Doc*` section with its arena so that it prints; both print exactly what the owned types
+print. The `@SECURITY`, `@RAW` and `@SCHEMA` section parsers build into an arena
 internally and return the owned section, so their public interfaces are unchanged; the rest of the
 compiler still uses the owned types.
 

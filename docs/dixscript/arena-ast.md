@@ -615,8 +615,8 @@ all instructions.
 - Cheap semantic analysis fixes: the keyword check's allocations.
 - Steps 3 and 4 (operator enum, whole-tree clones, re-measure).
 - The rest of step 6. Done: arena-aware `Display`, `Debug` and equality through handles
-  (`ValueRef`, `ExprRef`, `StmtRef`), and the arena-resident `Document`. Planned drops, each
-  compiling with the tests intact:
+  (`ValueRef`, `ExprRef`, `StmtRef`), the arena-resident `Document`, and `Display` for `Document`
+  and the `Doc*` section twins. Planned drops, each compiling with the tests intact:
   1. The rest of the parsers building into the arena. The `@SECURITY` parser is done and is the
      pilot, and `@RAW` and `@SCHEMA` are done. Next come `@DATA` (`data_section_parser.rs`, 3,325
      lines) and `@QUICKFUNCS` (`quickfuncs_section_parser.rs`, 3,361 lines), which hold most of
@@ -625,9 +625,7 @@ all instructions.
      parsing. The sections are parsed in parallel, so each section parser builds into its own
      arena and exports at the end of its section; merging the arenas by id offset comes after
      that, once consumers can read a `Document`.
-  2. `Display` for `Document` and the `Doc*` section twins, which consumers that print a whole
-     section will need.
-  3. Read-only consumers, then mutators (enhancer, resolver), then `Runtime`, then DLM. Siblings
+  2. Read-only consumers, then mutators (enhancer, resolver), then `Runtime`, then DLM. Siblings
      last behind the 2.0.0 bump, `mdix-lsp` last of all.
 
 ## Modules
@@ -855,6 +853,40 @@ its own `from_owned` and `export`, which the parsers use.
   owned `==`.
 - Like the nodes, the `Doc*` types are documented as a whole and carry `#[allow(missing_docs)]`
   for fields that mirror the owned section's fields.
+- `Display` for `Document` and the `Doc*` twins lives in `document_display.rs`, so this file stays
+  about the data and its conversions.
+
+### `Compiler/AST/arena/document_display.rs`
+
+**What it does:** `Display` for `Document` and for the `Doc*` section twins, written to print
+exactly what the owned `DixScript` and its section types print. `Document` owns its arena, so it
+implements `Display` directly. A `Doc*` value holds ids that mean nothing without the arena, so it
+cannot print by itself: `Arena::display(&item)` pairs it with the arena and returns an
+`ArenaDisplay`, which does. `ArenaDisplay` prints each of the thirteen twins that mirror an owned
+section type with a `Display` (`DocData`, `DocDataEntry`, `DocPropertyAssignment`, `DocRawBlock`,
+`DocRawField`, `DocSecurity`, `DocSecurityEntry`, `DocSecurityField`, `DocSchema`,
+`DocSchemaField`, `DocQuickFuncs`, `DocQuickFunction` and `DocQuickFuncParam`).
+
+**Decisions:**
+- **One wrapper handle, not a method on each type.** `ValueRef` plays this part for values.
+  `ArenaDisplay<'a, T>` is `Copy` and holds two references. `Arena::display` is generic, and a
+  type that has no `Display` here gives a compile error where it is printed, so one method does
+  the work of thirteen.
+- **The wording is copied from the owned impls, not shared with them.** Sharing would mean making
+  the owned types generic over how they read a value, which changes types that every consumer
+  uses. Copying leaves them alone and moves the check into the tests, which compare the two
+  outputs everywhere. The quirks of the owned impls are copied exactly: a whole file prints
+  `@SECURITY` without the blank line that follows every other section, the `@SECURITY` section
+  prints its entries itself and does not use `SecurityEntry`'s own `Display`, and the inline
+  `QuickFunction` form ends each statement with `; `.
+- **Values, expressions and statements print through the handles** (`value_ref`, `expr_ref`,
+  `stmt_ref`), so the text of every node is still written in `display.rs` and nowhere else.
+- **`@CONFIG`, `@IMPORTS`, `@DLM` and `@ENUMS` print through their owned `Display`**, because the
+  document holds the owned types for them.
+- Every `match` lists every variant with no wildcard arm, as in `display.rs`.
+
+**Tests:** `tests/arena_document_display.rs`, and two doctests: `Arena::display` and the `Display`
+impl of `Document` (`cargo test -p dixscript --doc document_display`).
 
 ### `tests/arena_roundtrip.rs`
 
@@ -923,6 +955,42 @@ every-compared-field test, not by the corpus or the round trips. The file was re
 The whole suite passes: 547 unit tests, 195 integration tests and 8 doctests (26 ignored, as
 before).
 
+### `tests/arena_document_display.rs`
+
+**What it does:** Proves that `Display` for `Document` and for the `Doc*` twins prints exactly what
+the owned types print, with the owned output as the reference. A hand-built file fills every
+value-holding section with each entry variant and each optional part, and the checks compare the
+whole file, every section, and every entry, property, field, function and parameter inside the
+sections. Edge cases cover the separators: an empty file, empty sections, an entry with no fields,
+a table property with no properties, a group array with no items, and a function with no
+parameters and no body. Real compiler output covers `@RAW` and `@SCHEMA`, and every corpus file
+that compiles is checked whole.
+
+**Decisions:**
+- **One test per section**, so a drift in one section's printer fails that section's test alone
+  and names it, and a separate test covers the whole file.
+- **Fifty variants each change exactly one printed field** of the hand-built file (a name, a data
+  type added or removed, a value, a path segment, a list entry added or removed, a content length,
+  a scope list, a default value). Each must change the owned output as well, otherwise the variant
+  proves nothing, and the document must print the changed file exactly as the owned file prints.
+- The count of items compared is checked, so a check that compared nothing fails. The corpus test
+  has floors on the number of files and on the sections they hold.
+- No file in `mdix_files/` has an `@RAW` or `@SCHEMA` section, so the sources the raw and schema
+  tests compile are checked here as well.
+- `@CONFIG`, `@IMPORTS`, `@DLM` and `@ENUMS` run the same owned code on both sides, so the tests
+  check only where they appear in the file, not their text.
+
+**Tests:** `cargo test -p dixscript --test arena_document_display`. Eleven tests, all passing on
+Rust 1.75. In the sandbox 70 of the 84 corpus files compile, and the corpus test compares 9,255
+printed items (842,181 characters of output). Sections present across those files: `@CONFIG` in
+70, `@DATA` in 65, `@QUICKFUNCS` in 40, `@SECURITY` in 12. A mutation check injected five bugs at
+once: a missing space after the comma in a value list, a missing comma between `@SECURITY`
+entries, the end offset printed as the `@RAW` content length, a blank line after `@SECURITY` in a
+whole file, and parameter defaults left out. Each was caught by the section test that covers it
+(the value list by both the `@DATA` and the `@SCHEMA` test) and nothing else was blamed for it.
+The file was restored afterwards. The whole suite passes: 547 unit tests, 230 integration tests
+and 11 doctests (26 ignored, as before).
+
 ## Fixes and Problems
 
 ### `benches/arena_vs_box_benchmark.rs`
@@ -972,8 +1040,20 @@ before).
   `Display` change there.
 
 ### `Compiler/AST/arena/document.rs`
-- `Document` and the `Doc*` types have no `Display` yet. The owned sections print through their
-  own `Display`, and consumers that print a whole section will need an arena-aware version.
+- A `Doc*` value cannot print by itself, because its ids mean nothing without the arena.
+  `Document` implements `Display`, and `Arena::display` returns a handle that prints a `Doc*`
+  section (see `document_display.rs`). `Debug` for the `Doc*` types is still the derived one and
+  prints ids; nothing needs a version that prints the owned text.
+
+### `Compiler/AST/arena/document_display.rs`
+- The wording of the owned `Display` impls is copied here, so a change to an owned impl has to be
+  made in this file as well. The tests compare the two outputs on every sample and on the corpus,
+  so a drift shows up there.
+- `Arena::display` accepts any type, because the bound is on the printing and not on the call. A
+  type with no `Display` here gives a compile error where it is printed, naming `ArenaDisplay<'_,
+  T>`, and not where it is wrapped.
+- An item must have been built in the arena it is printed with. Like every id, a mismatch reads
+  the wrong nodes or panics, and the documentation says so.
 
 ### `tests/arena_roundtrip.rs`
 - 14 corpus files do not compile in the sandbox. Four need network access to download cloud
@@ -990,3 +1070,15 @@ before).
 - The corpus has no `@RAW` or `@SCHEMA` sections, which is why the compiled-source test exists.
 - Only `Document` equality is native. The `Doc*` section twins carry ids and are compared only
   through `Document`.
+
+### `tests/arena_document_display.rs`
+- The corpus has no `@RAW` or `@SCHEMA` sections, which is why the compiled-source test exists.
+- **A mutation check that did not mutate.** The first attempt printed that the bugs were injected
+  but the script never wrote the file, so all eleven tests passed against the clean code. Passing
+  with five bugs in place could not be right, so the file was compared with the clean copy, found
+  identical, and the check was repeated. It now confirms that the file differs from the clean copy
+  before the result is read.
+- A mutation that changes the whole-file output cannot be told apart from another one by the
+  whole-file tests alone, which is why each section has its own test and why the empty-sections
+  test exists: it prints every section with no entries, so only a bug in how the file puts its
+  sections together can fail it.

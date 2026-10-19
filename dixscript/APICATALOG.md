@@ -126,10 +126,12 @@ plus the sections, with the owned types reused for `@CONFIG`, `@IMPORTS`, `@DLM`
 field and parameter types) for the five sections that hold values. `Document::from_owned` and
 `Document::export` convert exactly in both directions, each `Doc*` section twin has its own
 `from_owned` and `export`, and `Document` has a structural `PartialEq`. `Arena::alloc_value_list(&[ValueId]) -> ValueList`,
-`alloc_expr_list(&[ExprId]) -> ExprList` and `alloc_prop_list(&[ObjectPropNode]) -> PropList` store
-a run of ids. `Document` implements `Display`, and `Arena::display(&item) -> ArenaDisplay`
+`alloc_expr_list(&[ExprId]) -> ExprList`, `alloc_prop_list(&[ObjectPropNode]) -> PropList`,
+`alloc_stmt_list(&[StmtId]) -> StmtList`, `alloc_str_list(&[S]) -> StrList` and
+`alloc_case_list(&[SwitchCaseNode]) -> CaseList` store a run of ids, names or cases, and
+`alloc_case(SwitchCaseNode) -> CaseId` stores one case. `Document` implements `Display`, and `Arena::display(&item) -> ArenaDisplay`
 pairs a `Doc*` section with its arena so that it prints; both print exactly what the owned types
-print. The `@SECURITY`, `@RAW`, `@SCHEMA` and `@DATA` section parsers build into an arena
+print. All five section parsers (`@SECURITY`, `@RAW`, `@SCHEMA`, `@DATA` and `@QUICKFUNCS`) build into an arena
 internally and return the owned section, so their public interfaces are unchanged; the rest of the
 compiler still uses the owned types.
 

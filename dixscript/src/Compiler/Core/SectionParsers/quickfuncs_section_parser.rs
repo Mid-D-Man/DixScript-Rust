@@ -18,16 +18,34 @@
 //! All dotted identifier chains (A.B.C) become QualifiedIdentifier.
 //! The semantic analyzer resolves them (enum access, static call, property access, import, etc.).
 //! Error strategies: Halt = stop immediately; Continue = collect all errors; Recover = sync and resume.
+//!
+//! # Values are built in an arena
+//!
+//! The parser owns an [`Arena`]. Every value, expression and statement is built there as a node,
+//! the functions are kept as [`DocQuickFunction`] records that hold the ids, and
+//! [`QuickFuncsSectionParser::parse_section`] exports the finished section once, at the end, as
+//! the owned [`QuickFuncsSection`]. The public interface and the result are the same as before
+//! the parser used an arena; `tests/quickfuncs_parser_tests.rs` pins them.
+//!
+//! A list is only known to be complete when its closing token is reached, so statement blocks,
+//! function arguments, array literals, object literals and tuple constructors collect the ids of
+//! their finished children on a scratch stack and store the run in the arena once. Each of those
+//! parsers records the stack height when it starts and truncates the stack back to it on every
+//! way out, so an early return cannot leave stray entries for the list that encloses it.
+//!
+//! An interpolated string parses each placeholder with a sub-parser. The sub-parser is handed
+//! this parser's arena for the duration of the call, so its nodes belong to the same arena.
 
-use crate::Compiler::AST::{
-    QuickFuncsSection, QuickFunction, QuickFuncParam, QuickFuncStatement, SwitchCase,
-    Position, DataType, ElemType, Expression, Value, ObjectProperty, DeclarationType,
+use crate::Compiler::AST::{QuickFuncsSection, Position, DataType, ElemType, DeclarationType};
+use crate::Compiler::AST::arena::{
+    Arena, DocQuickFuncParam, DocQuickFuncs, DocQuickFunction, ExprId, ExprList, ExprNode,
+    ObjectPropNode, StmtId, StmtList, StmtNode, SwitchCaseNode, ValueId, ValueNode,
 };
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::ErrorManager::{ErrorManager, ParseErrorType, DebugConfig};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::Core::Tokenizer::token::SectionId;
-use crate::Utilities::{Keywords, bounded_estimate, section_estimate, estimate_statements_count, estimate_properties_count};
+use crate::Utilities::{Keywords, bounded_estimate, section_estimate};
 use std::collections::HashMap;
 
 const MAX_ITERATIONS_PER_TOKEN: usize = 3;
@@ -70,7 +88,7 @@ crate::Utilities::LazyStatic::lazy_static! {
         m
     };
 
-    // Compiled once at first use, reused forever — zero per-call allocation.
+    // Compiled once at first use, reused forever, zero per-call allocation.
     static ref INTERP_PLACEHOLDER_RE: regex::Regex =
         regex::Regex::new(r"\{([^}]+)\}").expect("INTERP_PLACEHOLDER_RE compile failed");
 
@@ -81,6 +99,9 @@ crate::Utilities::LazyStatic::lazy_static! {
         regex::Regex::new(r"^(\w+)\.(\w+)$").expect("INTERP_PROPERTY_RE compile failed");
 }
 
+/// Parser for the `@QUICKFUNCS(...)` section.
+///
+/// Create it over the section's tokens and call [`parse_section`](Self::parse_section).
 pub struct QuickFuncsSectionParser<'a> {
     tokens: &'a [Token],
     operational_settings: &'a OperationalSettings,
@@ -92,7 +113,14 @@ pub struct QuickFuncsSectionParser<'a> {
     iteration_count: usize,
     pending_angle: bool,
     pending_equal: bool, // set when '=' was consumed as part of a '>>=' token
-    current_container_nesting_depth: usize,
+        current_container_nesting_depth: usize,
+    /// Every node of the section is built here; `parse_section` exports the finished section.
+    arena: Arena,
+    /// Ids of the finished children of the list being parsed. See the module docs.
+    scratch_values: Vec<ValueId>,
+    scratch_exprs: Vec<ExprId>,
+    scratch_props: Vec<ObjectPropNode>,
+    scratch_stmts: Vec<StmtId>,
 }
 
 // =============================================================================
@@ -100,10 +128,17 @@ pub struct QuickFuncsSectionParser<'a> {
 // =============================================================================
 
 impl<'a> QuickFuncsSectionParser<'a> {
+        /// Creates a parser that reports diagnostics to the process-wide shared [`ErrorManager`].
+    ///
+    /// Use [`new_with_error_manager`](Self::new_with_error_manager) to report to a specific one.
     pub fn new(tokens: &'a [Token], operational_settings: &'a OperationalSettings) -> Self {
         Self::new_with_error_manager(tokens,operational_settings,ErrorManager::get_shared_instance())
     }
-    pub fn new_with_error_manager(
+        /// Creates a parser that reports diagnostics to `error_manager`.
+    ///
+    /// The parser stops after three times the token count in steps, capped at 1,000,000, so
+    /// malformed input cannot make it loop forever.
+pub fn new_with_error_manager(
     tokens: &'a [Token],
     operational_settings: &'a OperationalSettings,
     error_manager: ErrorManager,
@@ -129,7 +164,12 @@ impl<'a> QuickFuncsSectionParser<'a> {
         iteration_count: 0,
         pending_angle: false,
         pending_equal: false,
-        current_container_nesting_depth: 0,
+                current_container_nesting_depth: 0,
+        arena: Arena::new(),
+        scratch_values: Vec::new(),
+        scratch_exprs: Vec::new(),
+        scratch_props: Vec::new(),
+        scratch_stmts: Vec::new(),
     }
 }
 
@@ -137,6 +177,11 @@ impl<'a> QuickFuncsSectionParser<'a> {
     // Main entry point
     // =============================================================================
 
+    /// Parses the section and returns it.
+    ///
+    /// Under the `halt` error strategy a parse error ends the section and the result is `None`.
+    /// Under `continue` and `recover` the parser keeps going and returns the functions it could
+    /// read.
     pub fn parse_section(&mut self) -> Option<QuickFuncsSection> {
         if self.debug_config.is_enabled {
             self.error_manager.log_debug("QuickFunctions: beginning section parse");
@@ -223,7 +268,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
             ));
         }
 
-        Some(QuickFuncsSection::new(functions, section_start_pos))
+        Some(DocQuickFuncs { functions, position: section_start_pos }.export(&self.arena))
     }
 
     // =============================================================================
@@ -231,7 +276,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
     // =============================================================================
 
     /// Parse a complete function definition: `~name<type> => scope (params) { body }`
-    fn parse_function(&mut self) -> Option<QuickFunction> {
+    fn parse_function(&mut self) -> Option<DocQuickFunction> {
         let function_start_pos = Position::from_token(self.current());
 
         if !self.expect_symbol('~') {
@@ -302,14 +347,14 @@ impl<'a> QuickFuncsSectionParser<'a> {
             ));
         }
 
-        Some(QuickFunction::new(
-            function_name,
+        Some(DocQuickFunction {
+            name: function_name,
             return_type,
             scope_list,
             parameters,
             body,
-            function_start_pos,
-        ))
+            position: function_start_pos,
+        })
     }
 
     fn parse_return_type(&mut self) -> Option<DataType> {
@@ -332,7 +377,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
             let scope_path = match &token.token_type {
                 // Keyword: only "global" or contextually-allowed keywords are valid
                 TokenType::Keyword(kw) => {
-                    // *kw: &'static str — compare directly, no .as_str() needed
+                    // *kw: &'static str, compare directly, no .as_str() needed
                     if *kw == "global" {
                         self.advance();
                         Some("global".to_string())
@@ -392,7 +437,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
     }
 
     /// Parse `(x<int>, y<float> = 42, z)`.
-fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
+fn parse_parameters(&mut self) -> Vec<DocQuickFuncParam> {
     let mut parameters = Vec::with_capacity(bounded_estimate(2, self.tokens.len(), 100));
 
     if !self.expect_symbol('(') {
@@ -448,7 +493,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
 
         // ── optional type annotation ──────────────────────────────────────
         let mut param_type: Option<DataType> = None;
-        let mut default_value: Option<Expression> = None;
+        let mut default_value: Option<ExprId> = None;
 
         if self.check_symbol('<') {
             self.advance(); // consume outer '<'
@@ -513,7 +558,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 self.skip_whitespace();
             }
 
-            // ── Close outer '>' — handles ">>" split from nested typed collection ──
+            // ── Close outer '>', handles ">>" split from nested typed collection ──
             if !self.match_and_consume_closing_angle() {
                 let cur = self.current().clone();
                 self.error_manager.add_parse_error(
@@ -533,7 +578,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         // true after match_and_consume_closing_angle consumed '>>=' for the inner close.
         if (self.check_symbol('=') || self.pending_equal) && default_value.is_none() {
             if self.pending_equal {
-                // The '=' was already consumed as part of '>>=' — clear the flag.
+                // The '=' was already consumed as part of '>>=', clear the flag.
                 self.pending_equal = false;
             } else {
                 self.advance(); // consume the actual '=' token
@@ -550,12 +595,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             ));
         }
 
-        parameters.push(QuickFuncParam::new(
-            param_name,
-            param_type,
-            default_value,
-            param_start_pos,
-        ));
+        parameters.push(DocQuickFuncParam { name: param_name, data_type: param_type, default_value: default_value, position: param_start_pos });
 
         if self.check_symbol(',') {
             self.advance();
@@ -575,11 +615,16 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
     // Statement block
     // =============================================================================
 
-    fn parse_statement_block(&mut self) -> Vec<QuickFuncStatement> {
-        let mut statements = Vec::with_capacity(estimate_statements_count(self.tokens.len()));
+        fn parse_statement_block(&mut self) -> StmtList {
+        let base = self.scratch_stmts.len();
+        let result = self.parse_statement_block_inner(base);
+        self.scratch_stmts.truncate(base);
+        result
+    }
 
+    fn parse_statement_block_inner(&mut self, base: usize) -> StmtList {
         if !self.expect_symbol('{') {
-            return statements;
+            return self.arena.alloc_stmt_list(&self.scratch_stmts[base..]);
         }
 
         let mut brace_depth: usize = 1;
@@ -601,14 +646,13 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             self.iteration_count += 1;
             let position_before = self.position;
 
-            if let Some(stmt) = self.parse_statement() {
-                statements.push(stmt);
+                        if let Some(stmt) = self.parse_statement() {
+                self.scratch_stmts.push(stmt);
             } else if self.operational_settings.error_handling_strategy
                 == ErrorHandlingStrategy::Halt
             {
                 break;
             }
-
             if position_before == self.position && !self.is_at_end() {
                 if let TokenType::Symbol('}') = self.current().token_type {
                     brace_depth -= 1;
@@ -623,18 +667,17 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         }
 
         // Drain any remaining unmatched close braces at this depth
-        if brace_depth > 0 && self.check_symbol('}') {
+                if brace_depth > 0 && self.check_symbol('}') {
             self.advance();
         }
-
-        statements
+        self.arena.alloc_stmt_list(&self.scratch_stmts[base..])
     }
 
     // =============================================================================
     // Statement parsing
     // =============================================================================
 
-    fn parse_statement(&mut self) -> Option<QuickFuncStatement> {
+    fn parse_statement(&mut self) -> Option<StmtId> {
         self.skip_whitespace();
         if self.is_at_end() {
             return None;
@@ -649,7 +692,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
 
         // -- keyword-led statements -------------------------------------------
         if let TokenType::Keyword(kw) = &token.token_type {
-            // kw: &&'static str — compare with *kw, no .as_str() needed
+            // kw: &&'static str, compare with *kw, no .as_str() needed
             if *kw == "return" {
                 return self.parse_return_statement(stmt_pos);
             }
@@ -683,11 +726,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                         let expr = self.parse_expression(0);
                         self.skip_whitespace();
                         if self.check_symbol(';') { self.advance(); }
-                        return Some(QuickFuncStatement::Assignment {
-                            variable: var_name,
-                            value: expr,
-                            position: stmt_pos,
-                        });
+                        return Some(self.assign_stmt(&var_name, expr, stmt_pos));
                     }
                     TokenType::ArithmeticAssignOp(op) => {
                         let operator = op.to_string(); // &&'static str -> String
@@ -696,12 +735,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                         let expr = self.parse_expression(0);
                         self.skip_whitespace();
                         if self.check_symbol(';') { self.advance(); }
-                        return Some(QuickFuncStatement::ArithmeticAssignment {
-                            variable: var_name,
-                            operator,
-                            value: expr,
-                            position: stmt_pos,
-                        });
+                        return Some(self.arith_assign_stmt(&var_name, &operator, expr, stmt_pos));
                     }
                     _ => {
                         self.position = saved;
@@ -728,11 +762,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                     let expr = self.parse_expression(0);
                     self.skip_whitespace();
                     if self.check_symbol(';') { self.advance(); }
-                    return Some(QuickFuncStatement::Assignment {
-                        variable: var_name,
-                        value: expr,
-                        position: stmt_pos,
-                    });
+                    return Some(self.assign_stmt(&var_name, expr, stmt_pos));
                 }
                 TokenType::ArithmeticAssignOp(op) => {
                     let operator = op.to_string(); // &&'static str -> String
@@ -741,12 +771,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                     let expr = self.parse_expression(0);
                     self.skip_whitespace();
                     if self.check_symbol(';') { self.advance(); }
-                    return Some(QuickFuncStatement::ArithmeticAssignment {
-                        variable: var_name,
-                        operator,
-                        value: expr,
-                        position: stmt_pos,
-                    });
+                    return Some(self.arith_assign_stmt(&var_name, &operator, expr, stmt_pos));
                 }
                 TokenType::BitwiseOp(op) if op.ends_with('=') => {
                     let operator = op.to_string(); // &&'static str -> String
@@ -755,12 +780,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                     let expr = self.parse_expression(0);
                     self.skip_whitespace();
                     if self.check_symbol(';') { self.advance(); }
-                    return Some(QuickFuncStatement::ArithmeticAssignment {
-                        variable: var_name,
-                        operator,
-                        value: expr,
-                        position: stmt_pos,
-                    });
+                    return Some(self.arith_assign_stmt(&var_name, &operator, expr, stmt_pos));
                 }
                 _ => {
                     self.position = saved;
@@ -772,32 +792,26 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         let expr = self.parse_expression(0);
         self.skip_whitespace();
         if self.check_symbol(';') { self.advance(); }
-        Some(QuickFuncStatement::ExpressionStatement {
-            expression: expr,
-            position: stmt_pos,
-        })
+        Some(self.arena.alloc_stmt(StmtNode::ExpressionStatement { expression: expr, position: stmt_pos }))
     }
 
-    fn parse_return_statement(&mut self, pos: Position) -> Option<QuickFuncStatement> {
+    fn parse_return_statement(&mut self, pos: Position) -> Option<StmtId> {
         self.advance(); // consume 'return'
         self.skip_whitespace();
 
         let expr = if !self.check_symbol(';') && !self.check_symbol('}') {
             self.parse_expression(0)
         } else {
-            Expression::Value {
-                value: Value::Null { position: pos },
-                position: pos,
-            }
+            self.lit(ValueNode::Null { position: pos }, pos)
         };
 
         self.skip_whitespace();
         if self.check_symbol(';') { self.advance(); }
 
-        Some(QuickFuncStatement::Return { value: expr, position: pos })
+        Some(self.arena.alloc_stmt(StmtNode::Return { value: expr, position: pos }))
     }
 
-    fn parse_log_statement(&mut self, position: Position) -> Option<QuickFuncStatement> {
+    fn parse_log_statement(&mut self, position: Position) -> Option<StmtId> {
         self.advance(); // consume 'log' (keyword or identifier)
         self.skip_whitespace();
 
@@ -820,7 +834,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         self.skip_whitespace();
         if self.check_symbol(';') { self.advance(); }
 
-        Some(QuickFuncStatement::Log { value: expr, position })
+        Some(self.arena.alloc_stmt(StmtNode::Log { value: expr, position }))
     }
 
     /// Parse `let [mut] name[<type>] = expr` or `const name[<type>] = expr`.
@@ -828,7 +842,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         &mut self,
         decl_type: DeclarationType,
         start_pos: Position,
-    ) -> QuickFuncStatement {
+    ) -> StmtId {
         self.advance(); // consume 'let' / 'const'
         self.skip_whitespace();
 
@@ -893,13 +907,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                     self.get_source_line(&cur),
                 );
                 // Error-recovery: emit a placeholder declaration so parsing continues.
-                return QuickFuncStatement::ExpressionStatement {
-                    expression: Expression::Value {
-                        value: Value::Null { position: start_pos },
-                        position: start_pos,
-                    },
-                    position: start_pos,
-                };
+                return self.null_expr_stmt(start_pos);
             }
         };
 
@@ -918,13 +926,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 None,
                 self.get_source_line(&cur),
             );
-            return QuickFuncStatement::ExpressionStatement {
-                expression: Expression::Value {
-                    value: Value::Null { position: start_pos },
-                    position: start_pos,
-                },
-                position: start_pos,
-            };
+            return self.null_expr_stmt(start_pos);
         }
 
         self.advance();
@@ -934,34 +936,29 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         self.skip_whitespace();
         if self.check_symbol(';') { self.advance(); }
 
-        QuickFuncStatement::VariableDeclaration {
-            declaration_type: decl_type,
-            is_mutable,
-            variable_name: var_name,
-            data_type: var_type,
-            value: init_expr,
-            position: start_pos,
+        {
+            let variable_name = self.arena.alloc_str(&var_name);
+            self.arena.alloc_stmt(StmtNode::VariableDeclaration {
+                declaration_type: decl_type,
+                is_mutable,
+                variable_name,
+                data_type: var_type,
+                value: init_expr,
+                position: start_pos,
+            })
         }
     }
 
     // =============================================================================
-    // Control flow — if / elif / else
+    // Control flow, if / elif / else
     // =============================================================================
 
-    fn parse_if_statement(&mut self) -> Option<QuickFuncStatement> {
+    fn parse_if_statement(&mut self) -> Option<StmtId> {
         let if_pos = Position::from_token(self.current());
         self.advance(); // consume 'if'
 
         if !self.expect_symbol(':') {
-            return Some(QuickFuncStatement::If {
-                condition: Expression::Value {
-                    value: Value::Boolean { value: false, position: if_pos },
-                    position: if_pos,
-                },
-                then_branch: Vec::new(),
-                else_branch: None,
-                position: if_pos,
-            });
+            return Some({ let condition = self.lit(ValueNode::Boolean { value: false, position: if_pos }, if_pos); let then_branch = self.arena.alloc_stmt_list(&[]); self.arena.alloc_stmt(StmtNode::If { condition, then_branch, else_branch: None, position: if_pos }) });
         }
 
         self.skip_whitespace();
@@ -978,7 +975,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         let then_branch = if is_single_line {
             self.advance(); // consume 'then'
             self.skip_whitespace();
-            if let Some(stmt) = self.parse_statement() { vec![stmt] } else { Vec::new() }
+            if let Some(stmt) = self.parse_statement() { self.arena.alloc_stmt_list(&[stmt]) } else { self.arena.alloc_stmt_list(&[]) }
         } else {
             if !self.check_symbol('{') {
                 let cur = self.current().clone();
@@ -990,12 +987,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                     None,
                     self.get_source_line(&cur),
                 );
-                return Some(QuickFuncStatement::If {
-                    condition,
-                    then_branch: Vec::new(),
-                    else_branch: None,
-                    position: if_pos,
-                });
+                return Some({ let condition = condition; let then_branch = self.arena.alloc_stmt_list(&[]); self.arena.alloc_stmt(StmtNode::If { condition, then_branch, else_branch: None, position: if_pos }) });
             }
             self.parse_statement_block()
         };
@@ -1003,7 +995,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         self.skip_whitespace();
 
         // Collect elif branches
-        let mut elif_chain: Vec<QuickFuncStatement> = Vec::new();
+        let mut elif_chain: Vec<(ExprId, StmtList, Position)> = Vec::new();
 
         loop {
             self.skip_whitespace();
@@ -1046,16 +1038,11 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             let elif_body = self.parse_statement_block();
             self.skip_whitespace();
 
-            elif_chain.push(QuickFuncStatement::If {
-                condition: elif_cond,
-                then_branch: elif_body,
-                else_branch: None,
-                position: elif_pos,
-            });
+            elif_chain.push((elif_cond, elif_body, elif_pos));
         }
 
         // Optional else branch
-        let mut final_else: Option<Vec<QuickFuncStatement>> = None;
+        let mut final_else: Option<StmtList> = None;
 
         let is_else = if let TokenType::Keyword(kw) = &self.current().token_type {
             *kw == "else"
@@ -1075,49 +1062,40 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 // e.g.  else return -1;
                 //       else result = -10;
                 if let Some(stmt) = self.parse_statement() {
-                    final_else = Some(vec![stmt]);
+                    final_else = Some(self.arena.alloc_stmt_list(&[stmt]));
                 }
             }
         }
 
         // Build elif → else chain from bottom up
         let mut current_else = final_else;
-        for elif in elif_chain.into_iter().rev() {
-            if let QuickFuncStatement::If { condition, then_branch, position, .. } = elif {
-                current_else = Some(vec![QuickFuncStatement::If {
-                    condition,
-                    then_branch,
-                    else_branch: current_else,
-                    position,
-                }]);
-            }
+        for (condition, then_branch, position) in elif_chain.into_iter().rev() {
+            let nested = self.arena.alloc_stmt(StmtNode::If {
+                condition,
+                then_branch,
+                else_branch: current_else,
+                position,
+            });
+            current_else = Some(self.arena.alloc_stmt_list(&[nested]));
         }
 
-        Some(QuickFuncStatement::If {
+        Some(self.arena.alloc_stmt(StmtNode::If {
             condition,
             then_branch,
             else_branch: current_else,
             position: if_pos,
-        })
+        }))
     }
     // =============================================================================
-    // Control flow — switch / chk
+    // Control flow, switch / chk
     // =============================================================================
 
-    fn parse_switch_statement(&mut self) -> Option<QuickFuncStatement> {
+    fn parse_switch_statement(&mut self) -> Option<StmtId> {
         let switch_pos = Position::from_token(self.current());
         self.advance(); // consume 'chk'
 
         if !self.expect_symbol(':') {
-            return Some(QuickFuncStatement::Switch {
-                expression: Expression::Value {
-                    value: Value::Null { position: switch_pos },
-                    position: switch_pos,
-                },
-                cases: Vec::new(),
-                default_case: None,
-                position: switch_pos,
-            });
+            return Some({ let expression = self.lit(ValueNode::Null { position: switch_pos }, switch_pos); let cases = self.arena.alloc_case_list(&[]); self.arena.alloc_stmt(StmtNode::Switch { expression, cases, default_case: None, position: switch_pos }) });
         }
 
         self.skip_whitespace();
@@ -1125,16 +1103,11 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         self.skip_whitespace();
 
         if !self.expect_symbol('{') {
-            return Some(QuickFuncStatement::Switch {
-                expression: expr,
-                cases: Vec::new(),
-                default_case: None,
-                position: switch_pos,
-            });
+            return Some({ let expression = expr; let cases = self.arena.alloc_case_list(&[]); self.arena.alloc_stmt(StmtNode::Switch { expression, cases, default_case: None, position: switch_pos }) });
         }
 
-        let mut cases = Vec::new();
-        let mut default_case: Option<SwitchCase> = None;
+        let mut cases: Vec<SwitchCaseNode> = Vec::new();
+        let mut default_case: Option<SwitchCaseNode> = None;
 
         while !self.is_at_end() && !self.check_symbol('}') {
             self.skip_whitespace();
@@ -1171,42 +1144,38 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 self.advance(); // consume 'miss'
                 self.skip_whitespace();
                 let stmts = self.parse_case_body();
-                default_case = Some(SwitchCase::new(
-                    Value::Null { position: case_pos },
-                    stmts,
-                    case_pos,
-                ));
+                let case_value = self.arena.alloc_value(ValueNode::Null { position: case_pos });
+                default_case = Some(SwitchCaseNode { case_value, statements: stmts, position: case_pos });
             } else {
                 let case_val = self.parse_value();
                 self.skip_whitespace();
                 let stmts = self.parse_case_body();
-                cases.push(SwitchCase::new(case_val, stmts, case_pos));
+                cases.push(SwitchCaseNode { case_value: case_val, statements: stmts, position: case_pos });
             }
 
             self.skip_whitespace();
         }
 
         if !self.expect_symbol('}') {
-            return Some(QuickFuncStatement::Switch {
-                expression: expr,
-                cases: Vec::new(),
-                default_case: None,
-                position: switch_pos,
-            });
+            return Some({ let expression = expr; let cases = self.arena.alloc_case_list(&[]); self.arena.alloc_stmt(StmtNode::Switch { expression, cases, default_case: None, position: switch_pos }) });
         }
 
-        Some(QuickFuncStatement::Switch {
-            expression: expr,
-            cases,
-            default_case,
-            position: switch_pos,
-        })
+        {
+            let cases = self.arena.alloc_case_list(&cases);
+            let default_case = default_case.map(|case| self.arena.alloc_case(case));
+            Some(self.arena.alloc_stmt(StmtNode::Switch {
+                expression: expr,
+                cases,
+                default_case,
+                position: switch_pos,
+            }))
+        }
     }
 
-    fn parse_case_body(&mut self) -> Vec<QuickFuncStatement> {
+    fn parse_case_body(&mut self) -> StmtList {
         self.skip_whitespace();
 
-        // `then` keyword — single statement
+        // `then` keyword, single statement
         let is_then = if let TokenType::Keyword(kw) = &self.current().token_type {
             *kw == "then" // &&'static str
         } else {
@@ -1216,14 +1185,14 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         if is_then {
             self.advance();
             self.skip_whitespace();
-            return if let Some(stmt) = self.parse_statement() { vec![stmt] } else { Vec::new() };
+            return if let Some(stmt) = self.parse_statement() { self.arena.alloc_stmt_list(&[stmt]) } else { self.arena.alloc_stmt_list(&[]) };
         }
 
-        // `=>` arrow — single statement
+        // `=>` arrow, single statement
         if self.check_arrow() {
             self.advance();
             self.skip_whitespace();
-            return if let Some(stmt) = self.parse_statement() { vec![stmt] } else { Vec::new() };
+            return if let Some(stmt) = self.parse_statement() { self.arena.alloc_stmt_list(&[stmt]) } else { self.arena.alloc_stmt_list(&[]) };
         }
 
         // block body
@@ -1238,24 +1207,49 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             cur.line,
             cur.column,
             None,
-            self.get_source_line(&cur),
+                        self.get_source_line(&cur),
         );
-
-        Vec::new()
+        self.arena.alloc_stmt_list(&[])
     }
 
     // =============================================================================
     // Pratt expression parser
     // =============================================================================
 
-    fn parse_expression(&mut self, min_precedence: i32) -> Expression {
+        /// Allocates a value node and wraps it in an expression node at `position`.
+    fn lit(&mut self, node: ValueNode, position: Position) -> ExprId {
+        let value = self.arena.alloc_value(node);
+        self.arena.alloc_expr(ExprNode::Value { value, position })
+    }
+
+    /// A null value wrapped in an expression at `position`.
+    fn null_expr(&mut self, position: Position) -> ExprId {
+        self.lit(ValueNode::Null { position }, position)
+    }
+
+    /// An expression statement that holds a null, which the declaration parser returns after an
+    /// error so that the caller still gets a statement.
+    fn null_expr_stmt(&mut self, position: Position) -> StmtId {
+        let expression = self.null_expr(position);
+        self.arena.alloc_stmt(StmtNode::ExpressionStatement { expression, position })
+    }
+
+    fn assign_stmt(&mut self, variable: &str, value: ExprId, position: Position) -> StmtId {
+        let variable = self.arena.alloc_str(variable);
+        self.arena.alloc_stmt(StmtNode::Assignment { variable, value, position })
+    }
+
+    fn arith_assign_stmt(&mut self, variable: &str, operator: &str, value: ExprId, position: Position) -> StmtId {
+        let variable = self.arena.alloc_str(variable);
+        let operator = self.arena.alloc_str(operator);
+        self.arena.alloc_stmt(StmtNode::ArithmeticAssignment { variable, operator, value, position })
+    }
+
+    fn parse_expression(&mut self, min_precedence: i32) -> ExprId {
         self.skip_whitespace();
 
         if self.is_at_end() {
-            return Expression::Value {
-                value: Value::Null { position: Position::UNKNOWN },
-                position: Position::UNKNOWN,
-            };
+            return self.lit(ValueNode::Null { position: Position::UNKNOWN }, Position::UNKNOWN);
         }
 
         // Ternary chains (a?b:a?b:a?b:...) and right-associative operator
@@ -1287,10 +1281,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 self.get_source_line(&cur),
             );
             self.current_container_nesting_depth -= 1;
-            return Expression::Value {
-                value: Value::Null { position: Position::UNKNOWN },
-                position: Position::UNKNOWN,
-            };
+            return self.lit(ValueNode::Null { position: Position::UNKNOWN }, Position::UNKNOWN);
         }
 
         let mut left = self.parse_unary_or_primary();
@@ -1332,12 +1323,12 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
 
                 let false_branch = self.parse_expression(2);
 
-                left = Expression::Conditional {
-                    condition: Box::new(left),
-                    true_value: Box::new(true_branch),
-                    false_value: Box::new(false_branch),
+                left = self.arena.alloc_expr(ExprNode::Conditional {
+                    condition: left,
+                    true_value: true_branch,
+                    false_value: false_branch,
                     position: ternary_pos,
-                };
+                });
                 self.skip_whitespace();
                 continue;
             }
@@ -1368,7 +1359,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
 
     fn try_get_operator_precedence(&self, token: &Token) -> Option<(String, i32, bool)> {
         match &token.token_type {
-            // All of these are now &&'static str — use directly
+            // All of these are now &&'static str, use directly
             TokenType::ArithmeticOp(op) => {
                 OPERATOR_PRECEDENCE.get(op as &str).map(|&(prec, ra)| (op.to_string(), prec, ra))
             }
@@ -1390,7 +1381,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 OPERATOR_PRECEDENCE.get(s.as_str()).map(|&(prec, ra)| (s, prec, ra))
             }
             TokenType::Keyword(kw) => {
-                // kw: &&'static str — lowercase is already the canonical form for "and"/"or"
+                // kw: &&'static str, lowercase is already the canonical form for "and"/"or"
                 let lower = kw.to_lowercase();
                 OPERATOR_PRECEDENCE.get(lower.as_str()).map(|&(prec, ra)| (lower, prec, ra))
             }
@@ -1398,44 +1389,19 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         }
     }
 
-    fn create_binary_expression(
-        &self,
-        left: Expression,
+        fn create_binary_expression(
+        &mut self,
+        left: ExprId,
         op: &str,
-        right: Expression,
+        right: ExprId,
         position: Position,
-    ) -> Expression {
+    ) -> ExprId {
         match op {
-            "+" | "-" | "*" | "/" | "%" | "**" | "%%" | "%&" | "&%" => Expression::ArithmeticOp {
-                left: Box::new(left),
-                operator: op.to_string(),
-                right: Box::new(right),
-                position,
-            },
-            ">" | "<" | ">=" | "<=" | "==" | "!=" => Expression::ComparisonOp {
-                left: Box::new(left),
-                operator: op.to_string(),
-                right: Box::new(right),
-                position,
-            },
-            "&&" | "||" | "and" | "or" => Expression::LogicalOp {
-                left: Box::new(left),
-                operator: op.to_string(),
-                right: Box::new(right),
-                position,
-            },
-            "&" | "|" | "^" | "<<" | ">>" => Expression::BitwiseOp {
-                left: Box::new(left),
-                operator: op.to_string(),
-                right: Box::new(right),
-                position,
-            },
-            _ => Expression::ArithmeticOp {
-                left: Box::new(left),
-                operator: op.to_string(),
-                right: Box::new(right),
-                position,
-            },
+            "+" | "-" | "*" | "/" | "%" | "**" | "%%" | "%&" | "&%" => { let operator = self.arena.alloc_str(op); self.arena.alloc_expr(ExprNode::ArithmeticOp { left, operator, right, position }) },
+            ">" | "<" | ">=" | "<=" | "==" | "!=" => { let operator = self.arena.alloc_str(op); self.arena.alloc_expr(ExprNode::ComparisonOp { left, operator, right, position }) },
+            "&&" | "||" | "and" | "or" => { let operator = self.arena.alloc_str(op); self.arena.alloc_expr(ExprNode::LogicalOp { left, operator, right, position }) },
+            "&" | "|" | "^" | "<<" | ">>" => { let operator = self.arena.alloc_str(op); self.arena.alloc_expr(ExprNode::BitwiseOp { left, operator, right, position }) },
+            _ => { let operator = self.arena.alloc_str(op); self.arena.alloc_expr(ExprNode::ArithmeticOp { left, operator, right, position }) },
         }
     }
 
@@ -1443,13 +1409,10 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
     // Unary / primary dispatch
     // =============================================================================
 
-  fn parse_unary_or_primary(&mut self) -> Expression {
+  fn parse_unary_or_primary(&mut self) -> ExprId {
     self.skip_whitespace();
     if self.is_at_end() {
-        return Expression::Value {
-            value: Value::Null { position: Position::UNKNOWN },
-            position: Position::UNKNOWN,
-        };
+        return self.lit(ValueNode::Null { position: Position::UNKNOWN }, Position::UNKNOWN);
     }
 
     let token = self.current().clone();
@@ -1466,19 +1429,21 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             let single: &str = if *op == "--" { "-" } else { "+" };
             self.advance();
             self.skip_whitespace();
-            // Recursive — also handles `++++a`, `----a`, etc.
+            // Recursive, also handles `++++a`, `----a`, etc.
             let inner = self.parse_unary_or_primary();
-            let inner_unary = Expression::UnaryOp {
-                operator: single.to_string(),
-                operand:  Box::new(inner),
+            let operator = self.arena.alloc_str(single);
+            let inner_unary = self.arena.alloc_expr(ExprNode::UnaryOp {
+                operator,
+                operand:  inner,
                 position: unary_pos,
-            };
+            });
             // Do NOT call apply_postfix_operations on the UnaryOp result.
-            return Expression::UnaryOp {
-                operator: single.to_string(),
-                operand:  Box::new(inner_unary),
+            let operator = self.arena.alloc_str(single);
+            return self.arena.alloc_expr(ExprNode::UnaryOp {
+                operator,
+                operand:  inner_unary,
                 position: unary_pos,
-            };
+            });
         }
     }
 
@@ -1517,11 +1482,12 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         // or falls through to parse_primary_with_postfix() which correctly applies
         // postfix operations to the primary before returning.
         let operand = self.parse_unary_or_primary();
-        return Expression::UnaryOp {
-            operator: op,
-            operand:  Box::new(operand),
+        let operator = self.arena.alloc_str(&op);
+        return self.arena.alloc_expr(ExprNode::UnaryOp {
+            operator,
+            operand:  operand,
             position: unary_pos,
-        };
+        });
         // NOTE: The old `return self.apply_postfix_operations(unary_expr)` was the bug.
         // Postfix operations must bind to the primary, not to the UnaryOp.
     }
@@ -1533,10 +1499,11 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
     // Postfix: dot-access, index-access, building QualifiedIdentifier chains
     // =============================================================================
 
-    fn apply_postfix_operations(&mut self, mut expr: Expression) -> Expression {
+    fn apply_postfix_operations(&mut self, mut expr: ExprId) -> ExprId {
     // Collect initial identifier part for chain detection
-    let mut parts: Vec<String> = match &expr {
-        Expression::Identifier { name, .. } => vec![name.clone()],
+    let first = *self.arena.expr(expr);
+    let mut parts: Vec<String> = match first {
+        ExprNode::Identifier { name, .. } => vec![self.arena.text(name).to_string()],
         _ => Vec::new(),
     };
 
@@ -1580,11 +1547,12 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                     if !parts.is_empty() {
                         parts.push(member);
                     } else {
-                        expr = Expression::PropertyAccess {
-                            object: Box::new(expr),
-                            property: member,
+                        let property = self.arena.alloc_str(&member);
+                        expr = self.arena.alloc_expr(ExprNode::PropertyAccess {
+                            object: expr,
+                            property,
                             position: dot_pos,
-                        };
+                        });
                     }
                 } else {
                     break;
@@ -1601,21 +1569,22 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
 
                 // Flush any accumulated parts first
                 if parts.len() >= 2 {
-                    let pos = expr.position();
-                    expr = Expression::QualifiedIdentifier {
-                        parts: std::mem::take(&mut parts),
+                    let pos = self.arena.expr(expr).position();
+                    let parts_list = self.arena.alloc_str_list(&std::mem::take(&mut parts));
+                    expr = self.arena.alloc_expr(ExprNode::QualifiedIdentifier {
+                        parts: parts_list,
                         arguments: None,
                         position: pos,
-                    };
+                    });
                 } else {
                     parts.clear();
                 }
 
-                expr = Expression::IndexAccess {
-                    object: Box::new(expr),
-                    index: Box::new(index_expr),
+                expr = self.arena.alloc_expr(ExprNode::IndexAccess {
+                    object: expr,
+                    index: index_expr,
                     position: bracket_pos,
-                };
+                });
             }
 
             // --- KEY FIX: was `return`, now `continue` so the chain keeps going ---
@@ -1623,58 +1592,62 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 // Dotted chain call: obj.method() or Math.round() or input.trim()
                 // Flush parts into a QualifiedIdentifier, then continue the loop
                 // so subsequent `.method()` calls are parsed as InstanceMethodCalls.
-                let pos = expr.position();
+                let pos = self.arena.expr(expr).position();
                 let args = self.parse_function_arguments();
-                expr = Expression::QualifiedIdentifier {
-                    parts: std::mem::take(&mut parts),
+                let parts_list = self.arena.alloc_str_list(&std::mem::take(&mut parts));
+                expr = self.arena.alloc_expr(ExprNode::QualifiedIdentifier {
+                    parts: parts_list,
                     arguments: Some(args),
                     position: pos,
-                };
+                });
                 // parts is now empty; the next '.' will enter the PropertyAccess branch
             }
 
             // --- NEW ARM: handles '(' when parts is empty (chained call after first) ---
             TokenType::Symbol('(') => {
-                // parts.is_empty() — this is a call directly following a PropertyAccess
+                // parts.is_empty(), this is a call directly following a PropertyAccess
                 // or IndexAccess.  Match the specific forms we know how to lower.
                 let tmp = expr;
-                match tmp {
-                    Expression::PropertyAccess { object, property, position: prop_pos } => {
+                let tmp_node = *self.arena.expr(tmp);
+                match tmp_node {
+                    ExprNode::PropertyAccess { object, property, position: prop_pos } => {
                         let args = self.parse_function_arguments();
-                        expr = Expression::InstanceMethodCall {
+                        expr = self.arena.alloc_expr(ExprNode::InstanceMethodCall {
                             instance: object,
                             method_name: property,
                             arguments: args,
                             position: prop_pos,
-                        };
-                        // Continue the loop — further chaining may follow
+                        });
+                        // Continue the loop, further chaining may follow
                     }
 
-                    // FIX: lambda call through index access — arr[0](args), ops[i](x).
+                    // FIX: lambda call through index access, arr[0](args), ops[i](x).
                     // Previously this fell to `other => break` which silently dropped
                     // the call, leaving `arr[0]` (the lambda key string) as the result
                     // instead of invoking the lambda.
                     // We use the sentinel method name "__call__" so that
                     // evaluate_instance_method_call knows to do lambda dispatch on
                     // whatever the index access evaluates to.
-                    Expression::IndexAccess { object, index, position: idx_pos } => {
+                    ExprNode::IndexAccess { object, index, position: idx_pos } => {
                         let args = self.parse_function_arguments();
-                        expr = Expression::InstanceMethodCall {
-                            instance: Box::new(Expression::IndexAccess {
-                                object,
-                                index,
-                                position: idx_pos,
-                            }),
-                            method_name: "__call__".to_string(),
+                        let instance = self.arena.alloc_expr(ExprNode::IndexAccess {
+                            object,
+                            index,
+                            position: idx_pos,
+                        });
+                        let method_name = self.arena.alloc_str("__call__");
+                        expr = self.arena.alloc_expr(ExprNode::InstanceMethodCall {
+                            instance,
+                            method_name,
                             arguments: args,
                             position: idx_pos,
-                        };
-                        // Continue the loop — further chaining may follow
+                        });
+                        // Continue the loop, further chaining may follow
                     }
 
-                    other => {
-                        // Not a form we can call — restore and stop.
-                        expr = other;
+                    _ => {
+                        // Not a form we can call, restore and stop.
+                        expr = tmp;
                         break;
                     }
                 }
@@ -1686,27 +1659,28 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
 
     // Flush remaining chain
     if parts.len() >= 2 {
-        let pos = expr.position();
+        let pos = self.arena.expr(expr).position();
         self.skip_whitespace();
+        let parts_list = self.arena.alloc_str_list(&parts);
         if self.check_symbol('(') {
             let args = self.parse_function_arguments();
-            return Expression::QualifiedIdentifier {
-                parts,
+            return self.arena.alloc_expr(ExprNode::QualifiedIdentifier {
+                parts: parts_list,
                 arguments: Some(args),
                 position: pos,
-            };
+            });
         }
-        return Expression::QualifiedIdentifier {
-            parts,
+        return self.arena.alloc_expr(ExprNode::QualifiedIdentifier {
+            parts: parts_list,
             arguments: None,
             position: pos,
-        };
+        });
     }
 
     expr
                             }
 
-    fn parse_primary_with_postfix(&mut self) -> Expression {
+    fn parse_primary_with_postfix(&mut self) -> ExprId {
         let expr = self.parse_primary_base();
         self.apply_postfix_operations(expr)
     }
@@ -1715,13 +1689,10 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
     // Primary expressions
     // =============================================================================
 
-    fn parse_primary_base(&mut self) -> Expression {
+    fn parse_primary_base(&mut self) -> ExprId {
         self.skip_whitespace();
         if self.is_at_end() {
-            return Expression::Value {
-                value: Value::Null { position: Position::UNKNOWN },
-                position: Position::UNKNOWN,
-            };
+            return self.lit(ValueNode::Null { position: Position::UNKNOWN }, Position::UNKNOWN);
         }
 
         let token = self.current().clone();
@@ -1731,113 +1702,74 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             TokenType::Integer(i) => {
                 let val = *i;
                 self.advance();
-                Expression::Value {
-                    value: Value::Integer { value: val, position: tok_pos },
-                    position: tok_pos,
-                }
+                self.lit(ValueNode::Integer { value: val, position: tok_pos }, tok_pos)
             }
             TokenType::Long(l) => {
                 let val = *l;
                 self.advance();
-                Expression::Value {
-                    value: Value::Long { value: val, position: tok_pos },
-                    position: tok_pos,
-                }
+                self.lit(ValueNode::Long { value: val, position: tok_pos }, tok_pos)
             }
             TokenType::Float(f) => {
                 let val = *f;
                 self.advance();
-                Expression::Value {
-                    value: Value::Float { value: val, position: tok_pos },
-                    position: tok_pos,
-                }
+                self.lit(ValueNode::Float { value: val, position: tok_pos }, tok_pos)
             }
             TokenType::Double(d) => {
                 let val = *d;
                 self.advance();
-                Expression::Value {
-                    value: Value::Double { value: val, position: tok_pos },
-                    position: tok_pos,
-                }
+                self.lit(ValueNode::Double { value: val, position: tok_pos }, tok_pos)
             }
             // FIX: scientific notation (1.0e-9, 6.02e23, etc.) was falling to _ => Null
             TokenType::ScientificNotation(sn) => {
                 let val = *sn;
                 self.advance();
-                Expression::Value {
-                    value: Value::ScientificNotation { value: val, position: tok_pos },
-                    position: tok_pos,
-                }
+                self.lit(ValueNode::ScientificNotation { value: val, position: tok_pos }, tok_pos)
             }
             TokenType::String(s) => {
                 let val = s.clone();
                 self.advance();
-                Expression::Value {
-                    value: Value::String { value: val, position: tok_pos },
-                    position: tok_pos,
-                }
+                { let value = self.arena.alloc_str(&val); self.lit(ValueNode::String { value, position: tok_pos }, tok_pos) }
             }
             // FIX: single-quoted strings were also unhandled
             TokenType::StringSingle(s) => {
                 let val = s.clone();
                 self.advance();
-                Expression::Value {
-                    value: Value::String { value: val, position: tok_pos },
-                    position: tok_pos,
-                }
+                { let value = self.arena.alloc_str(&val); self.lit(ValueNode::String { value, position: tok_pos }, tok_pos) }
             }
             TokenType::InterpolatedString(template) => {
                 let raw = template.clone();
                 self.advance();
                 let (tpl, exprs) = self.parse_interpolated_string_content(&raw, tok_pos);
-                Expression::Value {
-                    value: Value::InterpolatedString {
-                        template: tpl,
-                        expressions: exprs,
-                        position: tok_pos,
-                    },
-                    position: tok_pos,
+                {
+                    let template = self.arena.alloc_str(&tpl);
+                    let expressions = self.arena.alloc_expr_list(&exprs);
+                    self.lit(ValueNode::InterpolatedString { template, expressions, position: tok_pos }, tok_pos)
                 }
             }
             TokenType::Bool(b) => {
                 let val = *b;
                 self.advance();
-                Expression::Value {
-                    value: Value::Boolean { value: val, position: tok_pos },
-                    position: tok_pos,
-                }
+                self.lit(ValueNode::Boolean { value: val, position: tok_pos }, tok_pos)
             }
             TokenType::Keyword(kw) if *kw == "null" => {
                 self.advance();
-                Expression::Value {
-                    value: Value::Null { position: tok_pos },
-                    position: tok_pos,
-                }
+                self.lit(ValueNode::Null { position: tok_pos }, tok_pos)
             }
             // FIX: hex colors, dates, timestamps were all falling to _ => Null
             TokenType::HexColor(hc) => {
                 let val = hc.clone();
                 self.advance();
-                Expression::Value {
-                    value: Value::HexColor { value: val, position: tok_pos },
-                    position: tok_pos,
-                }
+                { let value = self.arena.alloc_str(&val); self.lit(ValueNode::HexColor { value, position: tok_pos }, tok_pos) }
             }
             TokenType::Date(d) => {
                 let val = d.clone();
                 self.advance();
-                Expression::Value {
-                    value: Value::Date { value: val, position: tok_pos },
-                    position: tok_pos,
-                }
+                { let value = self.arena.alloc_str(&val); self.lit(ValueNode::Date { value, position: tok_pos }, tok_pos) }
             }
             TokenType::Timestamp(ts) => {
                 let val = ts.clone();
                 self.advance();
-                Expression::Value {
-                    value: Value::Timestamp { value: val, position: tok_pos },
-                    position: tok_pos,
-                }
+                { let value = self.arena.alloc_str(&val); self.lit(ValueNode::Timestamp { value, position: tok_pos }, tok_pos) }
             }
             TokenType::Identifier(id) => {
                 let name = id.clone();
@@ -1845,13 +1777,14 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 self.skip_whitespace();
                 if self.check_symbol('(') {
                     let args = self.parse_function_arguments();
-                    return Expression::QuickFuncCall {
+                    let name = self.arena.alloc_str(&name);
+                    return self.arena.alloc_expr(ExprNode::QuickFuncCall {
                         name,
                         arguments: args,
                         position: tok_pos,
-                    };
+                    });
                 }
-                Expression::Identifier { name, position: tok_pos }
+                { let name = self.arena.alloc_str(&name); self.arena.alloc_expr(ExprNode::Identifier { name, position: tok_pos }) }
             }
             TokenType::Symbol('(') => {
                 let saved = self.position;
@@ -1875,10 +1808,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                         self.get_source_line(&cur),
                     );
                     self.current_container_nesting_depth -= 1;
-                    return Expression::Value {
-                        value: Value::Null { position: tok_pos },
-                        position: tok_pos,
-                    };
+                    return self.lit(ValueNode::Null { position: tok_pos }, tok_pos);
                 }
 
                 let inner = self.parse_expression(0);
@@ -1886,23 +1816,20 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
 
                 self.skip_whitespace();
                 if !self.expect_symbol(')') {
-                    return Expression::Value {
-                        value: Value::Null { position: tok_pos },
-                        position: tok_pos,
-                    };
+                    return self.lit(ValueNode::Null { position: tok_pos }, tok_pos);
                 }
-                Expression::Parenthesized {
-                    expression: Box::new(inner),
+                self.arena.alloc_expr(ExprNode::Parenthesized {
+                    expression: inner,
                     position: tok_pos,
-                }
+                })
             }
             TokenType::Symbol('[') => {
                 let arr = self.parse_array_literal();
-                Expression::Value { value: arr, position: tok_pos }
+                self.arena.alloc_expr(ExprNode::Value { value: arr, position: tok_pos })
             }
             TokenType::Symbol('{') => {
                 let obj = self.parse_object_literal();
-                Expression::Value { value: obj, position: tok_pos }
+                self.arena.alloc_expr(ExprNode::Value { value: obj, position: tok_pos })
             }
             TokenType::TupleConstructor(_) => self.parse_tuple_constructor(),
             TokenType::BlobConstructor(_)  => self.parse_blob_constructor(),
@@ -1915,10 +1842,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                     ));
                 }
                 self.advance();
-                Expression::Value {
-                    value: Value::Null { position: tok_pos },
-                    position: tok_pos,
-                }
+                self.lit(ValueNode::Null { position: tok_pos }, tok_pos)
             }
         }
     }
@@ -1927,10 +1851,10 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
     // Value / literal parsing
     // =============================================================================
 
-    fn parse_value(&mut self) -> Value {
+    fn parse_value(&mut self) -> ValueId {
         self.skip_whitespace();
         if self.is_at_end() {
-            return Value::Null { position: Position::UNKNOWN };
+            return self.arena.alloc_value(ValueNode::Null { position: Position::UNKNOWN });
         }
 
         let token = self.current().clone();
@@ -1940,46 +1864,46 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             TokenType::Integer(i) => {
                 let v = *i;
                 self.advance();
-                Value::Integer { value: v, position: val_pos }
+                self.arena.alloc_value(ValueNode::Integer { value: v, position: val_pos })
             }
             TokenType::Long(i) => {
                 let v = *i;
                 self.advance();
-                Value::Long { value: v, position: val_pos }
+                self.arena.alloc_value(ValueNode::Long { value: v, position: val_pos })
             }
             TokenType::Float(f) => {
                 let v = *f;
                 self.advance();
-                Value::Float { value: v, position: val_pos }
+                self.arena.alloc_value(ValueNode::Float { value: v, position: val_pos })
             }
             TokenType::Double(d) => {
                 let v = *d;
                 self.advance();
-                Value::Double { value: v, position: val_pos }
+                self.arena.alloc_value(ValueNode::Double { value: v, position: val_pos })
             }
             TokenType::ScientificNotation(sn) => {
                 let v = *sn;
                 self.advance();
-                Value::ScientificNotation { value: v, position: val_pos }
+                self.arena.alloc_value(ValueNode::ScientificNotation { value: v, position: val_pos })
             }
             TokenType::String(s) => {
                 let v = s.clone();
                 self.advance();
-                Value::String { value: v, position: val_pos }
+                { let value = self.arena.alloc_str(&v); self.arena.alloc_value(ValueNode::String { value, position: val_pos }) }
             }
             TokenType::StringSingle(s) => {
                 let v = s.clone();
                 self.advance();
-                Value::String { value: v, position: val_pos }
+                { let value = self.arena.alloc_str(&v); self.arena.alloc_value(ValueNode::String { value, position: val_pos }) }
             }
             TokenType::Bool(b) => {
                 let v = *b;
                 self.advance();
-                Value::Boolean { value: v, position: val_pos }
+                self.arena.alloc_value(ValueNode::Boolean { value: v, position: val_pos })
             }
             TokenType::Keyword(kw) if *kw == "null" => {
                 self.advance();
-                Value::Null { position: val_pos }
+                self.arena.alloc_value(ValueNode::Null { position: val_pos })
             }
             // --- KEY FIX: read the full dotted path so `Priority.Low` becomes
             //     Identifier("Priority.Low"), which the resolver then converts to
@@ -1989,7 +1913,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 self.advance();
 
                 if self.check_symbol('.') {
-                    // Dotted qualified identifier — collect all segments
+                    // Dotted qualified identifier, collect all segments
                     let mut segments = vec![first];
                     while self.check_symbol('.') {
                         self.advance(); // consume '.'
@@ -2008,9 +1932,9 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                         }
                     }
                     // Store as a dotted string; the resolver splits it into EnumValue
-                    Value::Identifier { value: segments.join("."), position: val_pos }
+                    { let value = self.arena.alloc_str(&segments.join(".")); self.arena.alloc_value(ValueNode::Identifier { value, position: val_pos }) }
                 } else {
-                    Value::Identifier { value: first, position: val_pos }
+                    { let value = self.arena.alloc_str(&first); self.arena.alloc_value(ValueNode::Identifier { value, position: val_pos }) }
                 }
             }
             TokenType::Symbol('[') => self.parse_array_literal(),
@@ -2018,32 +1942,43 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             TokenType::HexColor(hc) => {
                 let v = hc.clone();
                 self.advance();
-                Value::HexColor { value: v, position: val_pos }
+                { let value = self.arena.alloc_str(&v); self.arena.alloc_value(ValueNode::HexColor { value, position: val_pos }) }
             }
             TokenType::Date(d) => {
                 let v = d.clone();
                 self.advance();
-                Value::Date { value: v, position: val_pos }
+                { let value = self.arena.alloc_str(&v); self.arena.alloc_value(ValueNode::Date { value, position: val_pos }) }
             }
             TokenType::Timestamp(t) => {
                 let v = t.clone();
                 self.advance();
-                Value::Timestamp { value: v, position: val_pos }
+                { let value = self.arena.alloc_str(&v); self.arena.alloc_value(ValueNode::Timestamp { value, position: val_pos }) }
             }
             TokenType::InterpolatedString(template) => {
                 let raw = template.clone();
                 self.advance();
                 let (tpl, exprs) = self.parse_interpolated_string_content(&raw, val_pos);
-                Value::InterpolatedString { template: tpl, expressions: exprs, position: val_pos }
+                {
+                    let template = self.arena.alloc_str(&tpl);
+                    let expressions = self.arena.alloc_expr_list(&exprs);
+                    self.arena.alloc_value(ValueNode::InterpolatedString { template, expressions, position: val_pos })
+                }
             }
             _ => {
                 let v = token.get_token_value();
                 self.advance();
-                Value::Identifier { value: v, position: val_pos }
+                { let value = self.arena.alloc_str(&v); self.arena.alloc_value(ValueNode::Identifier { value, position: val_pos }) }
             }
         }
     }
-    fn parse_array_literal(&mut self) -> Value {
+    fn parse_array_literal(&mut self) -> ValueId {
+        let base = self.scratch_values.len();
+        let result = self.parse_array_literal_inner(base);
+        self.scratch_values.truncate(base);
+        result
+    }
+
+    fn parse_array_literal_inner(&mut self, base: usize) -> ValueId {
         let arr_pos = Position::from_token(self.current());
 
         self.current_container_nesting_depth += 1;
@@ -2059,29 +1994,32 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 self.get_source_line(&cur),
             );
             self.current_container_nesting_depth -= 1;
-            return Value::Array { values: Vec::new(), position: arr_pos };
+            let values = self.arena.alloc_value_list(&[]);
+            return self.arena.alloc_value(ValueNode::Array { values, position: arr_pos });
         }
 
         if !self.expect_symbol('[') {
             self.current_container_nesting_depth -= 1;
-            return Value::Array { values: Vec::new(), position: arr_pos };
+            let values = self.arena.alloc_value_list(&[]);
+            return self.arena.alloc_value(ValueNode::Array { values, position: arr_pos });
         }
 
-        let mut items = Vec::with_capacity(bounded_estimate(4, self.tokens.len(), 40));
+        
 
         while !self.is_at_end() && !self.check_symbol(']') {
             self.skip_whitespace();
             if self.check_symbol(']') { break; }
 
             let expr = self.parse_expression(0);
-            let item = match expr {
-                Expression::Value { value, .. } => value,
-                other => Value::Expression {
-                    expr: Box::new(other),
-                    position: Position::from_token(self.current()),
-                },
+            let expr_node = *self.arena.expr(expr);
+            let item = match expr_node {
+                ExprNode::Value { value, .. } => value,
+                _ => {
+                    let position = Position::from_token(self.current());
+                    self.arena.alloc_value(ValueNode::Expression { expr, position })
+                }
             };
-            items.push(item);
+            self.scratch_values.push(item);
             self.skip_whitespace();
 
             if self.check_symbol(',') {
@@ -2094,10 +2032,20 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         if self.check_symbol(']') { self.advance(); }
 
         self.current_container_nesting_depth -= 1;
-        Value::Array { values: items, position: arr_pos }
+        {
+            let values = self.arena.alloc_value_list(&self.scratch_values[base..]);
+            self.arena.alloc_value(ValueNode::Array { values, position: arr_pos })
+        }
     }
 
-    fn parse_object_literal(&mut self) -> Value {
+    fn parse_object_literal(&mut self) -> ValueId {
+        let base = self.scratch_props.len();
+        let result = self.parse_object_literal_inner(base);
+        self.scratch_props.truncate(base);
+        result
+    }
+
+    fn parse_object_literal_inner(&mut self, base: usize) -> ValueId {
     let obj_pos = Position::from_token(self.current());
 
     self.current_container_nesting_depth += 1;
@@ -2113,15 +2061,17 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             self.get_source_line(&cur),
         );
         self.current_container_nesting_depth -= 1;
-        return Value::Object { properties: Vec::new(), position: obj_pos };
+        let properties = self.arena.alloc_prop_list(&[]);
+        return self.arena.alloc_value(ValueNode::Object { properties, position: obj_pos });
     }
 
     if !self.expect_symbol('{') {
         self.current_container_nesting_depth -= 1;
-        return Value::Object { properties: Vec::new(), position: obj_pos };
+        let properties = self.arena.alloc_prop_list(&[]);
+        return self.arena.alloc_value(ValueNode::Object { properties, position: obj_pos });
     }
 
-    let mut properties = Vec::with_capacity(estimate_properties_count(self.tokens.len()));
+    
 
     while !self.is_at_end() && !self.check_symbol('}') {
         self.skip_whitespace();
@@ -2173,7 +2123,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             self.skip_whitespace();
         }
 
-        // Consume the separator — '=' or ':' (both accepted in object literals).
+        // Consume the separator, '=' or ':' (both accepted in object literals).
         // If the type annotation parser consumed a fused `>=` or `>>=` token, the
         // '=' is already signalled via pending_equal and must not be consumed again.
         if self.pending_equal {
@@ -2199,64 +2149,75 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         let val_expr = self.parse_expression(0);
         let prop_value = self.convert_expression_to_value(val_expr);
 
-        properties.push(ObjectProperty::new(prop_name, prop_value, prop_pos));
+        let key = self.arena.alloc_str(&prop_name);
+        self.scratch_props.push(ObjectPropNode { key, value: prop_value, position: prop_pos });
         self.skip_whitespace();
 
-        // Comma is optional — newline-separated properties are valid DixScript.
+        // Comma is optional, newline-separated properties are valid DixScript.
         if self.check_symbol(',') {
             self.advance();
             self.skip_whitespace();
             // Trailing comma before closing brace is fine
             if self.check_symbol('}') { break; }
         }
-        // No else-error here — absence of comma is not an error in DixScript
+        // No else-error here, absence of comma is not an error in DixScript
     }
 
     if self.check_symbol('}') { self.advance(); }
 
     self.current_container_nesting_depth -= 1;
-    Value::Object { properties, position: obj_pos }
+    {
+        let properties = self.arena.alloc_prop_list(&self.scratch_props[base..]);
+        self.arena.alloc_value(ValueNode::Object { properties, position: obj_pos })
+    }
 }
-    fn parse_tuple_constructor(&mut self) -> Expression {
+    fn parse_tuple_constructor(&mut self) -> ExprId {
+        let base = self.scratch_values.len();
+        let result = self.parse_tuple_constructor_inner(base);
+        self.scratch_values.truncate(base);
+        result
+    }
+
+    fn parse_tuple_constructor_inner(&mut self, base: usize) -> ExprId {
         let pos = Position::from_token(self.current());
         self.advance();
         self.skip_whitespace();
 
         if !self.expect_symbol('(') {
-            return Expression::Value { value: Value::Null { position: pos }, position: pos };
+            return self.lit(ValueNode::Null { position: pos }, pos);
         }
 
-        let mut args = Vec::new();
+        
 
         while !self.is_at_end() && !self.check_symbol(')') {
             self.skip_whitespace();
             if self.check_symbol(')') { break; }
             let expr = self.parse_expression(0);
-            args.push(Value::Expression {
-                expr: Box::new(expr),
-                position: Position::from_token(self.current()),
-            });
+            let position = Position::from_token(self.current());
+            let arg = self.arena.alloc_value(ValueNode::Expression { expr, position });
+            self.scratch_values.push(arg);
             self.skip_whitespace();
             if self.check_symbol(',') { self.advance(); } else { break; }
         }
 
         if !self.expect_symbol(')') {
-            return Expression::Value { value: Value::Null { position: pos }, position: pos };
+            return self.lit(ValueNode::Null { position: pos }, pos);
         }
 
-        Expression::Value {
-            value: Value::PrefixedConstructor { prefix: "t".to_string(), arguments: args, position: pos },
-            position: pos,
+        {
+            let prefix = self.arena.alloc_str("t");
+            let arguments = self.arena.alloc_value_list(&self.scratch_values[base..]);
+            self.lit(ValueNode::PrefixedConstructor { prefix, arguments, position: pos }, pos)
         }
     }
 
-fn parse_blob_constructor(&mut self) -> Expression {
+fn parse_blob_constructor(&mut self) -> ExprId {
         let pos = Position::from_token(self.current());
         self.advance(); // consume BlobConstructor token
         self.skip_whitespace();
 
         if !self.expect_symbol('(') {
-            return Expression::Value { value: Value::Null { position: pos }, position: pos };
+            return self.lit(ValueNode::Null { position: pos }, pos);
         }
 
         self.skip_whitespace();
@@ -2264,7 +2225,7 @@ fn parse_blob_constructor(&mut self) -> Expression {
         // Parse the actual data expression instead of hard-coding a placeholder.
         let data_expr = if self.check_symbol(')') {
             // Empty blob
-            Value::String { value: String::new(), position: pos }
+            { let value = self.arena.alloc_str(&String::new()); self.arena.alloc_value(ValueNode::String { value, position: pos }) }
         } else {
             let expr = self.parse_expression(0);
             self.skip_whitespace();
@@ -2272,42 +2233,38 @@ fn parse_blob_constructor(&mut self) -> Expression {
         };
 
         if !self.expect_symbol(')') {
-            return Expression::Value { value: Value::Null { position: pos }, position: pos };
+            return self.lit(ValueNode::Null { position: pos }, pos);
         }
 
-        Expression::Value {
-            value: Value::PrefixedConstructor {
-                prefix: "b".to_string(),
-                arguments: vec![data_expr],
-                position: pos,
-            },
-            position: pos,
+        {
+            let prefix = self.arena.alloc_str("b");
+            let arguments = self.arena.alloc_value_list(&[data_expr]);
+            self.lit(ValueNode::PrefixedConstructor { prefix, arguments, position: pos }, pos)
         }
     }
 
-    fn parse_regex_constructor(&mut self) -> Expression {
+    fn parse_regex_constructor(&mut self) -> ExprId {
         let pos = Position::from_token(self.current());
         self.advance();
         self.skip_whitespace();
 
         if !self.expect_symbol('(') {
-            return Expression::Value { value: Value::Null { position: pos }, position: pos };
+            return self.lit(ValueNode::Null { position: pos }, pos);
         }
 
         let _pattern = self.parse_expression(0);
         self.skip_whitespace();
 
         if !self.expect_symbol(')') {
-            return Expression::Value { value: Value::Null { position: pos }, position: pos };
+            return self.lit(ValueNode::Null { position: pos }, pos);
         }
 
-        Expression::Value {
-            value: Value::PrefixedConstructor {
-                prefix: "r".to_string(),
-                arguments: vec![Value::String { value: "regex_pattern".to_string(), position: pos }],
-                position: pos,
-            },
-            position: pos,
+        {
+            let prefix = self.arena.alloc_str("r");
+            let pattern_text = self.arena.alloc_str("regex_pattern");
+            let pattern = self.arena.alloc_value(ValueNode::String { value: pattern_text, position: pos });
+            let arguments = self.arena.alloc_value_list(&[pattern]);
+            self.lit(ValueNode::PrefixedConstructor { prefix, arguments, position: pos }, pos)
         }
     }
 
@@ -2317,11 +2274,11 @@ fn parse_blob_constructor(&mut self) -> Expression {
 
     // ── Inside impl QuickFuncsSectionParser ─────────────────────────────────────
 
-    fn parse_interpolated_string_content(
-        &self,
+        fn parse_interpolated_string_content(
+        &mut self,
         raw: &str,
         position: Position,
-    ) -> (String, Vec<Expression>) {
+    ) -> (String, Vec<ExprId>) {
         let mut expressions = Vec::new();
         let mut template    = String::new();
         let mut idx         = 0usize;
@@ -2341,6 +2298,7 @@ fn parse_blob_constructor(&mut self) -> Expression {
                 self.operational_settings,
                 self.error_manager.clone(),
                 position,
+                &mut self.arena,
             );
             expressions.push(expr);
 
@@ -2353,27 +2311,18 @@ fn parse_blob_constructor(&mut self) -> Expression {
         (template, expressions)
     }
 
-    fn parse_interpolated_expression(&self, text: &str, position: Position) -> Expression {
+    fn parse_interpolated_expression(&mut self, text: &str, position: Position) -> ExprId {
         let trimmed = text.trim();
 
         if let Ok(v) = trimmed.parse::<i32>() {
-            return Expression::Value {
-                value: Value::Integer { value: v, position },
-                position,
-            };
+            return self.lit(ValueNode::Integer { value: v, position }, position);
         }
         if let Ok(v) = trimmed.parse::<i64>() {
-            return Expression::Value {
-                value: Value::Long { value: v, position },
-                position,
-            };
+            return self.lit(ValueNode::Long { value: v, position }, position);
         }
         if trimmed.ends_with('f') || trimmed.ends_with('F') {
             if let Ok(v) = trimmed[..trimmed.len() - 1].parse::<f32>() {
-                return Expression::Value {
-                    value: Value::Float { value: v, position },
-                    position,
-                };
+                return self.lit(ValueNode::Float { value: v, position }, position);
             }
         }
 
@@ -2382,64 +2331,60 @@ fn parse_blob_constructor(&mut self) -> Expression {
             let is_numeric = trimmed.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'));
             if is_numeric {
                 if let Ok(v) = trimmed.parse::<f64>() {
-                    return Expression::Value {
-                        value: Value::Double { value: v, position },
-                        position,
-                    };
+                    return self.lit(ValueNode::Double { value: v, position }, position);
                 }
             }
         }
 
         if trimmed.eq_ignore_ascii_case("true") {
-            return Expression::Value { value: Value::Boolean { value: true, position }, position };
+            return self.lit(ValueNode::Boolean { value: true, position }, position);
         }
         if trimmed.eq_ignore_ascii_case("false") {
-            return Expression::Value { value: Value::Boolean { value: false, position }, position };
+            return self.lit(ValueNode::Boolean { value: false, position }, position);
         }
 
         if (trimmed.starts_with('"') && trimmed.ends_with('"'))
             || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
         {
-            return Expression::Value {
-                value: Value::String { value: trimmed[1..trimmed.len() - 1].to_string(), position },
-                position,
-            };
+            return { let value = self.arena.alloc_str(&trimmed[1..trimmed.len() - 1].to_string()); self.lit(ValueNode::String { value, position: position }, position) };
         }
 
         if let Some(cap) = INTERP_METHOD_CALL_RE.captures(trimmed) {
-            return Expression::QualifiedIdentifier {
-                parts: vec![cap[1].to_string(), cap[2].to_string()],
-                arguments: Some(Vec::new()),
-                position,
-            };
+            let parts = self.arena.alloc_str_list(&[&cap[1], &cap[2]]);
+            let arguments = Some(self.arena.alloc_expr_list(&[]));
+            return self.arena.alloc_expr(ExprNode::QualifiedIdentifier { parts, arguments, position });
         }
 
         if let Some(cap) = INTERP_PROPERTY_RE.captures(trimmed) {
-            return Expression::QualifiedIdentifier {
-                parts: vec![cap[1].to_string(), cap[2].to_string()],
-                arguments: None,
-                position,
-            };
+            let parts = self.arena.alloc_str_list(&[&cap[1], &cap[2]]);
+            return self.arena.alloc_expr(ExprNode::QualifiedIdentifier { parts, arguments: None, position });
         }
 
-        Expression::Identifier { name: trimmed.to_string(), position }
+        { let name = self.arena.alloc_str(&trimmed.to_string()); self.arena.alloc_expr(ExprNode::Identifier { name, position: position }) }
     }
 
     // =============================================================================
     // Function arguments
     // =============================================================================
 
-    fn parse_function_arguments(&mut self) -> Vec<Expression> {
-        let mut args = Vec::with_capacity(bounded_estimate(2, self.tokens.len(), 50));
+    fn parse_function_arguments(&mut self) -> ExprList {
+        let base = self.scratch_exprs.len();
+        let result = self.parse_function_arguments_inner(base);
+        self.scratch_exprs.truncate(base);
+        result
+    }
+
+    fn parse_function_arguments_inner(&mut self, base: usize) -> ExprList {
+        
 
         if !self.expect_symbol('(') {
-            return args;
+            return self.arena.alloc_expr_list(&self.scratch_exprs[base..]);
         }
         self.skip_whitespace();
 
         if self.check_symbol(')') {
             self.advance();
-            return args;
+            return self.arena.alloc_expr_list(&self.scratch_exprs[base..]);
         }
 
         self.current_container_nesting_depth += 1;
@@ -2455,12 +2400,13 @@ fn parse_blob_constructor(&mut self) -> Expression {
                 self.get_source_line(&cur),
             );
             self.current_container_nesting_depth -= 1;
-            return args;
+            return self.arena.alloc_expr_list(&self.scratch_exprs[base..]);
         }
 
         loop {
             self.skip_whitespace();
-            args.push(self.parse_expression(0));
+            let arg = self.parse_expression(0);
+            self.scratch_exprs.push(arg);
             self.skip_whitespace();
 
             if self.check_symbol(',') {
@@ -2492,34 +2438,34 @@ fn parse_blob_constructor(&mut self) -> Expression {
         }
 
         self.current_container_nesting_depth -= 1;
-        args
+        self.arena.alloc_expr_list(&self.scratch_exprs[base..])
     }
 
     // In quickfuncs_section_parser.rs
-    // impl QuickFuncsSectionParser — near the bottom of the file
+    // impl QuickFuncsSectionParser, near the bottom of the file
 
-    fn convert_expression_to_value(&self, expr: Expression) -> Value {
-        let pos = expr.position();
-        match expr {
-            Expression::Value { value, .. } => value,
-            Expression::Identifier { name, .. } => Value::Identifier { value: name, position: pos },
-            // Non-call qualified identifiers only (bare property access or enum ref like Role.USER)
-            // are stored as a dotted identifier string for downstream enum resolution.
-            // Method/function calls (arguments: Some(_)) must NOT go through this path or
-            // resolve_identifier_value will misidentify "obj.count" as EnumValue { "obj", "count" }.
-            Expression::QualifiedIdentifier { parts, arguments: None, .. } => {
-                Value::Identifier { value: parts.join("."), position: pos }
+    fn convert_expression_to_value(&mut self, expr: ExprId) -> ValueId {
+        let node = *self.arena.expr(expr);
+        let pos = node.position();
+        match node {
+            ExprNode::Value { value, .. } => value,
+            ExprNode::Identifier { name, .. } => {
+                self.arena.alloc_value(ValueNode::Identifier { value: name, position: pos })
             }
-            // All other expressions — including qualified calls like obj.count(), obj.keys(),
-            // arithmetic, comparisons, etc. — are preserved as a full expression so the AST
-            // enhancer can resolve them (to InstanceMethodCall) and the interpreter executes them.
-            other => Value::Expression { expr: Box::new(other), position: pos },
+            ExprNode::QualifiedIdentifier { parts, arguments: None, .. } => {
+                let joined = self
+                    .arena
+                    .str_list(parts)
+                    .iter()
+                    .map(|part| self.arena.text(*part))
+                    .collect::<Vec<_>>()
+                    .join(".");
+                let value = self.arena.alloc_str(&joined);
+                self.arena.alloc_value(ValueNode::Identifier { value, position: pos })
+            }
+            _ => self.arena.alloc_value(ValueNode::Expression { expr, position: pos }),
         }
     }
-
-    // =============================================================================
-    // Lambda expressions
-    // =============================================================================
 
     fn is_lambda_expression(&self) -> bool {
         if !self.check_symbol('(') {
@@ -2557,7 +2503,7 @@ fn parse_blob_constructor(&mut self) -> Expression {
         false
     }
 
- fn parse_lambda_expression(&mut self) -> Expression {
+ fn parse_lambda_expression(&mut self) -> ExprId {
         let lambda_pos = Position::from_token(self.current());
         let parameters = self.parse_lambda_parameters();
         self.skip_whitespace();
@@ -2577,10 +2523,7 @@ fn parse_blob_constructor(&mut self) -> Expression {
                     None,
                     self.get_source_line(&cur),
                 );
-                return Expression::Value {
-                    value: Value::Null { position: lambda_pos },
-                    position: lambda_pos,
-                };
+                return self.lit(ValueNode::Null { position: lambda_pos }, lambda_pos);
             }
         } else {
             let cur = self.current().clone();
@@ -2592,10 +2535,7 @@ fn parse_blob_constructor(&mut self) -> Expression {
                 None,
                 self.get_source_line(&cur),
             );
-            return Expression::Value {
-                value: Value::Null { position: lambda_pos },
-                position: lambda_pos,
-            };
+            return self.lit(ValueNode::Null { position: lambda_pos }, lambda_pos);
         }
 
         self.skip_whitespace();
@@ -2604,19 +2544,17 @@ fn parse_blob_constructor(&mut self) -> Expression {
         let (block_statements, body) = if self.check_symbol('{') {
             self.parse_lambda_block_body()
         } else {
-            (Vec::new(), self.parse_expression(0))
+            (self.arena.alloc_stmt_list(&[]), self.parse_expression(0))
         };
 
         let param_count = parameters.len();
 
-        let result = Expression::Value {
-            value: Value::Lambda {
-                parameters,
-                body: Box::new(body),
-                statements: block_statements,
-                position: lambda_pos,
-            },
-            position: lambda_pos,
+        let result = {
+            let parameters = self.arena.alloc_str_list(&parameters);
+            self.lit(
+                ValueNode::Lambda { parameters, body, statements: block_statements, position: lambda_pos },
+                lambda_pos,
+            )
         };
 
         if self.debug_config.is_verbose {
@@ -2700,17 +2638,22 @@ fn parse_blob_constructor(&mut self) -> Expression {
   /// Parse a block-body lambda `{ stmt* }` and return
     /// `(statements, null_body_expr)`.  The caller packages
     /// these into `Value::Lambda { statements, body: Null }`.
-    fn parse_lambda_block_body(&mut self) -> (Vec<QuickFuncStatement>, Expression) {
+    fn parse_lambda_block_body(&mut self) -> (StmtList, ExprId) {
+        let base = self.scratch_stmts.len();
+        let result = self.parse_lambda_block_body_inner(base);
+        self.scratch_stmts.truncate(base);
+        result
+    }
+
+    fn parse_lambda_block_body_inner(&mut self, base: usize) -> (StmtList, ExprId) {
         let pos = Position::from_token(self.current());
 
         if !self.expect_symbol('{') {
-            return (
-                vec![],
-                Expression::Value { value: Value::Null { position: pos }, position: pos },
-            );
+            let null_body = self.null_expr(pos);
+            return (self.arena.alloc_stmt_list(&[]), null_body);
         }
 
-        let mut statements: Vec<QuickFuncStatement> = Vec::new();
+        
 
         while !self.is_at_end() && !self.check_symbol('}') {
             self.skip_whitespace();
@@ -2719,13 +2662,12 @@ fn parse_blob_constructor(&mut self) -> Expression {
             }
 
             if let Some(stmt) = self.parse_statement() {
-                statements.push(stmt);
+                self.scratch_stmts.push(stmt);
             } else if self.operational_settings.error_handling_strategy
                 == ErrorHandlingStrategy::Halt
             {
                 break;
             }
-
             self.skip_whitespace();
         }
 
@@ -2746,10 +2688,8 @@ fn parse_blob_constructor(&mut self) -> Expression {
 
         // body is always Null for block lambdas; the interpreter drives
         // execution through `statements`.
-        let null_body =
-            Expression::Value { value: Value::Null { position: pos }, position: pos };
-
-        (statements, null_body)
+        let null_body = self.null_expr(pos);
+        (self.arena.alloc_stmt_list(&self.scratch_stmts[base..]), null_body)
     }
 
     // =============================================================================
@@ -2834,7 +2774,7 @@ fn parse_blob_constructor(&mut self) -> Expression {
         other => other,
     };
 
-    // Consume the outer '>' — handles ">>" split when inner type closed it halfway
+    // Consume the outer '>', handles ">>" split when inner type closed it halfway
     if !self.match_and_consume_closing_angle() {
         let cur = self.current().clone();
         self.error_manager.add_parse_error(
@@ -2977,7 +2917,7 @@ fn parse_typed_collection_qf(&mut self, base_kw: &str) -> Option<DataType> {
 // ElemType is flat and cannot represent typed sub-collections
 // (e.g. the `<int>` in `<array<int>>` when nested inside a tuple), but we
 // must consume those tokens to keep the parser in sync.
-// Returning the base ElemType (Array, Tuple, etc.) is semantically correct —
+// Returning the base ElemType (Array, Tuple, etc.) is semantically correct ,
 // the inner element type of the sub-collection is simply not tracked.
 
 fn parse_elem_type_keyword_qf(&mut self) -> Option<ElemType> {
@@ -3034,7 +2974,7 @@ fn parse_elem_type_keyword_qf(&mut self) -> Option<ElemType> {
                 None,
                 self.get_source_line(&token),
             );
-            // Do NOT advance — let the caller see the unexpected token and recover.
+            // Do NOT advance, let the caller see the unexpected token and recover.
             None
         }
     }
@@ -3046,10 +2986,10 @@ fn parse_elem_type_keyword_qf(&mut self) -> Option<ElemType> {
 // `<` has NOT yet been consumed when this is called).
 //
 // Angle-bracket token mapping (from the tokenizer):
-//   `>`     → Symbol('>')           — one closing angle
-//   `>>`    → BitwiseOp(">>")       — two closing angles
-//   `>>>`   → BitwiseOp(">>") + Symbol('>') — processed as two separate tokens
-//   `>>>>`  → BitwiseOp(">>") + BitwiseOp(">>") — likewise
+//   `>`     → Symbol('>')          , one closing angle
+//   `>>`    → BitwiseOp(">>")      , two closing angles
+//   `>>>`   → BitwiseOp(">>") + Symbol('>'), processed as two separate tokens
+//   `>>>>`  → BitwiseOp(">>") + BitwiseOp(">>"), likewise
 //
 // Because the tokenizer splits `>>>` into `BitwiseOp(">>")` then `Symbol('>')`,
 // we never need a special "three-close" case; the two tokens are processed
@@ -3059,7 +2999,7 @@ fn parse_elem_type_keyword_qf(&mut self) -> Option<ElemType> {
 // "extra" `>` that belongs to the outer annotation, we advance past the `>>`
 // token and set `pending_angle = true`.  The outer parser's next call to
 // `match_and_consume_closing_angle` will then return `true` immediately
-// without a further token read — exactly as it does for the normal `>>` split
+// without a further token read, exactly as it does for the normal `>>` split
 // in `parse_type_annotation` and `parse_typed_collection_qf`.
 fn skip_nested_angle_content(&mut self) {
     let mut depth = 0i32;
@@ -3084,10 +3024,10 @@ fn skip_nested_angle_content(&mut self) {
                 }
             }
 
-            // ">=" — one closing angle plus '=' fused by the tokenizer (no space).
+            // ">=", one closing angle plus '=' fused by the tokenizer (no space).
             TokenType::ComparisonOp(op) if op == ">=" => {
                 if depth == 0 {
-                    // The '>' belongs outside our scope — do not consume.
+                    // The '>' belongs outside our scope, do not consume.
                     break;
                 }
                 depth -= 1;
@@ -3100,11 +3040,11 @@ fn skip_nested_angle_content(&mut self) {
                 // pending_equal is set; loop continues for the remaining depth.
             }
 
-            // ">>" — two closing angles fused by the tokenizer.
+            // ">>", two closing angles fused by the tokenizer.
             TokenType::BitwiseOp(op) if op == ">>" => {
                 match depth {
                     0 => {
-                        // Both angles are outside our scope — do not consume.
+                        // Both angles are outside our scope, do not consume.
                         break;
                     }
                     1 => {
@@ -3124,11 +3064,11 @@ fn skip_nested_angle_content(&mut self) {
                 }
             }
 
-            // ">>=" — two closing angles plus assignment fused by the tokenizer.
+            // ">>=", two closing angles plus assignment fused by the tokenizer.
             TokenType::BitwiseOp(op) if op == ">>=" => {
                 match depth {
                     0 => {
-                        // All three chars are outside our scope — do not consume.
+                        // All three chars are outside our scope, do not consume.
                         break;
                     }
                     1 => {
@@ -3233,14 +3173,17 @@ fn match_and_consume_closing_angle(&mut self) -> bool {
     // =============================================================================
 
     #[inline]
-    fn current(&self) -> &Token {
+        fn current(&self) -> &'a Token {
         static EOF_TOKEN: Token = Token {
             token_type: TokenType::EndOfFile,
             line: 1,
             column: 1,
             section: SectionId::None,
         };
-        self.tokens.get(self.position).unwrap_or(&EOF_TOKEN)
+        // A copy of the shared slice reference, so the token does not borrow `self` and the
+        // arena can be written while the token is still read.
+        let tokens: &'a [Token] = self.tokens;
+        tokens.get(self.position).unwrap_or(&EOF_TOKEN)
     }
 
     #[inline]
@@ -3281,7 +3224,7 @@ fn match_and_consume_closing_angle(&mut self) -> bool {
     fn skip_whitespace(&mut self) {
         while !self.is_at_end() {
             match &self.current().token_type {
-                // Never skip string tokens — they are content
+                // Never skip string tokens, they are content
                 TokenType::String(_)
                 | TokenType::StringSingle(_)
                 | TokenType::InterpolatedString(_) => break,
@@ -3324,12 +3267,14 @@ fn parse_interpolated_sub_expr(
     operational_settings: &OperationalSettings,
     error_manager:        ErrorManager,
     position:             Position,
-) -> Expression {
+    arena:                &mut Arena,
+) -> ExprId {
     use crate::Compiler::Core::Tokenizer::Tokenizer;
 
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        return Expression::Value { value: Value::Null { position }, position };
+        let value = arena.alloc_value(ValueNode::Null { position });
+        return arena.alloc_expr(ExprNode::Value { value, position });
     }
 
     // Re-tokenise the placeholder content with the same compiler settings so
@@ -3340,22 +3285,23 @@ fn parse_interpolated_sub_expr(
         error_manager.clone(),
     ).tokenize().tokens;
 
-    // Only EOF produced → treat as a bare identifier
+    // Only EOF produced: treat it as a bare identifier.
     if tokens.len() <= 1 {
-        return Expression::Identifier { name: trimmed.to_string(), position };
+        let name = arena.alloc_str(trimmed);
+        return arena.alloc_expr(ExprNode::Identifier { name, position });
     }
 
-    // `tokens` is a locally owned Vec<Token>.  The sub-parser borrows it, but
-    // `parse_expression(0)` returns an owned Expression, so both the sub-parser
-    // and the Vec are dropped at the end of this function.  Lifetime 'a of the
-    // sub-parser is inferred as the local scope — Rust coerces
-    // `&'outer OperationalSettings` to `&'local OperationalSettings` (since
-    // outer: local).
+    // `tokens` is a locally owned Vec<Token>. The sub-parser borrows it, but
+    // `parse_expression(0)` returns an id into the arena, so both the sub-parser
+    // and the Vec are dropped at the end of this function. The sub-parser is handed the caller's
+    // arena for the call and gives it back, so the id it returns names a node in that arena.
     let mut sub_parser = QuickFuncsSectionParser::new_with_error_manager(
         &tokens,
         operational_settings,
         error_manager,
     );
-
-    sub_parser.parse_expression(0)
-    }
+    std::mem::swap(&mut sub_parser.arena, arena);
+    let result = sub_parser.parse_expression(0);
+    std::mem::swap(&mut sub_parser.arena, arena);
+    result
+}

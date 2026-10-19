@@ -331,7 +331,7 @@ is declared here and is the one submodule that is not re-exported flat, so it is
 - The arena is not re-exported flat, so its names (`Arena`, `Document`, `ValueNode`) cannot
   collide with the owned AST names.
 - The module documentation now says that `arena` exists and which parsers use it so far (the
-  `@SECURITY`, `@RAW`, `@SCHEMA` and `@DATA` section parsers).
+  the five section parsers).
 
 ### `Compiler/Core/SectionParsers/security_section_parser.rs`
 
@@ -454,6 +454,32 @@ source position.
 
 **Tests:** `cargo test -p dixscript --test data_parser_tests`. 35 tests, all passing on Rust 1.75.
 Nine deliberate bugs were injected to check them (see the Fixes entry below).
+
+### `tests/quickfuncs_parser_tests.rs`
+
+**What it does:** Pins the behaviour of the `@QUICKFUNCS` parser itself. The loader tests reach it
+only through `DixLoader`, which cannot show what each error strategy does with malformed input or
+which diagnostics are reported. The helper is the same as in `data_parser_tests.rs`. Each of the 41
+tests prints the parsed section with the owned `Display` and compares it, and the sorted
+diagnostic messages, with the recorded text, under one to three strategies (70 runs). One case
+also pins the section's `Debug` text, which holds every source position.
+
+**Decisions:**
+- The cases cover the function signatures (return types, scopes, parameter defaults), every
+  statement kind, the `if`/`elif`/`else` chain and nested blocks, `chk` switches with `miss` and
+  nested switches, operator precedence, unary operators and ternaries, postfix chains, calls,
+  every literal, containers and constructors, interpolated strings, lambdas, the nesting depth
+  limits, and malformed input in each construct under all three strategies.
+- **The `does_not_leak` and `keep_their_own` tests are the point of the file.** They put a list
+  that fails (or succeeds) inside another list: an array in an array, an object in an object, a
+  tuple in an array, a call in a call, a call in an array in a call, a statement block in a
+  statement block, and a lambda block in a block. They check that the enclosing list holds only its
+  own children.
+- The expectations were recorded from the converted parser and checked against the output of the
+  original parser, which is byte for byte the same on all 70 runs.
+
+**Tests:** `cargo test -p dixscript --test quickfuncs_parser_tests`. 41 tests, all passing on Rust
+1.75. Ten deliberate bugs were injected to check them (see the Fixes entry below).
 
 ## Fixes and Problems
 
@@ -592,14 +618,14 @@ budget test below.
 ### `Compiler/Core/SectionParsers/` (data, dlm, enums, quickfuncs)
 
 **What it does:** One parser per section: `data_section_parser.rs` for `@DATA` (it has its own
-section below), `quickfuncs_section_parser.rs` for `@QUICKFUNCS`, `dlm_section_parser.rs` for
-`@DLM` and `enums_section_parser.rs` for `@ENUMS`.
+section below), `quickfuncs_section_parser.rs` for `@QUICKFUNCS` (it has its own section below),
+`dlm_section_parser.rs` for `@DLM` and `enums_section_parser.rs` for `@ENUMS`.
 
 **Decisions:**
 - Every token-length-derived reservation goes through the shared helper above.
   `parse_section` uses `section_estimate`, nested constructs use the capped estimates.
-    This was the only change in the `@QUICKFUNCS`, `@DLM` and `@ENUMS` files, so their parsing
-  logic is untouched.
+    This was the only change in the `@DLM` and `@ENUMS` files, so their parsing logic is
+  untouched.
 
 ### `Compiler/Core/SectionParsers/data_section_parser.rs`
 
@@ -640,6 +666,54 @@ regex constructors, identifiers, enum values and function calls (local and impor
 **Tests:** `tests/data_parser_tests.rs` pins the parser itself. Every file in `mdix_files/` that
 compiles also goes through this parser in `tests/arena_roundtrip.rs`, `tests/arena_document.rs`
 and `tests/arena_document_display.rs`.
+
+### `Compiler/Core/SectionParsers/quickfuncs_section_parser.rs`
+
+**What it does:** Parses one `@QUICKFUNCS(...)` into a `QuickFuncsSection`: functions of the form
+`~name<type> => scope (parameters) { body }`. A body holds statements (`let` and `const`,
+assignments, `log:`, `if:`/`elif:`/`else`, `chk:` switches with a `miss` case, `return` and
+expression statements). They are built from an operator-precedence expression parser with unary
+operators, ternaries, postfix chains (members, indexes, calls), literals, arrays, objects, tuple,
+blob and regex constructors, interpolated strings and lambdas.
+
+**Decisions:**
+- This is the fifth and last section parser built on the arena AST. The parser owns an `Arena`,
+  builds every value, expression and statement there as a node, keeps the functions as
+  `DocQuickFunction` records that hold the ids, and exports the finished section once, at the end
+  of `parse_section`, through `DocQuickFuncs::export`. The public interface and the result are
+  unchanged.
+- **Lists use scratch stacks, as in the `@DATA` parser.** Statement blocks and lambda block bodies
+  use `scratch_stmts`, function arguments use `scratch_exprs`, array literals and tuple
+  constructors use `scratch_values`, and object literals use `scratch_props`. Each list parser is
+  a thin wrapper that records the stack height, calls the real parser (`..._inner(base)`) and
+  truncates back to the height whatever the result is. Without the truncation a failed list leaks
+  entries into the list that encloses it, and the exported tree grows exponentially (the tests
+  show a 66-deep array or call exhausting memory).
+- `current()` returns `&'a Token`, a reference into the token slice and not into the parser, so a
+  token can be held while the arena is written.
+- **The `elif` chain is built once.** The owned parser built an `If` statement for every `elif`
+  and then took them apart in reverse to nest them. The arena version collects the condition, body
+  and position of each `elif` and builds the nested `If` nodes in reverse, which gives the same
+  tree without the intermediate statements.
+- **Code that inspects what it built reads a copy of the node.** Postfix handling and value
+  conversion copy the node out of the arena (`*self.arena.expr(id)`, because nodes are `Copy`)
+  before they write, so no borrow of the arena is held across a write. `convert_expression_to_value`
+  reuses the identifier's text span and does not copy the text.
+- **Interpolated strings share the arena.** A placeholder is parsed by a sub-parser over its own
+  tokens. The sub-parser is handed this parser's arena for the call (`std::mem::swap`) and gives it
+  back, so the id it returns names a node in the same arena. No second arena has to be imported
+  afterwards.
+- A call on an index access (`a[0](1)`) still wraps the index access as the instance of a
+  `__call__` method call, as before.
+- A switch's `miss` case is stored with `alloc_case` and its ordinary cases as one run with
+  `alloc_case_list`. The arena gained `alloc_stmt_list`, `alloc_str_list`, `alloc_case` and
+  `alloc_case_list` for this parser.
+- The public items now carry doc comments, the module documentation describes the arena and the
+  scratch stacks, and the em dashes were removed from the comments.
+
+**Tests:** `tests/quickfuncs_parser_tests.rs` pins the parser itself. Every file in `mdix_files/`
+that compiles also goes through this parser in `tests/arena_roundtrip.rs`,
+`tests/arena_document.rs` and `tests/arena_document_display.rs`.
 
 ### `tests/parser_alloc_budget.rs`
 
@@ -802,3 +876,41 @@ requires the larger to take less than 7 times as long.
 - **Where the arena stops paying:** the same as in the earlier parsers. The section is built in its
   own arena and copied out at the end, which adds a copy until consumers read a `Document`. The
   scratch stacks do remove a temporary `Vec` per list, but this was not measured.
+
+### Fixes and Problems: arena AST @QUICKFUNCS parser
+
+- **`Compiler/Core/SectionParsers/quickfuncs_section_parser.rs`:** the conversion was checked with
+  a throwaway before and after harness: the loader's tokenize, config and parse stages run over
+  the 84 corpus files and 204 sources (18 harvested from the existing tests and 186 written for
+  each statement, expression and error path), each under all three error strategies (864 runs).
+  The crafted sources dump the parsed section and the diagnostics in full. The corpus files dump
+  the function count and a hash of the section's `Debug` and `Display` text. The diagnostic lines
+  are sorted before they are compared, because sections parse in parallel. The original parser's
+  output was identical across two runs, and the converted parser's output was byte-identical to it.
+- **The crafted sources were checked before the conversion.** After the `@DATA` parser's sources
+  turned out not to reach the code they were written for, the baseline was searched for each
+  construct (`if`, `chk`, lambdas, interpolated strings, ternaries, postfix chains, constructors)
+  before any code was changed, and every one was present.
+- **`tests/quickfuncs_parser_tests.rs`:** 41 tests, designed with the `@DATA` lessons in hand:
+  nested lists of every kind that share a scratch stack, in both the failing and the passing form.
+  Ten injected bugs (the truncation removed from each of the six list wrappers, the `elif` chain
+  nested in the wrong order, the `__call__` method name changed, the dotted join in value
+  conversion changed, and the interpolation sub-parser not handing the arena back) were all caught:
+  23 tests failed and two were killed by the memory blow-up. The bugs were injected together, so
+  where several of them break the same test, which of them it catches was not separated.
+- **Behaviour recorded, not changed:** after a malformed list the parser's recovery turns the
+  tokens that follow the error into expression statements. For example `return [1, [2 3], 4]`
+  under `continue` gives `return [1, [2]]` followed by the statements `3`, `null`, `null`, `4` and
+  `null`. A call, an array or a parenthesis nested 66 deep stops being parsed part way, so the
+  recorded section is cut off at the depth limit and the diagnostics are a run of `Expected ')'`
+  or `Expected ']'` errors, not a message about nesting.
+- **`NOTICE` header:** the file's header named the section "Compiler/Core/SectionParsers/
+  quickfuncs_section_parser.rs", but `compiler.md` only had a combined entry for the four parsers,
+  so the heading did not exist. The section above is that heading.
+- **Dead code left as it was:** `parse_interpolated_expression`, the `MAX_STUCK_COUNT` constant and
+  the `last_position` and `stuck_count` fields are never used, and the compiler already warned
+  about them. The method was converted so the conversion is complete, and none of the four was
+  removed.
+- **Where the arena stops paying:** the same as in the earlier parsers. The section is built in
+  its own arena and copied out at the end, which adds a copy until consumers read a `Document`.
+  This completes the section parsers; every consumer still reads the owned types.

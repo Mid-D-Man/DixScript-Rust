@@ -27,11 +27,11 @@ Breaking release.
   arenas. `arena::Document` is the arena-resident form of a whole `DixScript`
   (`Document::from_owned`, `Document::export`, structural `==`), with `Doc*` twins of the five
   sections that hold values, each with its own `from_owned` and `export`. `Arena::alloc_value_list`,
-  `alloc_expr_list` and `alloc_prop_list` store a run of ids for a parser that builds a list node by
-  node. `Document` implements
+  `alloc_expr_list`, `alloc_prop_list`, `alloc_stmt_list`, `alloc_str_list` and `alloc_case_list`
+  store a run of ids (or names, or cases) for a parser that builds a list node by node, and
+  `alloc_case` stores a switch's default case. `Document` implements
   `Display`, and `Arena::display` pairs a `Doc*` section with its arena as an `ArenaDisplay` that
-  prints; both print exactly what the owned types print. The `@SECURITY`, `@RAW`,
-  `@SCHEMA` and `@DATA` section parsers build their values in an arena and export the finished section,
+  prints; both print exactly what the owned types print. All five section parsers (`@SECURITY`, `@RAW`, `@SCHEMA`, `@DATA` and `@QUICKFUNCS`) build their values in an arena and export the finished section,
   with their public interfaces unchanged; the rest of the compiler still uses the owned types. It
   is the first piece of the arena AST described in `docs/dixscript/arena-ast.md`.
 

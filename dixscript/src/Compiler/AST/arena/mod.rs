@@ -378,6 +378,137 @@ impl Arena {
         PropList::new(start, props.len())
     }
 
+    /// Copies `ids` into the statement-list store and returns the run that names them.
+    ///
+    /// A block of statements is only known to be complete at its closing brace, so a parser
+    /// collects the ids of the finished statements and stores the run once. Read the run back
+    /// with [`stmt_list`](Self::stmt_list).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store would grow past what a `u32` offset can address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::{Arena, ExprNode, StmtNode, ValueNode};
+    /// use dixscript::Compiler::AST::Position;
+    ///
+    /// let mut arena = Arena::new();
+    /// let at = Position::new(1, 1);
+    /// let value = arena.alloc_value(ValueNode::Null { position: at });
+    /// let expr = arena.alloc_expr(ExprNode::Value { value, position: at });
+    /// let a = arena.alloc_stmt(StmtNode::Return { value: expr, position: at });
+    /// let b = arena.alloc_stmt(StmtNode::Log { value: expr, position: at });
+    /// let list = arena.alloc_stmt_list(&[a, b]);
+    ///
+    /// assert_eq!(list.len(), 2);
+    /// assert_eq!(arena.stmt_list(list), &[a, b]);
+    /// ```
+    #[inline]
+    pub fn alloc_stmt_list(&mut self, ids: &[StmtId]) -> StmtList {
+        let start = self.stmt_lists.len();
+        self.stmt_lists.extend_from_slice(ids);
+        StmtList::new(start, ids.len())
+    }
+
+    /// Copies each string of `items` into the text buffer and returns the run of spans that names
+    /// them.
+    ///
+    /// Used for lists of names, such as the parameters of a lambda. Read the run back with
+    /// [`str_list`](Self::str_list) and [`text`](Self::text).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the text buffer or the list store would grow past what a `u32` offset can
+    /// address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let list = arena.alloc_str_list(&["a", "b"]);
+    ///
+    /// let names: Vec<&str> = arena.str_list(list).iter().map(|s| arena.text(*s)).collect();
+    /// assert_eq!(names, ["a", "b"]);
+    /// ```
+    pub fn alloc_str_list<S: AsRef<str>>(&mut self, items: &[S]) -> StrList {
+        let start = self.str_lists.len();
+        for item in items {
+            let span = self.alloc_str(item.as_ref());
+            self.str_lists.push(span);
+        }
+        StrList::new(start, items.len())
+    }
+
+    /// Stores one switch case on its own and returns its id.
+    ///
+    /// This is how the default (`miss`) case of a switch is stored: it is named by a [`CaseId`]
+    /// in the statement, not by the run of ordinary cases made with
+    /// [`alloc_case_list`](Self::alloc_case_list). Read it back with [`case`](Self::case).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store would grow past what a `u32` id can address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::{Arena, SwitchCaseNode, ValueNode};
+    /// use dixscript::Compiler::AST::Position;
+    ///
+    /// let mut arena = Arena::new();
+    /// let at = Position::new(1, 1);
+    /// let case_value = arena.alloc_value(ValueNode::Null { position: at });
+    /// let statements = arena.alloc_stmt_list(&[]);
+    /// let id = arena.alloc_case(SwitchCaseNode { case_value, statements, position: at });
+    ///
+    /// assert!(arena.case(id).statements.is_empty());
+    /// ```
+    #[inline]
+    pub fn alloc_case(&mut self, node: SwitchCaseNode) -> CaseId {
+        let id = CaseId(to_u32(self.cases.len()));
+        self.cases.push(node);
+        id
+    }
+
+    /// Copies `cases` into the case store and returns the run that names them.
+    ///
+    /// The ordinary cases of a switch are stored as one run, in source order. Read the run back
+    /// with [`case_list`](Self::case_list).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store would grow past what a `u32` offset can address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::{Arena, SwitchCaseNode, ValueNode};
+    /// use dixscript::Compiler::AST::Position;
+    ///
+    /// let mut arena = Arena::new();
+    /// let at = Position::new(1, 1);
+    /// let statements = arena.alloc_stmt_list(&[]);
+    /// let mut cases = Vec::new();
+    /// for n in 1..=2 {
+    ///     let case_value = arena.alloc_value(ValueNode::Integer { value: n, position: at });
+    ///     cases.push(SwitchCaseNode { case_value, statements, position: at });
+    /// }
+    /// let list = arena.alloc_case_list(&cases);
+    ///
+    /// assert_eq!(list.len(), 2);
+    /// assert_eq!(arena.case_list(list).len(), 2);
+    /// ```
+    #[inline]
+    pub fn alloc_case_list(&mut self, cases: &[SwitchCaseNode]) -> CaseList {
+        let start = self.cases.len();
+        self.cases.extend_from_slice(cases);
+        CaseList::new(start, cases.len())
+    }
+
     // -- access -------------------------------------------------------------
 
     /// Returns the value node `id` names.

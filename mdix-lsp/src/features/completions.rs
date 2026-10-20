@@ -108,17 +108,33 @@ fn provide_inner(
                 .and_then(|t| t.chars().next())
                 .unwrap_or_else(|| char_before_cursor(&d.source, pos));
 
+            // Where the cursor really is, read from the token stream (which exists even
+            // when the document does not parse). The trigger character alone used to decide
+            // everything, so a popup could offer top-level sections inside @DATA, types on an
+            // empty line, or QuickFunc declarations outside @QUICKFUNCS.
+            let at_top_level = paren_depth_before(&d.tokens, pos) == 0;
+
             match trigger_ch {
-                '@' => section_snippet_completions(),
-                '<' => type_annotation_completions(),
-                '~' => quickfunc_declaration_snippets(),
+                // A new section can only start outside every section body.
+                '@' if at_top_level => section_snippet_completions(),
+                '@'                 => general_completions(d, pos),
+
+                // A type annotation follows a name (`key<int>`); anywhere else '<' is
+                // just a character, so offer nothing.
+                '<' if type_annotation_allowed(&d.source, pos) => type_annotation_completions(),
+                '<'                                            => Vec::new(),
+
+                // `~name<type>(...)` declarations only exist inside @QUICKFUNCS.
+                '~' if section == SectionId::QuickFuncs => quickfunc_declaration_snippets(),
+                '~'                                     => Vec::new(),
+
                 '.' => dot_completions(d, pos),
                 '{' => bracket_completions('{', pos),
                 '(' => bracket_completions('(', pos),
                 '[' => bracket_completions('[', pos),
                 _ => {
-                    let word = word_before_cursor(&d.source, pos);
-                    if word.starts_with('@') {
+                    if at_top_level {
+                        // Outside every section only a section can be written.
                         section_snippet_completions()
                     } else {
                         general_completions(d, pos)
@@ -144,6 +160,65 @@ fn section_of_token_at(tokens: &[Token], pos: Position) -> SectionId {
         last = token.section;
     }
     last
+}
+
+fn is_section_token(token_type: &TokenType) -> bool {
+    matches!(
+        token_type,
+        TokenType::SectionConfig
+            | TokenType::SectionImports
+            | TokenType::SectionDLM
+            | TokenType::SectionEnums
+            | TokenType::SectionQuickFuncs
+            | TokenType::SectionData
+            | TokenType::SectionSecurity
+            | TokenType::SectionRaw
+            | TokenType::SectionSchema
+    )
+}
+
+/// Parenthesis depth at `pos`, counted over the tokens before it: 0 means "outside every
+/// section body". A section keyword resets the count first, the way the parser ends an
+/// unclosed section at the next one. Unlike `section_of_token_at` this also covers text the
+/// tokenizer could not attribute to a section (for example an unknown `@Foo(`).
+fn paren_depth_before(tokens: &[Token], pos: Position) -> i32 {
+    let target_line = (pos.line as usize) + 1;
+    let target_col  = (pos.character as usize) + 1;
+    let mut depth   = 0i32;
+
+    for token in tokens {
+        if token.line > target_line { break; }
+        if token.line == target_line && token.column >= target_col { break; }
+
+        if is_section_token(&token.token_type) {
+            depth = 0;
+            continue;
+        }
+
+        match &token.token_type {
+            TokenType::Symbol('(') => depth += 1,
+            TokenType::Symbol(')') => depth = (depth - 1).max(0),
+            _ => {}
+        }
+    }
+
+    depth
+}
+
+/// Whether a `<` that was just typed can start a type annotation. One follows a name
+/// (`key<int>`, `~fn<object>`, `param<string>`); after `=`, `,`, `(` or at the start of a
+/// line it is just a character. When the cursor is not right after a `<` there is nothing
+/// to judge and the old behaviour stands.
+fn type_annotation_allowed(source: &str, pos: Position) -> bool {
+    let line  = source.lines().nth(pos.line as usize).unwrap_or("");
+    let chars: Vec<char> = line.chars().collect();
+    let cursor = (pos.character as usize).min(chars.len());
+
+    if cursor == 0 || chars[cursor - 1] != '<' {
+        return true;
+    }
+
+    cursor >= 2 && (chars[cursor - 2].is_alphanumeric() || chars[cursor - 2] == '_')
 }
 
 // ── CONFIG line heuristic ─────────────────────────────────────────────────────
@@ -2332,3 +2407,60 @@ fn word_before_dot(source: &str, pos: Position) -> String {
         .unwrap_or("")
         .to_string()
             }
+
+#[cfg(test)]
+mod context_gating_tests {
+    use super::*;
+
+    fn tok(token_type: TokenType, line: usize, column: usize) -> Token {
+        Token::new(token_type, line, column, SectionId::None)
+    }
+
+    #[test]
+    fn depth_is_one_inside_a_body_and_zero_after_it() {
+        // @DATA(
+        //   x
+        // )
+        let tokens = vec![
+            tok(TokenType::SectionData, 1, 1),
+            tok(TokenType::Symbol('('), 1, 6),
+            tok(TokenType::Identifier("x".to_string()), 2, 3),
+            tok(TokenType::Symbol(')'), 3, 1),
+        ];
+
+        assert_eq!(paren_depth_before(&tokens, Position::new(1, 4)), 1);
+        assert_eq!(paren_depth_before(&tokens, Position::new(3, 1)), 0);
+    }
+
+    #[test]
+    fn an_unrecognised_section_body_still_counts_as_inside() {
+        // @Foo(   (not a section name, so the tokenizer does not attribute it to a section)
+        let tokens = vec![
+            tok(TokenType::Symbol('@'), 1, 1),
+            tok(TokenType::Identifier("Foo".to_string()), 1, 2),
+            tok(TokenType::Symbol('('), 1, 5),
+        ];
+
+        assert_eq!(paren_depth_before(&tokens, Position::new(2, 0)), 1);
+    }
+
+    #[test]
+    fn a_new_section_keyword_ends_an_unclosed_one() {
+        let tokens = vec![
+            tok(TokenType::SectionData, 1, 1),
+            tok(TokenType::Symbol('('), 1, 6),
+            tok(TokenType::SectionEnums, 3, 1),
+        ];
+
+        assert_eq!(paren_depth_before(&tokens, Position::new(2, 7)), 0);
+    }
+
+    #[test]
+    fn a_type_annotation_needs_a_name_before_the_angle_bracket() {
+        assert!(type_annotation_allowed("  key<", Position::new(0, 6)));
+        assert!(!type_annotation_allowed("  <", Position::new(0, 3)));
+        assert!(!type_annotation_allowed("x = <", Position::new(0, 5)));
+        // Cursor not right after a '<': nothing to judge.
+        assert!(type_annotation_allowed("key = 1", Position::new(0, 7)));
+    }
+}

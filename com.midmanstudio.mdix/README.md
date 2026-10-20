@@ -323,10 +323,13 @@ choose **MDIX → Open in MDIX Studio**.
 - **Editor tab** — source text editor with live compile status, syntax highlighting and
   language-server features (diagnostics, completion, hover — see below). **Save** on an
   unsaved scratch document asks where to put it.
-- **Search tab** — find text in every `.mdix` file of the project, packages included. Typing
-  searches after a short pause and Enter searches at once. **Match case**, **Regex** and
-  **Names only** (keys, sections, enums and functions, skipping values and comments) narrow it. Click
-  a result to open the file at the match. The open document is searched as you have it, unsaved
+- **Search tab** — two modes, switched by **File names** (remembered). With it on, the tab lists
+  the `.mdix` files whose name or folder matches what you type, and every file when the box is
+  empty, so it also works as a file browser. With it off, it finds text inside every `.mdix` file of
+  the project, packages included. Typing searches after a short pause and Enter searches at once.
+  **Match case** and **Regex** apply to both; **Names only** (keys, sections, enums and functions,
+  skipping values and comments) applies to searching inside files. Click a result to open the file
+  (at the match, when searching inside). The open document is searched as you have it, unsaved
   edits included.
 - **Templates tab** — create new files from built-in templates.
 
@@ -340,12 +343,14 @@ there is nothing to install.
 | Diagnostics | Problem underlines appear after a short typing pause; click a row in the problems list to jump to that line |
 | Completion | Opens on `@ . < ~ { ( [`; **Ctrl+Space** (or **Cmd/Ctrl+I**) opens it on demand. Up/Down/PageUp/PageDown to choose, **Enter** or **Tab** to accept, **Esc** to dismiss |
 | Snippets | After accepting one, **Tab** / **Shift+Tab** move between its placeholders; **Esc** ends it |
-| Hover | Leave the caret still for a moment and the docs for the symbol under it appear |
-| Highlighting | Toggle under **MidManStudio → MDIX Language Server → Syntax Highlighting** |
+| Hover | Rest the mouse on a symbol and its docs appear below the pointer; move away and they go |
+| Highlighting, Autocomplete, Hover | Separate switches under **MidManStudio → MDIX Language Server**, and in the **⋮** menu on the window tab. Off means off. Compile errors and the problems list always stay on |
 
 The Editor tab shows the server's state (starting, ready, how many problems, or the error). The
 **MidManStudio → MDIX Language Server** menu also has **Restart**, **Verbose Server Log** and
-**Set Server Path...**. The server is looked up in this order: the path set from that menu, the
+**Set Server Path...**, and **Strip Editor Colour Tags** for files that an earlier build saved with
+`<color=#…>` markup in them. **Copy** (next to Save) copies the status line and every problem.
+The server is looked up in this order: the path set from that menu, the
 `MDIX_LSP_PATH` environment variable, the bundled binary, then your `PATH`.
 
 ---

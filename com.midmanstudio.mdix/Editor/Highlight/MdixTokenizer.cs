@@ -76,8 +76,9 @@ namespace MidManStudio.Mdix.Unity.Editor.Highlight
             // 1. comments
             @"(?<cmt>//[^\r\n]*)" +
             @"|(?<blk>/\*[\s\S]*?(?:\*/|\z))" +
-            // 2. section headers
-            @"|(?<sec>@(?:CONFIG|IMPORTS|DLM|ENUMS|QUICKFUNCS|DATA|SECURITY)\b)" +
+            // 2. section headers. Case-insensitive, like the real lexer (@Data == @DATA), and every
+            //    section it knows: RAW and SCHEMA were missing. (?i: ) applies to this group only.
+            @"|(?<sec>@(?i:CONFIG|IMPORTS|DLM|ENUMS|QUICKFUNCS|DATA|SECURITY|RAW|SCHEMA)\b)" +
             // 3. strings (interpolated first, then double, then single quoted)
             @"|(?<istr>\$""(?:\\.|[^""\\\r\n])*(?:""|(?=[\r\n])|\z))" +
             @"|(?<dstr>""(?:\\.|[^""\\\r\n])*(?:""|(?=[\r\n])|\z))" +

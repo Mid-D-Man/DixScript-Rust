@@ -204,6 +204,12 @@ namespace MidManStudio.Mdix.Unity.Editor
                 style     =
                 {
                     flexGrow                = new StyleFloat(1f),
+                    // Basis 0 + min-height 0: take the space that is left, never the height of the
+                    // text. With "auto" a long file made the field taller than the window, which
+                    // pushed the problems list off-screen and left nothing to scroll.
+                    flexBasis               = new StyleLength(0f),
+                    flexShrink              = new StyleFloat(1f),
+                    minHeight               = new StyleLength(0f),
                     backgroundColor         = new StyleColor(new Color(0.031f, 0.047f, 0.078f)),
                     color                   = new StyleColor(new Color(0.91f, 0.93f, 0.96f)),
                     unityFontStyleAndWeight = new StyleEnum<FontStyle>(FontStyle.Normal),
@@ -214,14 +220,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 },
             };
 
-            _codeField.RegisterValueChangedCallback(evt =>
-            {
-                _sourceText = evt.newValue;
-                _isDirty    = true;
-                UpdateStatusBar(parsed: false, entryCount: 0, flatCount: 0, tableCount: 0);
-
-                NotifyLspTextChanged(evt.newValue, evt.previousValue);
-            });
+            _codeField.RegisterValueChangedCallback(OnCodeFieldValueChanged);
 
             // OnEnable can run LoadAsset() before CreateGUI() builds this field, which would
             // leave it blank while _sourceText holds the file — and the next keystroke would
@@ -230,6 +229,10 @@ namespace MidManStudio.Mdix.Unity.Editor
                 _codeField.SetValueWithoutNotify(_sourceText);
 
             _panelEditor?.Add(_codeField);
+
+            ConstrainPanelHeights();
+            InstallCodeFieldWheel();
+            InstallCopyAffordances();
 
             InitializeLspIntegration();
         }
@@ -258,7 +261,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 FocusSearchField();
 
                 // Files may have changed since the last search, so a standing query is run again.
-                if (_searchField != null && !string.IsNullOrEmpty(_searchField.value))
+                if (_searchField != null && (SearchFilesMode || !string.IsNullOrEmpty(_searchField.value)))
                     ScheduleSearch();
             }
 
@@ -311,17 +314,26 @@ namespace MidManStudio.Mdix.Unity.Editor
 
         // ── Compile / parse ───────────────────────────────────────────────────
 
-        private void Compile()
+        /// <summary>Compiles the buffer and reports it in the status line. True when it compiled.</summary>
+        private bool Compile()
         {
-            if (string.IsNullOrEmpty(_sourceText)) return;
+            _lastCompileError = null;
+
+            if (string.IsNullOrEmpty(_sourceText)) return true; // nothing to compile
 
             var result = Dix.LoadStr(_sourceText);
 
             if (result.IsFailure)
             {
-                SetStatus($"✗  {result.Error.Message}", error: true);
+                _lastCompileError = result.Error.Message;
+
+                var hint = ContainsEditorColourTags(_sourceText)
+                    ? "  (the text contains <color=#…> tags — if you didn't write them, use MidManStudio ▸ MDIX Language Server ▸ Strip Editor Colour Tags)"
+                    : string.Empty;
+
+                SetStatus($"✗  {_lastCompileError}{hint}", error: true);
                 UpdateStatusBar(false, 0, 0, 0);
-                return;
+                return false;
             }
 
             using var db = result.SuccessResult;
@@ -338,6 +350,22 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             // Compiling only parses the text; it does not write it anywhere. It used to clear the
             // dirty flag here, so edits that were merely compiled were dropped silently on close.
+            return true;
+        }
+
+        private string? _lastCompileError;
+
+        /// <summary>
+        /// After a successful write: compile (which refreshes the status bar and the Explorer) and
+        /// say so honestly. Save used to print "Saved" and stop, so the Explorer kept showing the
+        /// previous version and a file that no longer compiled looked fine.
+        /// </summary>
+        private void ReportSaved()
+        {
+            if (Compile())
+                SetStatus("✓  Saved — 0 errors", error: false);
+            else
+                SetStatus($"✗  Saved, but it does not compile: {_lastCompileError}", error: true);
         }
 
         // ── Explorer ──────────────────────────────────────────────────────────
@@ -549,7 +577,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 File.WriteAllText(_currentPath, _sourceText);
                 AssetDatabase.ImportAsset(_currentPath);
                 _isDirty = false;
-                SetStatus("✓  Saved", error: false);
+                ReportSaved();
             }
             catch (Exception ex)
             {
@@ -595,9 +623,8 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             EditorPrefs.SetString(PrefKeyLastPath, path);
 
-            Compile();                  // refreshes the status bar (file name included) and the Explorer
             NotifyLspDocumentOpened();  // the server drops the untitled document and opens this file
-            SetStatus("✓  Saved", error: false);
+            ReportSaved();              // compiles: refreshes the status bar (file name included) and the Explorer
         }
 
         // ── Status helpers ────────────────────────────────────────────────────

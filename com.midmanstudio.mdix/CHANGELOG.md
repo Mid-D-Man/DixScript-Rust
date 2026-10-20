@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- MDIX Studio: Autocomplete and Hover are separate switches (MidManStudio → MDIX Language Server,
+  and the ⋮ menu on the window tab), next to Syntax Highlighting. Off means no requests are made.
+  Compile errors and the problems list are not affected.
+- MDIX Studio Search tab: **File names** mode lists the `.mdix` files whose name or folder matches
+  (every file when empty); click one to open it. Remembered between sessions.
+- MDIX Studio: **Copy** button next to Save, and right-click Copy on the status line and on each
+  problem, so an error message can be pasted.
+- MDIX Studio: **Strip Editor Colour Tags** (MidManStudio → MDIX Language Server) removes the
+  `<color=#…>` markup that earlier builds could write into a file.
 - MDIX Studio Explorer: edit plain values in place. Click a number, text, true/false or colour that
   is written out in the file, type, and press Enter (Esc cancels). The change is made in the
   Editor tab's text and compiled; the type is kept (`L`, `f`, a double stays a double), text is
@@ -87,6 +96,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- MDIX Studio: the highlighter's colour markup (`<color=#…>`) no longer reaches the text buffer.
+  Setting the colour layer's text sent a change event that bubbled up to the code field, and the
+  window took it for an edit. It went to the language server (hover reported hex colours that were
+  not in the file; completion offered the wrong lists), to the compiler (`Expected section keyword,
+  found: Symbol(<)` on a file that looked correct) and to Save (the markup ended up on disk).
+  (`Editor/Highlight/MdixCodeOverlay.cs`, `Editor/MdixEditorWindow.Lsp.cs`.)
+- MDIX Studio: Save now compiles, so the status line and the Explorer show the saved version, and a
+  file that no longer compiles is reported as such instead of "Saved".
+- MDIX Studio: a long file scrolls. The code field and panels took the height of their content, which
+  pushed the problems list out of the window and left nothing to scroll.
+- MDIX Studio: hover follows the mouse instead of the caret and sits below the pointer.
+- MDIX Studio Search tab: the query box no longer stretches to half the panel.
+- MDIX Studio "Generate ScriptableObject" window: it can be resized wider, and opens wide enough to
+  read each row.
+- MDIX Studio: section names are case-insensitive, as they are in the compiler. Highlighting colours
+  `@Data` and `@data` like `@DATA` (they were left plain), and colours `@RAW` and `@SCHEMA`.
+  Explorer inline editing finds `@Data(` in any case. (`Editor/Highlight/MdixTokenizer.cs`,
+  `Editor/MdixSourceMap.cs`.)
 - Saving silently lost data: lists, arrays, sets and dictionaries were written as their type name
   (`System.Collections.Generic.List`1[System.Int32]`) and loaded back empty, public fields were ignored,
   `uint`, `ulong`, `char` and `DateTimeOffset` came back wrong, `Guid` was not written, and a derived-class

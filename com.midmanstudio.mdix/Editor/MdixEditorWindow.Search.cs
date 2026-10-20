@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -18,16 +19,25 @@ namespace MidManStudio.Mdix.Unity.Editor
     ///
     /// Typing searches after a short pause, Enter searches at once. Clicking a result opens the file
     /// in the Editor tab with the match selected.
+    ///
+    /// Two modes, switched by the "File names" box (remembered between sessions): file names lists the
+    /// .mdix files whose path matches — and every file when the box is empty, so the tab doubles as a
+    /// file browser — and the other mode looks inside the files.
     /// </summary>
     public sealed partial class MdixEditorWindow
     {
         private const string UntitledKey = "(untitled)";
         private const int    SearchDelayMs = 300;
+        private const int    MaxFileRows   = 500;
+        private const string PrefKeySearchFiles = "MdixStudio_SearchFileNames";
+
+        private bool SearchFilesMode => _searchFilesMode != null && _searchFilesMode.value;
 
         private TextField  _searchField;
         private Toggle     _searchMatchCase;
         private Toggle     _searchRegex;
         private Toggle     _searchNamesOnly;
+        private Toggle     _searchFilesMode;
         private Label      _searchSummary;
         private ScrollView _searchResults;
         private IVisualElementScheduledItem _searchTimer;
@@ -59,14 +69,16 @@ namespace MidManStudio.Mdix.Unity.Editor
                 label     = string.Empty,
                 style =
                 {
-                    flexGrow        = new StyleFloat(1f),
+                    // Not flexGrow: in this column that made the query box swallow half the panel.
+                    flexGrow        = new StyleFloat(0f),
+                    flexShrink      = new StyleFloat(0f),
                     marginLeft      = new StyleLength(0f),
                     marginRight     = new StyleLength(0f),
                     marginBottom    = new StyleLength(4),
                 },
             };
 
-            _searchField.tooltip = "Text to find in every .mdix file in the project. Enter searches at once.";
+            _searchField.tooltip = "What to look for. Enter searches at once.";
             _searchField.RegisterValueChangedCallback(_ => ScheduleSearch());
             _searchField.RegisterCallback<KeyDownEvent>(evt =>
             {
@@ -81,15 +93,24 @@ namespace MidManStudio.Mdix.Unity.Editor
                 style = { flexDirection = new StyleEnum<FlexDirection>(FlexDirection.Row) },
             };
 
+            _searchFilesMode = MakeSearchToggle("File names",  "On: list the .mdix files whose name or folder matches (every file when empty). Off: search inside the files.");
+            _searchFilesMode.SetValueWithoutNotify(EditorPrefs.GetBool(PrefKeySearchFiles, true));
+            _searchFilesMode.RegisterValueChangedCallback(evt =>
+            {
+                EditorPrefs.SetBool(PrefKeySearchFiles, evt.newValue);
+                UpdateSearchModeUi();
+            });
+
             _searchMatchCase = MakeSearchToggle("Match case",  "Treat upper and lower case as different letters.");
             _searchRegex     = MakeSearchToggle("Regex",       "Read the text as a regular expression.");
             _searchNamesOnly = MakeSearchToggle("Names only",  "Only count matches on keys, sections, enums and functions. Skips values and comments.");
 
+            options.Add(_searchFilesMode);
             options.Add(_searchMatchCase);
             options.Add(_searchRegex);
             options.Add(_searchNamesOnly);
 
-            _searchSummary = new Label("Type to search every .mdix file in the project.")
+            _searchSummary = new Label(string.Empty)
             {
                 style =
                 {
@@ -108,7 +129,24 @@ namespace MidManStudio.Mdix.Unity.Editor
             box.Add(_searchResults);
 
             _panelSearch.Add(box);
+
+            UpdateSearchModeUi();
         }
+
+        /// <summary>"Names only" and the idle hint only make sense for the mode that is on.</summary>
+        private void UpdateSearchModeUi()
+        {
+            _searchNamesOnly?.SetEnabled(!SearchFilesMode);
+
+            // File-name mode describes its own list ("12 files in the project"); the hint is only
+            // for the mode that shows nothing until something is typed.
+            if (!SearchFilesMode && _searchField != null && string.IsNullOrEmpty(_searchField.value))
+                SetSearchSummary(IdleSearchHint(), error: false);
+        }
+
+        private string IdleSearchHint() => SearchFilesMode
+            ? "Type part of a file name or folder, or leave this empty to list every .mdix file."
+            : "Type to search inside every .mdix file in the project.";
 
         private Toggle MakeSearchToggle(string label, string tooltip)
         {
@@ -150,10 +188,17 @@ namespace MidManStudio.Mdix.Unity.Editor
             if (_searchTimer != null) _searchTimer.Pause();
 
             var query = _searchField.value ?? string.Empty;
+
+            if (SearchFilesMode)
+            {
+                RunFileNameSearch(query);
+                return;
+            }
+
             if (query.Length == 0)
             {
                 _searchResults.Clear();
-                SetSearchSummary("Type to search every .mdix file in the project.", error: false);
+                SetSearchSummary(IdleSearchHint(), error: false);
                 return;
             }
 
@@ -167,6 +212,138 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             var result = MdixProjectSearch.Run(CollectSearchSources(), options);
             ShowSearchResults(result);
+        }
+
+        // ── File names ────────────────────────────────────────────────────────
+
+        private void RunFileNameSearch(string query)
+        {
+            var matchCase = _searchMatchCase != null && _searchMatchCase.value;
+            var useRegex  = _searchRegex     != null && _searchRegex.value;
+
+            Regex pattern = null;
+            if (query.Length > 0 && useRegex)
+            {
+                try
+                {
+                    pattern = new Regex(query, matchCase ? RegexOptions.None : RegexOptions.IgnoreCase);
+                }
+                catch (ArgumentException ex)
+                {
+                    _searchResults.Clear();
+                    SetSearchSummary("✗  " + ex.Message, error: true);
+                    return;
+                }
+            }
+
+            var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+            // Paths only: nothing is read, so this stays instant however many files there are.
+            var paths = new List<string>();
+            var seen  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var assetPath in AssetDatabase.GetAllAssetPaths())
+            {
+                if (!assetPath.EndsWith(".mdix", StringComparison.OrdinalIgnoreCase)) continue;
+                if (seen.Add(assetPath)) paths.Add(assetPath);
+            }
+
+            // A document that was never saved has no path but is still part of the work.
+            if (string.IsNullOrEmpty(_currentPath) && !string.IsNullOrEmpty(_sourceText))
+                paths.Add(UntitledKey);
+
+            paths.Sort((a, b) => string.Compare(a, b, StringComparison.OrdinalIgnoreCase));
+
+            _searchResults.Clear();
+
+            var total = 0;
+            var shown = 0;
+
+            foreach (var path in paths)
+            {
+                var display = path == UntitledKey ? "Untitled (not saved yet)" : path;
+
+                var matches = query.Length == 0 ||
+                              (pattern != null ? pattern.IsMatch(display) : display.IndexOf(query, comparison) >= 0);
+                if (!matches) continue;
+
+                total++;
+                if (shown >= MaxFileRows) continue;
+
+                _searchResults.Add(MakeFileRow(path, display, query, pattern, comparison));
+                shown++;
+            }
+
+            var summary = total == 0
+                ? (query.Length == 0 ? "There are no .mdix files in the project yet." : "No file name matches.")
+                : total + (total == 1 ? " file" : " files") + (query.Length == 0 ? " in the project" : " match");
+
+            if (total > shown) summary += ". The list is cut here; type more of the name to see the rest";
+
+            SetSearchSummary(summary, error: false);
+        }
+
+        private VisualElement MakeFileRow(string path, string display, string query, Regex pattern, StringComparison comparison)
+        {
+            var slash  = display.LastIndexOf('/');
+            var folder = slash >= 0 ? display.Substring(0, slash) : string.Empty;
+            var name   = slash >= 0 ? display.Substring(slash + 1) : display;
+
+            // The matched part of the file name in gold; a match that lies in the folder is left plain.
+            var start  = -1;
+            var length = 0;
+
+            if (query.Length > 0)
+            {
+                if (pattern != null)
+                {
+                    var match = pattern.Match(name);
+                    if (match.Success && match.Length > 0) { start = match.Index; length = match.Length; }
+                }
+                else
+                {
+                    start = name.IndexOf(query, comparison);
+                    length = query.Length;
+                }
+            }
+
+            var nameRich = start < 0
+                ? Highlight.MdixRichText.Escape(name)
+                : Highlight.MdixRichText.Escape(name.Substring(0, start)) +
+                  "<color=#FFD27F>" + Highlight.MdixRichText.Escape(name.Substring(start, length)) + "</color>" +
+                  Highlight.MdixRichText.Escape(name.Substring(start + length));
+
+            var isOpen = path == UntitledKey
+                ? string.IsNullOrEmpty(_currentPath)
+                : string.Equals(path, _currentPath, StringComparison.Ordinal);
+
+            var rich = "<b>" + nameRich + "</b>" +
+                       (folder.Length == 0 ? string.Empty : "   <color=#6B7A90>" + Highlight.MdixRichText.Escape(folder) + "</color>") +
+                       (isOpen ? "   <color=#5C6B80>" + (_isDirty ? "open, unsaved changes" : "open") + "</color>" : string.Empty);
+
+            var row = new Label(rich)
+            {
+                enableRichText = true,
+                tooltip        = display,
+                style =
+                {
+                    paddingLeft     = new StyleLength(14),
+                    paddingRight    = new StyleLength(8),
+                    paddingTop      = new StyleLength(4),
+                    paddingBottom   = new StyleLength(4),
+                    whiteSpace      = new StyleEnum<WhiteSpace>(WhiteSpace.NoWrap),
+                    overflow        = new StyleEnum<Overflow>(Overflow.Hidden),
+                    textOverflow    = new StyleEnum<TextOverflow>(TextOverflow.Ellipsis),
+                },
+            };
+
+            row.RegisterCallback<PointerEnterEvent>(_ =>
+                row.style.backgroundColor = new StyleColor(new Color(0.102f, 0.149f, 0.251f)));
+            row.RegisterCallback<PointerLeaveEvent>(_ =>
+                row.style.backgroundColor = StyleKeyword.Null);
+            row.RegisterCallback<ClickEvent>(_ => OpenSearchTarget(path, 0, 0));
+
+            return row;
         }
 
         private List<MdixSearchSource> CollectSearchSources()
@@ -330,25 +507,28 @@ namespace MidManStudio.Mdix.Unity.Editor
 
         // ── Open a result ─────────────────────────────────────────────────────
 
-        private void OpenSearchHit(MdixSearchHit hit)
+        private void OpenSearchHit(MdixSearchHit hit) => OpenSearchTarget(hit.Path, hit.Offset, hit.Length);
+
+        /// <summary>Opens <paramref name="path"/> in the Editor tab with [offset, offset + length) selected.</summary>
+        private void OpenSearchTarget(string path, int offset, int length)
         {
             if (_codeField == null) return;
 
-            var sameDocument = hit.Path == UntitledKey
+            var sameDocument = path == UntitledKey
                 ? string.IsNullOrEmpty(_currentPath)
-                : string.Equals(hit.Path, _currentPath, StringComparison.Ordinal);
+                : string.Equals(path, _currentPath, StringComparison.Ordinal);
 
             if (!sameDocument)
             {
-                var asset = AssetDatabase.LoadAssetAtPath<MdixAsset>(hit.Path);
+                var asset = AssetDatabase.LoadAssetAtPath<MdixAsset>(path);
                 if (asset == null)
                 {
-                    SetStatus("✗  Could not open " + hit.Path, error: true);
+                    SetStatus("✗  Could not open " + path, error: true);
                     return;
                 }
 
                 // Opening another file would drop unsaved edits, so this asks first.
-                if (!ConfirmLeaveCurrentDocument(hit.Path)) return;
+                if (!ConfirmLeaveCurrentDocument(path)) return;
 
                 LoadAsset(asset);
             }
@@ -356,8 +536,8 @@ namespace MidManStudio.Mdix.Unity.Editor
             ShowTab(1);
 
             // The Editor tab has only just been shown; give it a moment before selecting.
-            var from = Math.Max(0, Math.Min(hit.Offset, _sourceText.Length));
-            var to   = Math.Max(from, Math.Min(hit.Offset + hit.Length, _sourceText.Length));
+            var from = Math.Max(0, Math.Min(offset, _sourceText.Length));
+            var to   = Math.Max(from, Math.Min(offset + length, _sourceText.Length));
 
             _codeField.schedule.Execute(() =>
             {

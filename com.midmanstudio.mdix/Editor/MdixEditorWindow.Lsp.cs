@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
@@ -13,13 +15,32 @@ namespace MidManStudio.Mdix.Unity.Editor
     /// <summary>Editor-wide MDIX Studio preferences (EditorPrefs-backed).</summary>
     internal static class MdixStudioPrefs
     {
-        private const string KeyHighlight = "MdixStudio_SyntaxHighlighting";
-        private const string KeyVerbose   = "MdixStudio_LspVerboseLog";
+        private const string KeyHighlight    = "MdixStudio_SyntaxHighlighting";
+        private const string KeyVerbose      = "MdixStudio_LspVerboseLog";
+        private const string KeyAutoComplete = "MdixStudio_AutoComplete";
+        private const string KeyHover        = "MdixStudio_HoverInfo";
 
         public static bool SyntaxHighlighting
         {
             get => EditorPrefs.GetBool(KeyHighlight, true);
             set => EditorPrefs.SetBool(KeyHighlight, value);
+        }
+
+        /// <summary>
+        /// The completion popup (typing, and Ctrl+Space). Off means off: no requests are made.
+        /// Compile errors and the problems list are not part of this — they always stay on.
+        /// </summary>
+        public static bool AutoComplete
+        {
+            get => EditorPrefs.GetBool(KeyAutoComplete, true);
+            set => EditorPrefs.SetBool(KeyAutoComplete, value);
+        }
+
+        /// <summary>The hover popup that follows the mouse. Off means no hover requests.</summary>
+        public static bool HoverInfo
+        {
+            get => EditorPrefs.GetBool(KeyHover, true);
+            set => EditorPrefs.SetBool(KeyHover, value);
         }
 
         /// <summary>Echo mdix-lsp's routine INFO/DEBUG log lines to the Unity console.</summary>
@@ -64,7 +85,7 @@ namespace MidManStudio.Mdix.Unity.Editor
     /// against the real 2022.3 sources, but its on-screen behaviour needs a
     /// first run in the Editor.
     /// </summary>
-    public sealed partial class MdixEditorWindow
+    public sealed partial class MdixEditorWindow : IHasCustomMenu
     {
         // ── Language-server state ─────────────────────────────────────────────
 
@@ -100,6 +121,7 @@ namespace MidManStudio.Mdix.Unity.Editor
         private VisualElement? _problemsPanel;
         private ScrollView?    _problemsList;
         private Label?         _problemsHeader;
+        private readonly List<string> _problemLines = new List<string>(); // for Copy
 
         // ── Completion ────────────────────────────────────────────────────────
 
@@ -144,6 +166,19 @@ namespace MidManStudio.Mdix.Unity.Editor
         private int    _hoverDoneCaret = -2;
         private double _caretIdleSince;
 
+        // Hover follows the mouse, like any code editor. The caret-idle path in
+        // UpdateHoverIdleCheck is only the fallback for a Unity version that can't map a
+        // point to a character.
+        private const double HoverMouseIdleSeconds   = 0.4;
+        private const float  HoverMouseMoveTolerance = 3f;
+
+        private bool     _mouseInCode;
+        private Vector2  _mouseWorld;
+        private double   _mouseMovedAt;
+        private int      _hoverMouseOffset     = -1;  // offset the visible popup is about
+        private int      _hoverDoneMouseOffset = -2;  // last offset asked about (asked once per word)
+        private Vector2? _hoverAnchorWorld;           // where to put the popup; null = at the caret
+
         // ═════════════════════════════════════════════════════════════════════
         //  Hooks called from MdixEditorWindow.cs
         // ═════════════════════════════════════════════════════════════════════
@@ -160,6 +195,16 @@ namespace MidManStudio.Mdix.Unity.Editor
             // TrickleDown: see the class remarks — a bubble-phase handler never fires for these keys.
             _codeField.RegisterCallback<KeyDownEvent>(OnCodeFieldKeyDown, TrickleDown.TrickleDown);
             _codeField.RegisterCallback<FocusOutEvent>(_ => HideAllPopups());
+
+            // Hover: track the pointer (TrickleDown so the text field can't swallow the moves).
+            _codeField.RegisterCallback<PointerMoveEvent>(OnCodePointerMove, TrickleDown.TrickleDown);
+            _codeField.RegisterCallback<PointerDownEvent>(_ => HideHover(), TrickleDown.TrickleDown);
+            _codeField.RegisterCallback<PointerLeaveEvent>(_ =>
+            {
+                _mouseInCode          = false;
+                _hoverDoneMouseOffset = -2; // coming back to the same word should show it again
+                HideHover();
+            });
 
             _overlay = new MdixCodeOverlay(_codeField);
             ApplyHighlightPreference();
@@ -518,6 +563,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             _lastEditTime   = EditorApplication.timeSinceStartup;
 
             HideHover();
+            _hoverDoneMouseOffset = -2;
             if (_marks.Count > 0) _marks.Clear();
 
             _overlay?.Refresh();
@@ -595,6 +641,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 style =
                 {
                     height          = 140,
+                    flexShrink      = 0,   // the list keeps its height; the code field gives way instead
                     borderTopWidth  = 1,
                     borderTopColor  = new Color(0.15f, 0.18f, 0.24f),
                     backgroundColor = new Color(0.024f, 0.035f, 0.059f),
@@ -732,6 +779,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             if (_problemsList == null) return;
 
             _problemsList.Clear();
+            _problemLines.Clear();
 
             var shown = Math.Min(problems.Count, 100);
             for (var i = 0; i < shown; i++)
@@ -747,7 +795,10 @@ namespace MidManStudio.Mdix.Unity.Editor
                     default: icon = "i"; colour = new Color(0.55f, 0.70f, 0.90f); break;
                 }
 
-                var row = new Label($"[{icon}]  Line {p.Line + 1}: {p.Message}")
+                var rowText = $"[{icon}]  Line {p.Line + 1}: {p.Message}";
+                _problemLines.Add(rowText);
+
+                var row = new Label(rowText)
                 {
                     enableRichText = false,
                     style =
@@ -763,8 +814,17 @@ namespace MidManStudio.Mdix.Unity.Editor
                 var line      = p.Line;
                 var character = p.Character;
                 row.RegisterCallback<ClickEvent>(_ => JumpTo(line, character));
+                row.AddManipulator(new ContextualMenuManipulator(menuEvent =>
+                    menuEvent.menu.AppendAction("Copy", _ => GUIUtility.systemCopyBuffer = rowText)));
 
                 _problemsList.Add(row);
+            }
+
+            // Rows past the cap are still worth copying.
+            for (var i = shown; i < problems.Count; i++)
+            {
+                var p = problems[i];
+                _problemLines.Add($"[{(p.Severity == 1 ? "x" : p.Severity == 2 ? "!" : "i")}]  Line {p.Line + 1}: {p.Message}");
             }
 
             if (problems.Count > shown)
@@ -854,6 +914,12 @@ namespace MidManStudio.Mdix.Unity.Editor
 
         private void MaybeTriggerCompletion(string newValue, string previousValue)
         {
+            if (!MdixStudioPrefs.AutoComplete)
+            {
+                HideCompletion();
+                return;
+            }
+
             var delta = newValue.Length - previousValue.Length;
             var caret = SafeCaret();
 
@@ -891,6 +957,12 @@ namespace MidManStudio.Mdix.Unity.Editor
             try
             {
                 if (_codeField == null) return;
+
+                if (!MdixStudioPrefs.AutoComplete)
+                {
+                    HideCompletion();
+                    return;
+                }
 
                 var requestId = ++_completionRequestId;
 
@@ -1263,11 +1335,81 @@ namespace MidManStudio.Mdix.Unity.Editor
             };
 
             _hoverPopup.Add(_hoverLabel);
+
+            // The popup is shown right under the pointer; it must never take the pointer from the field.
+            _hoverPopup.pickingMode = PickingMode.Ignore;
+            _hoverLabel.pickingMode = PickingMode.Ignore;
+        }
+
+        private void OnCodePointerMove(PointerMoveEvent evt)
+        {
+            var position = new Vector2(evt.position.x, evt.position.y);
+            _mouseInCode = true;
+
+            // Ignore sub-pixel jitter so a resting trackpad finger doesn't keep resetting the timer.
+            if (Vector2.Distance(position, _mouseWorld) < HoverMouseMoveTolerance) return;
+
+            _mouseWorld   = position;
+            _mouseMovedAt = EditorApplication.timeSinceStartup;
+
+            if (!_hoverVisible) return;
+
+            // Keep the popup while the pointer stays on the word it describes; dismiss it otherwise.
+            var stillOnWord = _overlay != null &&
+                              _overlay.TryGetOffsetAtPoint(_mouseWorld, _sourceText, out var offset) &&
+                              SameWord(_sourceText, offset, _hoverMouseOffset);
+
+            if (!stillOnWord)
+            {
+                _hoverDoneMouseOffset = -2;
+                HideHover();
+            }
+        }
+
+        /// <summary>Whether two offsets lie in the same run of identifier / hex-colour characters.</summary>
+        private static bool SameWord(string text, int a, int b)
+        {
+            if (a < 0 || b < 0 || a >= text.Length || b >= text.Length) return false;
+            if (a == b) return true;
+
+            var low  = Math.Min(a, b);
+            var high = Math.Max(a, b);
+
+            for (var i = low; i <= high; i++)
+            {
+                var c = text[i];
+                if (!MdixTextPositions.IsWordChar(c) && c != '#') return false;
+            }
+
+            return true;
         }
 
         private void UpdateHoverIdleCheck(double now)
         {
             if (_codeField == null || _hoverInFlight || CompletionOpen) return;
+
+            if (!MdixStudioPrefs.HoverInfo)
+            {
+                if (_hoverVisible) HideHover();
+                return;
+            }
+
+            // Mouse hover: the pointer is over the code, has rested for a moment, and is over a
+            // character that hasn't been asked about yet.
+            if (_overlay != null && MdixCodeOverlay.CanMapPointToOffset)
+            {
+                if (!_mouseInCode || EditorWindow.mouseOverWindow != this) return;
+                if (_hoverVisible || now - _mouseMovedAt < HoverMouseIdleSeconds) return;
+
+                if (!_overlay.TryGetOffsetAtPoint(_mouseWorld, _sourceText, out var mouseOffset)) return;
+                if (char.IsWhiteSpace(_sourceText[mouseOffset])) return; // nothing to describe
+                if (SameWord(_sourceText, mouseOffset, _hoverDoneMouseOffset)) return;
+
+                RequestHoverAtOffset(mouseOffset, _mouseWorld);
+                return;
+            }
+
+            // Fallback (this Unity version can't map a point to a character): hover at the caret.
             if (EditorWindow.focusedWindow != this) return;
 
             var caret = SafeCaret();
@@ -1310,6 +1452,8 @@ namespace MidManStudio.Mdix.Unity.Editor
                 _hoverDoneCaret = caret;
 
                 if (SafeCaret() != caret || _sourceText != text) return;
+
+                _hoverAnchorWorld = null;
                 ShowHover(result);
             }
             catch (Exception ex)
@@ -1320,6 +1464,65 @@ namespace MidManStudio.Mdix.Unity.Editor
             {
                 _hoverInFlight = false;
             }
+        }
+
+        private async void RequestHoverAtOffset(int offset, Vector2 anchorWorld)
+        {
+            _hoverInFlight = true;
+            try
+            {
+                if (!await FlushLspSyncAsync())
+                {
+                    _hoverDoneMouseOffset = offset;
+                    return;
+                }
+
+                var text   = _sourceText;
+                var client = _lspClient;
+                if (client == null || offset < 0 || offset >= text.Length) return;
+
+                var (line, character) = MdixTextPositions.OffsetToPosition(text, offset);
+                var result = await client.RequestHoverAsync(CurrentDocUri, line, character);
+
+                _hoverDoneMouseOffset = offset;
+
+                // Stale: the text changed meanwhile, or the pointer moved on to another word.
+                if (_sourceText != text || !_mouseInCode || _overlay == null) return;
+                if (!_overlay.TryGetOffsetAtPoint(_mouseWorld, text, out var now) || !SameWord(text, now, offset)) return;
+
+                _hoverMouseOffset = offset;
+                _hoverAnchorWorld = anchorWorld;
+                ShowHover(result);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+            finally
+            {
+                _hoverInFlight = false;
+            }
+        }
+
+        /// <summary>Puts the hover popup just below the pointer, or at the caret for the keyboard fallback.</summary>
+        private bool PlaceHoverPopup()
+        {
+            if (_hoverPopup == null) return false;
+            if (_hoverAnchorWorld == null) return PlacePopup(_hoverPopup, 90f);
+
+            var local  = rootVisualElement.WorldToLocal(_hoverAnchorWorld.Value);
+            var bounds = rootVisualElement.layout;
+            if (float.IsNaN(local.x) || float.IsNaN(local.y)) return false;
+
+            var left = Mathf.Max(4f, Mathf.Min(local.x, bounds.width - 320f));
+            var top  = local.y + 18f;
+
+            if (top + 90f > bounds.height - 4f)
+                top = Mathf.Max(4f, local.y - 18f - 90f);
+
+            _hoverPopup.style.left = left;
+            _hoverPopup.style.top  = top;
+            return true;
         }
 
         private void ShowHover(MdixJsonValue? hover)
@@ -1365,7 +1568,7 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             _hoverLabel.text = rich;
 
-            if (!PlacePopup(_hoverPopup, 90f))
+            if (!PlaceHoverPopup())
             {
                 HideHover();
                 return;
@@ -1383,12 +1586,215 @@ namespace MidManStudio.Mdix.Unity.Editor
         }
 
         // ═════════════════════════════════════════════════════════════════════
+        //  Guarding the text buffer against the colour layer's markup
+        // ═════════════════════════════════════════════════════════════════════
+
+        private static readonly Regex EditorColourTag =
+            new Regex(@"<color=#[0-9A-Fa-f]{6,8}>|</color>", RegexOptions.Compiled);
+
+        private bool _warnedAboutMarkupLeak;
+
+        private static bool ContainsEditorColourTags(string text) =>
+            !string.IsNullOrEmpty(text) && EditorColourTag.IsMatch(text);
+
+        /// <summary>
+        /// The code field's change callback. A genuine edit always carries what the field now
+        /// holds, so anything else is not an edit:
+        ///  * An event from the colour layer. That layer is a child of the field and
+        ///    ChangeEvent&lt;string&gt; BUBBLES, so setting its text used to arrive here with the
+        ///    colour markup as "the new text" — which then went to the language server (hover
+        ///    reported hex colours that aren't in the file), the compiler (Symbol(&lt;) errors on a
+        ///    file that looked fine) and Save (the markup ended up in the file on disk).
+        ///    MdixCodeOverlay no longer sends that event; this is the second lock on the door.
+        ///  * Any other event whose text is the field's text plus our markup.
+        /// </summary>
+        private void OnCodeFieldValueChanged(ChangeEvent<string> evt)
+        {
+            if (_overlay != null && _overlay.OwnsEventTarget(evt.target))
+            {
+                evt.StopPropagation();
+                return;
+            }
+
+            var incoming = evt.newValue ?? string.Empty;
+            var previous = evt.previousValue ?? string.Empty;
+
+            var fieldValue = _codeField != null ? _codeField.value : incoming;
+            if (incoming != fieldValue && MdixRichText.StripMarkup(incoming) == fieldValue)
+            {
+                if (!_warnedAboutMarkupLeak)
+                {
+                    _warnedAboutMarkupLeak = true;
+                    Debug.LogWarning(
+                        "[MDIX Studio] ignored a change event from " +
+                        (evt.target != null ? evt.target.GetType().Name : "an unknown element") +
+                        " that carried the highlighter's colour markup instead of an edit. " +
+                        "Nothing was lost; please report this if you see it again.");
+                }
+
+                evt.StopPropagation();
+                return;
+            }
+
+            _sourceText = incoming;
+            _isDirty    = true;
+            UpdateStatusBar(parsed: false, entryCount: 0, flatCount: 0, tableCount: 0);
+
+            NotifyLspTextChanged(incoming, previous);
+        }
+
+        /// <summary>
+        /// Removes the highlighter's markup from the text in the editor. For files an earlier
+        /// MDIX Studio build saved with it. Asks first: a string that legitimately holds Unity
+        /// rich text (dialogue, say) would lose its tags too.
+        /// </summary>
+        private void StripEditorColourTags()
+        {
+            if (!ContainsEditorColourTags(_sourceText))
+            {
+                EditorUtility.DisplayDialog("MDIX Studio", "The text in the editor has no <color=#…> tags.", "OK");
+                return;
+            }
+
+            var confirmed = EditorUtility.DisplayDialog(
+                "Strip editor colour tags",
+                "Remove every <color=#…> / </color> tag (and the <b>, <i>, <u> and <noparse> markup the " +
+                "colour layer adds) from the text in the editor?\n\n" +
+                "Only do this if you did not write them yourself, for example inside a string. " +
+                "Nothing is saved until you press Save.",
+                "Strip", "Cancel");
+
+            if (!confirmed) return;
+
+            var cleaned = MdixRichText.StripMarkup(_sourceText);
+            ApplyProgrammaticEdit(0, _sourceText.Length, cleaned);
+
+            if (Compile())
+                SetStatus("✓  Colour tags removed — press Save to keep the change", error: false);
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        //  Layout, scrolling and copying
+        // ═════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// flex-basis auto lets a panel — and the text field in it — grow to its content's height,
+        /// which pushes the problems list off the bottom of the window and leaves nothing to
+        /// scroll. Basis 0 with min-height 0 makes every panel take exactly the space that is left.
+        /// </summary>
+        private void ConstrainPanelHeights()
+        {
+            foreach (var panel in new[] { _panelExplorer, _panelEditor, _panelSearch, _panelTemplates })
+            {
+                if (panel == null) continue;
+
+                panel.style.flexBasis  = new StyleLength(0f);
+                panel.style.flexShrink = new StyleFloat(1f);
+                panel.style.minHeight  = new StyleLength(0f);
+                panel.style.overflow   = new StyleEnum<Overflow>(Overflow.Hidden);
+            }
+        }
+
+        /// <summary>
+        /// Two-finger / wheel scrolling over the code. When the field scrolls through a ScrollView,
+        /// the wheel is applied to it directly; otherwise Unity's own handling is left alone.
+        /// </summary>
+        private void InstallCodeFieldWheel()
+        {
+            if (_codeField == null) return;
+
+            _codeField.RegisterCallback<WheelEvent>(evt =>
+            {
+                var scroll = _codeField?.Q<ScrollView>();
+                if (scroll == null) return;
+
+                var viewport = scroll.contentViewport.layout.height;
+                var content  = scroll.contentContainer.layout.height;
+                if (float.IsNaN(viewport) || float.IsNaN(content) || content <= viewport + 1f) return;
+
+                var offset = scroll.scrollOffset;
+                scroll.scrollOffset = new Vector2(
+                    offset.x + evt.delta.x * scroll.mouseWheelScrollSize,
+                    offset.y + evt.delta.y * scroll.mouseWheelScrollSize);
+
+                evt.StopPropagation();
+            }, TrickleDown.TrickleDown);
+        }
+
+        /// <summary>A Copy button next to the toolbar buttons, and right-click Copy on the status line.</summary>
+        private void InstallCopyAffordances()
+        {
+            var anchor = _btnFoldAll;
+            if (anchor?.parent != null)
+            {
+                var copy = new Button(CopyDiagnosticsToClipboard)
+                {
+                    text    = "Copy",
+                    tooltip = "Copy the status line and every problem to the clipboard",
+                };
+                copy.AddToClassList("mdix-btn");
+                anchor.parent.Insert(anchor.parent.IndexOf(anchor), copy);
+            }
+
+            if (_statusLabel != null)
+            {
+                _statusLabel.AddManipulator(new ContextualMenuManipulator(menuEvent =>
+                    menuEvent.menu.AppendAction("Copy message", _ => CopyDiagnosticsToClipboard())));
+            }
+        }
+
+        private void CopyDiagnosticsToClipboard()
+        {
+            var builder = new StringBuilder();
+
+            if (_statusLabel != null && !string.IsNullOrEmpty(_statusLabel.text))
+                builder.AppendLine(_statusLabel.text);
+
+            if (_problemsHeader != null && !string.IsNullOrEmpty(_problemsHeader.text))
+                builder.AppendLine(_problemsHeader.text);
+
+            foreach (var line in _problemLines)
+                builder.AppendLine(line);
+
+            GUIUtility.systemCopyBuffer = builder.ToString().TrimEnd();
+            ShowNotification(new GUIContent("Copied"));
+        }
+
+        /// <summary>The ⋮ menu on the window tab: the same switches as the MidManStudio menu.</summary>
+        void IHasCustomMenu.AddItemsToMenu(GenericMenu menu)
+        {
+            menu.AddItem(new GUIContent("MDIX/Syntax highlighting"), MdixStudioPrefs.SyntaxHighlighting, () =>
+            {
+                MdixStudioPrefs.SyntaxHighlighting = !MdixStudioPrefs.SyntaxHighlighting;
+                ApplyHighlightPreference();
+            });
+
+            menu.AddItem(new GUIContent("MDIX/Autocomplete"), MdixStudioPrefs.AutoComplete, () =>
+            {
+                MdixStudioPrefs.AutoComplete = !MdixStudioPrefs.AutoComplete;
+                HideCompletion();
+            });
+
+            menu.AddItem(new GUIContent("MDIX/Hover info"), MdixStudioPrefs.HoverInfo, () =>
+            {
+                MdixStudioPrefs.HoverInfo = !MdixStudioPrefs.HoverInfo;
+                HideHover();
+            });
+
+            menu.AddSeparator("MDIX/");
+            menu.AddItem(new GUIContent("MDIX/Restart language server"), false, () => RestartLanguageServer());
+            menu.AddItem(new GUIContent("MDIX/Strip editor colour tags"), false, () => StripEditorColourTags());
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
         //  Menu items
         // ═════════════════════════════════════════════════════════════════════
 
         private const string MenuRoot      = "MidManStudio/MDIX Language Server/";
         private const string MenuHighlight = MenuRoot + "Syntax Highlighting";
         private const string MenuVerbose   = MenuRoot + "Verbose Server Log";
+        private const string MenuAutoComplete = MenuRoot + "Autocomplete";
+        private const string MenuHover        = MenuRoot + "Hover Info";
 
         [MenuItem(MenuHighlight)]
         private static void ToggleSyntaxHighlighting()
@@ -1403,6 +1809,46 @@ namespace MidManStudio.Mdix.Unity.Editor
         {
             Menu.SetChecked(MenuHighlight, MdixStudioPrefs.SyntaxHighlighting);
             return true;
+        }
+
+        [MenuItem(MenuAutoComplete)]
+        private static void ToggleAutoComplete()
+        {
+            MdixStudioPrefs.AutoComplete = !MdixStudioPrefs.AutoComplete;
+            foreach (var window in Resources.FindObjectsOfTypeAll<MdixEditorWindow>())
+                window.HideCompletion();
+        }
+
+        [MenuItem(MenuAutoComplete, true)]
+        private static bool ToggleAutoCompleteValidate()
+        {
+            Menu.SetChecked(MenuAutoComplete, MdixStudioPrefs.AutoComplete);
+            return true;
+        }
+
+        [MenuItem(MenuHover)]
+        private static void ToggleHoverInfo()
+        {
+            MdixStudioPrefs.HoverInfo = !MdixStudioPrefs.HoverInfo;
+            foreach (var window in Resources.FindObjectsOfTypeAll<MdixEditorWindow>())
+                window.HideHover();
+        }
+
+        [MenuItem(MenuHover, true)]
+        private static bool ToggleHoverInfoValidate()
+        {
+            Menu.SetChecked(MenuHover, MdixStudioPrefs.HoverInfo);
+            return true;
+        }
+
+        [MenuItem(MenuRoot + "Strip Editor Colour Tags")]
+        private static void StripEditorColourTagsMenu()
+        {
+            foreach (var window in Resources.FindObjectsOfTypeAll<MdixEditorWindow>())
+            {
+                window.StripEditorColourTags();
+                return; // one window is enough; it asks for confirmation itself
+            }
         }
 
         [MenuItem(MenuVerbose)]

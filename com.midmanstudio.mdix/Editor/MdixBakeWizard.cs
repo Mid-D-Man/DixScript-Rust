@@ -66,8 +66,19 @@ namespace MidManStudio.Mdix.Unity.Editor
                 title:   "Generate ScriptableObject",
                 focus:   true);
 
+            // The width used to be pinned at 480 (min and max), so rows such as "fits exactly" /
+            // "reads 0 of 3" were cut off and the window could only grow taller. Width is free now.
             window.minSize         = new Vector2(480, 420);
-            window.maxSize         = new Vector2(480, 640);
+            window.maxSize         = new Vector2(1600, 1000);
+
+            // Open wide enough for a row to read in full, but never shrink a window that was
+            // already made bigger.
+            var current = window.position;
+            window.position = new Rect(
+                current.x, current.y,
+                Mathf.Max(current.width, 760f),
+                Mathf.Max(current.height, 520f));
+
             window._sourceAsset    = asset;
             window._outputFileName = System.IO.Path.GetFileNameWithoutExtension(
                 asset.ProjectRelativePath) + "_data";
@@ -265,9 +276,12 @@ namespace MidManStudio.Mdix.Unity.Editor
                 return;
             }
 
+            // MinHeight + ExpandHeight: the list takes whatever height the window has, so a taller
+            // window shows more types instead of leaving a gap.
             using (var scroll = new EditorGUILayout.ScrollViewScope(
                 _scrollPosition,
-                GUILayout.Height(180)))
+                GUILayout.MinHeight(180),
+                GUILayout.ExpandHeight(true)))
             {
                 _scrollPosition = scroll.scrollPosition;
 

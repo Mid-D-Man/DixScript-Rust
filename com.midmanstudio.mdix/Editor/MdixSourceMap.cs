@@ -404,12 +404,17 @@ namespace MidManStudio.Mdix.Unity.Editor
                 IsIdent(idx) && string.CompareOrdinal(_src, _t[idx].Start, text, 0, text.Length) == 0 &&
                 _t[idx].End - _t[idx].Start == text.Length;
 
-            // Finds "@DATA(" and reads what is inside.
+            // Section names are not case-sensitive (@Data is @DATA), unlike true/false.
+            private bool IsSectionNameText(int idx, string name) =>
+                IsIdent(idx) && _t[idx].End - _t[idx].Start == name.Length &&
+                string.Compare(_src, _t[idx].Start, name, 0, name.Length, StringComparison.OrdinalIgnoreCase) == 0;
+
+            // Finds "@DATA(" (in any case) and reads what is inside.
             public void ParseData()
             {
                 for (int i = 0; i + 2 < _t.Count; i++)
                 {
-                    if (IsSym(i, "@") && IsIdentText(i + 1, "DATA") && IsSym(i + 2, "(") && _t[i + 1].Start == _t[i].End)
+                    if (IsSym(i, "@") && IsSectionNameText(i + 1, "DATA") && IsSym(i + 2, "(") && _t[i + 1].Start == _t[i].End)
                     {
                         _p = i + 3;
                         ParseEntries();

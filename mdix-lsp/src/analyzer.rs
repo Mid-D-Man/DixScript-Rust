@@ -23,6 +23,7 @@ use dixscript::Compiler::AST::data_types::{DLMModuleType, DLMModuleSubtype};
 use dixscript::Compiler::ImportsResolution::CloudFileCache;
 use dixscript::ErrorManager::{
     DixError, ErrorManager, ErrorSeverity,
+    ParseError, ParseErrorType,
     SemanticError, SemanticErrorType,
 };
 
@@ -216,16 +217,28 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
     ) {
         Ok(p)  => p,
         Err(e) => {
-            tracing::warn!("Parser construction failed: {}", e.message());
-            return em.get_all_errors_flat();
+            // An unparseable document is the normal state while someone is typing, so this
+            // is debug, not warn (it used to flood the Unity console on every keystroke).
+            // The failure itself is NOT dropped: it is reported as a diagnostic, otherwise
+            // the editor says "no problems" about a document that cannot compile.
+            let message = e.message().to_string();
+            tracing::debug!("Parser construction failed: {}", message);
+
+            let mut errors = em.get_all_errors_flat();
+            errors.push(parse_failure_error(&doc.tokens, &message));
+            return errors;
         }
     };
 
     let ast = match parser.parse() {
         Ok(a)  => a,
         Err(e) => {
-            tracing::warn!("Parse failed: {}", e.message());
-            return em.get_all_errors_flat();
+            let message = e.message().to_string();
+            tracing::debug!("Parse failed: {}", message);
+
+            let mut errors = em.get_all_errors_flat();
+            errors.push(parse_failure_error(&doc.tokens, &message));
+            return errors;
         }
     };
 
@@ -474,3 +487,240 @@ fn find_section_token_pos(
         .find(|t| is_match(&t.token_type))
         .map(|t| (t.line, t.column))
         }
+
+// ── Parse-failure diagnostics ─────────────────────────────────────────────────
+//
+// `GeneralParser::parse()` fails with a bare `ParseException`: a message and no
+// position. Reporting that at 1:1 would be no help, so the failure is located from
+// the token stream by walking the top level the way the parser does: a section
+// keyword opens a body, parentheses nest, and anything else outside a body that is
+// not a comment is where the parser gave up.
+
+const SECTION_NAMES: [&str; 9] = [
+    "CONFIG", "IMPORTS", "DLM", "ENUMS", "QUICKFUNCS", "DATA", "SECURITY", "RAW", "SCHEMA",
+];
+
+fn is_section_token(token_type: &TokenType) -> bool {
+    matches!(
+        token_type,
+        TokenType::SectionConfig
+            | TokenType::SectionImports
+            | TokenType::SectionDLM
+            | TokenType::SectionEnums
+            | TokenType::SectionQuickFuncs
+            | TokenType::SectionData
+            | TokenType::SectionSecurity
+            | TokenType::SectionRaw
+            | TokenType::SectionSchema
+    )
+}
+
+/// Index of the first token that sits outside every section body and is not a
+/// section keyword or a comment — the token "Expected section keyword" is about.
+fn find_stray_top_level_token(
+    tokens: &[dixscript::Compiler::Core::Tokenizer::Token],
+) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut i     = 0usize;
+
+    while i < tokens.len() {
+        let token_type = &tokens[i].token_type;
+
+        if matches!(token_type, TokenType::EndOfFile) {
+            break;
+        }
+
+        // A section keyword always starts a section. The parser also treats one met
+        // inside an unclosed section as the end of that section, so this resets.
+        if is_section_token(token_type) {
+            depth = 1;
+            i += 1;
+
+            // The opening parenthesis belongs to the body; the parser tolerates its absence.
+            if let Some(next) = tokens.get(i) {
+                if matches!(next.token_type, TokenType::Symbol('(')) {
+                    i += 1;
+                }
+            }
+            continue;
+        }
+
+        if depth == 0 {
+            if !matches!(token_type, TokenType::Comment(_)) {
+                return Some(i);
+            }
+        } else {
+            match token_type {
+                TokenType::Symbol('(') => depth += 1,
+                TokenType::Symbol(')') => depth -= 1,
+                _ => {}
+            }
+        }
+
+        i += 1;
+    }
+
+    None
+}
+
+/// (line, column, message, suggestion) for the stray token at `index`. Positions
+/// are 1-based, like every other DixScript position.
+fn describe_stray_token(
+    tokens: &[dixscript::Compiler::Core::Tokenizer::Token],
+    index:  usize,
+) -> (usize, usize, String, Option<String>) {
+    let token = &tokens[index];
+    let valid = "Valid sections: @CONFIG, @IMPORTS, @DLM, @ENUMS, @QUICKFUNCS, @DATA, @SECURITY."
+        .to_string();
+
+    match &token.token_type {
+        TokenType::Symbol('@') => {
+            if let Some(TokenType::Identifier(name)) =
+                tokens.get(index + 1).map(|t| &t.token_type)
+            {
+                // The lexer matches section names case-insensitively, so a name that is a
+                // section in ANY case never arrives here as a stray token: this is a name that
+                // is not a section, or one still being typed. Point at the section it may be
+                // heading for when exactly one starts with what is there.
+                let upper = name.to_uppercase();
+                let candidates: Vec<&str> = SECTION_NAMES
+                    .iter()
+                    .copied()
+                    .filter(|section| section.starts_with(upper.as_str()))
+                    .collect();
+
+                if candidates.len() == 1 {
+                    return (
+                        token.line,
+                        token.column,
+                        format!("Unknown section '@{}'.", name),
+                        Some(format!("Did you mean '@{}'?", candidates[0])),
+                    );
+                }
+
+                return (
+                    token.line,
+                    token.column,
+                    format!("Unknown section '@{}'.", name),
+                    Some(valid),
+                );
+            }
+
+            (
+                token.line,
+                token.column,
+                "Expected a section name after '@'.".to_string(),
+                Some(valid),
+            )
+        }
+        TokenType::Identifier(name) => (
+            token.line,
+            token.column,
+            format!("'{}' is outside every section.", name),
+            Some("Everything except comments belongs inside a section, e.g. @DATA( ... ).".to_string()),
+        ),
+        other => (
+            token.line,
+            token.column,
+            format!("Unexpected {} outside every section.", other),
+            Some("Everything except comments belongs inside a section, e.g. @DATA( ... ).".to_string()),
+        ),
+    }
+}
+
+/// The diagnostic for a document the parser rejected outright. Falls back to the
+/// parser's own message at the top of the file when no stray token can be found
+/// (the problem is then inside a section body).
+fn parse_failure_error(
+    tokens:      &[dixscript::Compiler::Core::Tokenizer::Token],
+    raw_message: &str,
+) -> DixError {
+    let (line, column, message, suggestion) = match find_stray_top_level_token(tokens) {
+        Some(i) => describe_stray_token(tokens, i),
+        None    => (1, 1, raw_message.to_string(), None),
+    };
+
+    DixError::Parse(ParseError::new(
+        ParseErrorType::SectionSyntaxError,
+        message,
+        line,
+        column,
+        suggestion,
+        None,
+        ErrorSeverity::Error,
+    ))
+}
+
+#[cfg(test)]
+mod parse_failure_tests {
+    use super::*;
+    use dixscript::Compiler::Core::Tokenizer::token::SectionId;
+    use dixscript::Compiler::Core::Tokenizer::Token;
+
+    fn tok(token_type: TokenType, line: usize, column: usize) -> Token {
+        Token::new(token_type, line, column, SectionId::None)
+    }
+
+    #[test]
+    fn unknown_section_is_located_and_the_valid_ones_are_listed() {
+        // @Foo( )
+        let tokens = vec![
+            tok(TokenType::Symbol('@'), 1, 1),
+            tok(TokenType::Identifier("Foo".to_string()), 1, 2),
+            tok(TokenType::Symbol('('), 1, 5),
+            tok(TokenType::Symbol(')'), 1, 6),
+            Token::eof(1, 7),
+        ];
+
+        assert_eq!(find_stray_top_level_token(&tokens), Some(0));
+
+        let (line, column, message, suggestion) = describe_stray_token(&tokens, 0);
+        assert_eq!((line, column), (1, 1));
+        assert_eq!(message, "Unknown section '@Foo'.");
+        assert!(suggestion.unwrap_or_default().contains("Valid sections"));
+    }
+
+    #[test]
+    fn a_section_name_still_being_typed_gets_a_suggestion_in_any_case() {
+        // @da   (section names are case-insensitive; only DATA starts with DA)
+        let tokens = vec![
+            tok(TokenType::Symbol('@'), 1, 1),
+            tok(TokenType::Identifier("da".to_string()), 1, 2),
+            Token::eof(1, 4),
+        ];
+
+        let (_, _, message, suggestion) = describe_stray_token(&tokens, 0);
+        assert_eq!(message, "Unknown section '@da'.");
+        assert_eq!(suggestion.as_deref(), Some("Did you mean '@DATA'?"));
+    }
+
+    #[test]
+    fn well_formed_top_level_has_no_stray_token() {
+        // @DATA( x ( ) )
+        let tokens = vec![
+            tok(TokenType::SectionData, 1, 1),
+            tok(TokenType::Symbol('('), 1, 6),
+            tok(TokenType::Identifier("x".to_string()), 2, 3),
+            tok(TokenType::Symbol('('), 2, 5),
+            tok(TokenType::Symbol(')'), 2, 6),
+            tok(TokenType::Symbol(')'), 3, 1),
+            Token::eof(3, 2),
+        ];
+
+        assert_eq!(find_stray_top_level_token(&tokens), None);
+    }
+
+    #[test]
+    fn stray_token_after_a_closed_section_is_found() {
+        // @DATA( ) <
+        let tokens = vec![
+            tok(TokenType::SectionData, 1, 1),
+            tok(TokenType::Symbol('('), 1, 6),
+            tok(TokenType::Symbol(')'), 1, 7),
+            tok(TokenType::Symbol('<'), 2, 1),
+            Token::eof(2, 2),
+        ];
+
+        assert_eq!(find_stray_top_level_token(&tokens), Some(3));
+    }
+}

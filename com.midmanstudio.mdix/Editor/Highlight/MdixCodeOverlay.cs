@@ -185,8 +185,23 @@ namespace MidManStudio.Mdix.Unity.Editor.Highlight
                 rich = MdixRichText.Escape(plain);
             }
 
-            _overlay.text = rich;
+            // TextElement.text is implemented through INotifyValueChanged<string>: assigning it
+            // sends a ChangeEvent<string> that BUBBLES — through the input, up to the TextField
+            // itself. The window's value-changed callback then read the overlay's colour markup
+            // as if the person had typed it, and fed it to the language server, the compiler
+            // and Save. Setting the value without notification sends nothing at all.
+            if (_overlay is INotifyValueChanged<string> notifier)
+                notifier.SetValueWithoutNotify(rich);
+            else
+                _overlay.text = rich;
         }
+
+        /// <summary>
+        /// True when <paramref name="target"/> is the colour layer. A change event whose target is
+        /// this element is never an edit, however it got to the TextField.
+        /// </summary>
+        public bool OwnsEventTarget(object? target) =>
+            _overlay != null && ReferenceEquals(target, _overlay);
 
         private void Tick()
         {
@@ -270,6 +285,132 @@ namespace MidManStudio.Mdix.Unity.Editor.Highlight
 
             position = root.WorldToLocal(inner.LocalToWorld(local));
             return !(float.IsNaN(position.x) || float.IsNaN(position.y));
+        }
+
+        // ── Pointer → text offset (hover follows the mouse) ──────────────────────────
+        //
+        // UI Toolkit has no public "which character is under this point" call, so the
+        // offset is found by measuring: the line from the vertical position, then the
+        // column by binary search on the measured width of each prefix. The real input
+        // element does the measuring (rich text off, same font), so proportional fonts
+        // are handled. TextElement.MeasureTextSize is resolved by reflection so that a
+        // Unity version without it only loses mouse hover instead of breaking the whole
+        // editor assembly at compile time.
+
+        private static System.Reflection.MethodInfo? _measure;
+        private static object? _measureUndefined;
+        private static bool _measureResolved;
+
+        private static bool ResolveMeasure()
+        {
+            if (_measureResolved) return _measure != null;
+            _measureResolved = true;
+
+            try
+            {
+                var methods = typeof(TextElement).GetMethods(
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+
+                foreach (var method in methods)
+                {
+                    if (method.Name != "MeasureTextSize" || method.ReturnType != typeof(Vector2)) continue;
+
+                    var parameters = method.GetParameters();
+                    if (parameters.Length != 5 || parameters[0].ParameterType != typeof(string)) continue;
+
+                    _measureUndefined = Enum.ToObject(parameters[2].ParameterType, 0); // MeasureMode.Undefined
+                    _measure          = method;
+                    break;
+                }
+            }
+            catch
+            {
+                _measure = null;
+            }
+
+            return _measure != null;
+        }
+
+        /// <summary>False when this Unity version can't measure text; hover then falls back to the caret.</summary>
+        public static bool CanMapPointToOffset => ResolveMeasure();
+
+        private static Vector2 MeasureSize(TextElement element, string text)
+        {
+            var result = _measure!.Invoke(
+                element, new object[] { text, 0f, _measureUndefined!, 0f, _measureUndefined! });
+
+            return result is Vector2 size ? size : default;
+        }
+
+        private static float MeasureWidth(TextElement element, string text) =>
+            text.Length == 0 ? 0f : MeasureSize(element, text).x;
+
+        /// <summary>
+        /// The offset in <paramref name="text"/> of the character under a point given in panel
+        /// (world) coordinates, or false when the point is not over any text: above the first
+        /// line, below the last, or past the end of a line.
+        /// </summary>
+        public bool TryGetOffsetAtPoint(Vector2 worldPosition, string text, out int offset)
+        {
+            offset = -1;
+
+            if (string.IsNullOrEmpty(text) || !ResolveMeasure()) return false;
+
+            var inner = _inner ?? FindInnerTextElement();
+            if (inner == null) return false;
+
+            try
+            {
+                var local = inner.WorldToLocal(worldPosition);
+                if (float.IsNaN(local.x) || float.IsNaN(local.y)) return false;
+
+                var style = inner.resolvedStyle;
+                var left  = style.paddingLeft + style.borderLeftWidth;
+                var top   = style.paddingTop  + style.borderTopWidth;
+
+                var lineHeight = MeasureSize(inner, "Ag").y;
+                if (lineHeight < 1f) return false;
+
+                var y = local.y - top;
+                var x = local.x - left;
+                if (y < 0f || x < 0f) return false;
+
+                // Start of the line under the pointer.
+                var lineIndex = (int)(y / lineHeight);
+                var lineStart = 0;
+                for (var i = 0; i < lineIndex; i++)
+                {
+                    var newline = text.IndexOf('\n', lineStart);
+                    if (newline < 0) return false; // below the last line
+                    lineStart = newline + 1;
+                }
+
+                var lineEnd = text.IndexOf('\n', lineStart);
+                if (lineEnd < 0) lineEnd = text.Length;
+
+                var line = text.Substring(lineStart, lineEnd - lineStart).TrimEnd('\r');
+                if (line.Length == 0) return false;
+
+                // Number of characters that lie completely left of the pointer.
+                var low  = 0;
+                var high = line.Length;
+                while (low < high)
+                {
+                    var mid = (low + high + 1) / 2;
+                    if (MeasureWidth(inner, line.Substring(0, mid)) <= x) low = mid;
+                    else high = mid - 1;
+                }
+
+                if (low >= line.Length) return false; // past the end of the line
+
+                offset = lineStart + low;
+                return true;
+            }
+            catch
+            {
+                offset = -1;
+                return false;
+            }
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

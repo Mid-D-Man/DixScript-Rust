@@ -65,6 +65,7 @@ mod document_display;
 mod equality;
 mod export;
 mod import;
+mod merge;
 mod nodes;
 mod view;
 
@@ -74,6 +75,7 @@ pub use document::{
     DocSecurityEntry, DocSecurityField, Document,
 };
 pub use document_display::ArenaDisplay;
+pub use merge::ArenaOffsets;
 pub use nodes::{ExprNode, ObjectPropNode, StmtNode, SwitchCaseNode, UnknownData, ValueNode};
 pub use view::{ExprRef, StmtRef, ValueRef};
 

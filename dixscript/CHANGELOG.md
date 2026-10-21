@@ -29,7 +29,7 @@ Breaking release.
   sections that hold values, each with its own `from_owned` and `export`. `Arena::alloc_value_list`,
   `alloc_expr_list`, `alloc_prop_list`, `alloc_stmt_list`, `alloc_str_list` and `alloc_case_list`
   store a run of ids (or names, or cases) for a parser that builds a list node by node, and
-  `alloc_case` stores a switch's default case. `Document` implements
+  `alloc_case` stores a switch's default case. `Arena::append` copies one arena onto the end of another and returns an `ArenaOffsets`, which the `shifted` method of each `Doc*` section applies to move the section with it. `GeneralParser::parse_document` parses a file into one `Document` by appending the arenas of the section parsers in source order, and each section parser has `parse_section_doc` and `into_arena` for it. `GeneralParser::parse` is `parse_document` followed by one export. `Document` implements
   `Display`, and `Arena::display` pairs a `Doc*` section with its arena as an `ArenaDisplay` that
   prints; both print exactly what the owned types print. All five section parsers (`@SECURITY`, `@RAW`, `@SCHEMA`, `@DATA` and `@QUICKFUNCS`) build their values in an arena and export the finished section,
   with their public interfaces unchanged; the rest of the compiler still uses the owned types. It

@@ -177,12 +177,30 @@ pub fn new_with_error_manager(
     // Main entry point
     // =============================================================================
 
+    /// Consumes the parser and returns its arena, which holds every node of the section
+    /// that [`parse_section_doc`](Self::parse_section_doc) returned.
+    pub fn into_arena(self) -> Arena {
+        self.arena
+    }
+
     /// Parses the section and returns it.
     ///
     /// Under the `halt` error strategy a parse error ends the section and the result is `None`.
     /// Under `continue` and `recover` the parser keeps going and returns the functions it could
     /// read.
     pub fn parse_section(&mut self) -> Option<QuickFuncsSection> {
+        let section = self.parse_section_doc()?;
+        Some(section.export(&self.arena))
+    }
+
+    /// Parses the section and leaves it in the parser's own arena, returning it as a
+    /// [`DocQuickFuncs`] whose ids name nodes there.
+    ///
+    /// This is [`parse_section`](Self::parse_section) without the final export. Take the arena
+    /// with [`into_arena`](Self::into_arena) afterwards: a caller that parses several sections
+    /// appends their arenas to one with [`Arena::append`] and moves each section with its
+    /// `shifted` method. The error handling is the same as in `parse_section`.
+    pub fn parse_section_doc(&mut self) -> Option<DocQuickFuncs> {
         if self.debug_config.is_enabled {
             self.error_manager.log_debug("QuickFunctions: beginning section parse");
         }
@@ -268,7 +286,7 @@ pub fn new_with_error_manager(
             ));
         }
 
-        Some(DocQuickFuncs { functions, position: section_start_pos }.export(&self.arena))
+        Some(DocQuickFuncs { functions, position: section_start_pos })
     }
 
     // =============================================================================

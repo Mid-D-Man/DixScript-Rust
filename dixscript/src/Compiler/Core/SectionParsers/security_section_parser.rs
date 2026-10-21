@@ -110,12 +110,30 @@ impl<'a> SecuritySectionParser<'a> {
         }
     }
 
+    /// Consumes the parser and returns its arena, which holds every node of the section
+    /// that [`parse_section_doc`](Self::parse_section_doc) returned.
+    pub fn into_arena(self) -> Arena {
+        self.arena
+    }
+
     /// Parses the section and returns it.
     ///
     /// Under the `halt` error strategy a parse error ends the section and the result is `None`.
     /// Under `continue` and `recover` the parser keeps going and returns the entries it could
     /// read, with a `Value::Error` standing in for a field whose value is missing.
     pub fn parse_section(&mut self) -> Option<SecuritySection> {
+        let section = self.parse_section_doc()?;
+        Some(section.export(&self.arena))
+    }
+
+    /// Parses the section and leaves it in the parser's own arena, returning it as a
+    /// [`DocSecurity`] whose ids name nodes there.
+    ///
+    /// This is [`parse_section`](Self::parse_section) without the final export. Take the arena
+    /// with [`into_arena`](Self::into_arena) afterwards: a caller that parses several sections
+    /// appends their arenas to one with [`Arena::append`] and moves each section with its
+    /// `shifted` method. The error handling is the same as in `parse_section`.
+    pub fn parse_section_doc(&mut self) -> Option<DocSecurity> {
         let section_start_pos = Position::from_token(self.current());
         self.reset_parse_state();
 
@@ -207,9 +225,9 @@ impl<'a> SecuritySectionParser<'a> {
         Some(self.finish_section(security_entries, section_start_pos))
     }
 
-    /// Exports the section built in the arena as the owned `SecuritySection`.
-    fn finish_section(&self, entries: Vec<DocSecurityEntry>, position: Position) -> SecuritySection {
-        DocSecurity { entries, position }.export(&self.arena)
+        /// Wraps the finished section's parts as a `DocSecurity`.
+    fn finish_section(&self, entries: Vec<DocSecurityEntry>, position: Position) -> DocSecurity {
+        DocSecurity { entries, position }
     }
 
     fn parse_security_entry(&mut self) -> Option<DocSecurityEntry> {
@@ -478,7 +496,7 @@ impl<'a> SecuritySectionParser<'a> {
             && self.has_encountered_errors
     }
 
-    fn partial_or_none(&self, start_pos: Position) -> Option<SecuritySection> {
+    fn partial_or_none(&self, start_pos: Position) -> Option<DocSecurity> {
         if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt {
             None
         } else {

@@ -12,8 +12,19 @@
 //!   section parsers call their own `new()` and use the shared process singleton.
 //!   Behaviour is functionally identical to the propagating path because the
 //!   top-level error manager IS the shared singleton when constructed via `new()`.
+//!
+//! ## Arenas
+//! The `@DATA`, `@QUICKFUNCS`, `@SECURITY`, `@RAW` and `@SCHEMA` parsers each build into an arena
+//! of their own, because the sections can be parsed in parallel.
+//! [`GeneralParser::parse_document`] appends those arenas, in source order, to the arena of one
+//! [`Document`] and moves each section with it, so the result does not depend on which thread
+//! finished first. [`GeneralParser::parse`] is `parse_document` followed by one export to the
+//! owned AST, for the stages that still read it.
 
 use crate::Compiler::AST::*;
+use crate::Compiler::AST::arena::{
+    Arena, DocData, DocQuickFuncs, DocRawBlock, DocSchema, DocSecurity, Document,
+};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::Core::Tokenizer::token::SectionId;
 use crate::Compiler::Core::SectionParsers::*;
@@ -46,19 +57,17 @@ enum ParsedSection {
     DLM(Option<DLMSection>),
     Enums(Option<EnumsSection>),
     Imports(Option<ImportsSection>),
-    QuickFuncs(Option<QuickFuncsSection>),
-    Data(Option<DataSection>),
-    Security(Option<SecuritySection>),
-    /// Not `Option<RawSection>` like every other variant — one
-    /// `parse_section_inner` call handles exactly one `@RAW(...)`
-    /// occurrence, and `assign_section_to_script` appends it to
-    /// `script.raw: Vec<RawBlock>` rather than overwriting, so multiple
-    /// `@RAW` blocks in one file each land correctly instead of the last
-    /// one clobbering the others.
-    Raw(Option<RawBlock>),
-    /// `@SCHEMA` is a singleton (`Option<SchemaBlock>` on the AST root), so —
-    /// unlike `Raw` — a plain overwrite in `assign_section_to_script` is right.
-    Schema(Option<SchemaBlock>),
+    /// The sections that hold values come back with the arena they were built in.
+    QuickFuncs(Option<(DocQuickFuncs, Arena)>),
+    Data(Option<(DocData, Arena)>),
+    Security(Option<(DocSecurity, Arena)>),
+    /// Not a singleton like every other variant: one `parse_section_inner` call handles exactly
+    /// one `@RAW(...)` occurrence, and `assign_section_to_document` appends it to `raw` rather
+    /// than overwriting, so multiple `@RAW` blocks in one file each land correctly instead of the
+    /// last one clobbering the others.
+    Raw(Option<(DocRawBlock, Arena)>),
+    /// `@SCHEMA` is a singleton, so a plain overwrite in `assign_section_to_document` is right.
+    Schema(Option<(DocSchema, Arena)>),
 }
 
 pub struct GeneralParser<'a> {
@@ -190,7 +199,22 @@ impl<'a> GeneralParser<'a> {
 
     // ── Main parse ────────────────────────────────────────────────────────────
 
-    pub fn parse(mut self) -> Result<DixScript, ParseException> {
+    /// Parses the file and returns the owned AST.
+    ///
+    /// This is [`parse_document`](Self::parse_document) followed by one export, for the stages
+    /// that still read the owned types.
+    pub fn parse(self) -> Result<DixScript, ParseException> {
+        Ok(self.parse_document()?.export())
+    }
+
+    /// Parses the file and returns it as a [`Document`]: one arena that holds every value,
+    /// expression and statement, and the sections that point into it.
+    ///
+    /// Each section parser builds into an arena of its own, so the sections can be parsed in
+    /// parallel. The arenas are appended to the document's arena in source order, whichever
+    /// thread finished first, and each section is moved with its arena, so the result is the same
+    /// on every run.
+    pub fn parse_document(mut self) -> Result<Document, ParseException> {
         let t_total = Instant::now();
 
         if self.debug_config.is_enabled {
@@ -201,7 +225,7 @@ impl<'a> GeneralParser<'a> {
 
         self.validate_version_compatibility()?;
 
-        let mut script = DixScript::new();
+        let mut script = Document::new();
         // Config section was pre-parsed by ConfigSectionHandler; populate directly.
         script.config = Some(self.config_section.clone());
 
@@ -342,7 +366,7 @@ impl<'a> GeneralParser<'a> {
     fn parse_sections_sequential(
         &self,
         sections: Vec<SectionData>,
-        script:   &mut DixScript,
+        script:   &mut Document,
     ) -> Result<(), ParseException> {
         for section in sections {
             self.parse_and_assign_section(&section, script)?;
@@ -353,7 +377,7 @@ impl<'a> GeneralParser<'a> {
     fn parse_sections_concurrent(
         &self,
         sections: Vec<SectionData>,
-        script:   &mut DixScript,
+        script:   &mut Document,
     ) -> Result<(), ParseException> {
         #[cfg(all(not(target_arch = "wasm32"), feature = "rayon-support"))]
         {
@@ -367,7 +391,7 @@ impl<'a> GeneralParser<'a> {
                 .collect();
             for (name, result) in results {
                 match result {
-                    Ok(parsed) => self.assign_section_to_script(parsed, script),
+                    Ok(parsed) => self.assign_section_to_document(parsed, script),
                     Err(e)     => self.handle_section_error(&name, e)?,
                 }
             }
@@ -414,13 +438,29 @@ impl<'a> GeneralParser<'a> {
             "DLM"        => Ok(ParsedSection::DLM(make_section_parser!(DlmSectionParser).parse_section())),
             "ENUMS"      => Ok(ParsedSection::Enums(make_section_parser!(EnumsSectionParser).parse_section())),
             "IMPORTS"    => Ok(ParsedSection::Imports(make_section_parser!(ImportsSectionParser).parse_section())),
-            "QUICKFUNCS" => Ok(ParsedSection::QuickFuncs(make_section_parser!(QuickFuncsSectionParser).parse_section())),
-            "DATA"       => Ok(ParsedSection::Data(make_section_parser!(DataSectionParser).parse_section())),
-            "SECURITY"   => Ok(ParsedSection::Security(make_section_parser!(SecuritySectionParser).parse_section())),
-            "RAW"        => Ok(ParsedSection::Raw(make_section_parser!(RawSectionParser).parse_section())),
+            "QUICKFUNCS" => {
+                let mut parser = make_section_parser!(QuickFuncsSectionParser);
+                let section = parser.parse_section_doc();
+                Ok(ParsedSection::QuickFuncs(section.map(|s| (s, parser.into_arena()))))
+            }
+            "DATA"       => {
+                let mut parser = make_section_parser!(DataSectionParser);
+                let section = parser.parse_section_doc();
+                Ok(ParsedSection::Data(section.map(|s| (s, parser.into_arena()))))
+            }
+            "SECURITY"   => {
+                let mut parser = make_section_parser!(SecuritySectionParser);
+                let section = parser.parse_section_doc();
+                Ok(ParsedSection::Security(section.map(|s| (s, parser.into_arena()))))
+            }
+            "RAW"        => {
+                let mut parser = make_section_parser!(RawSectionParser);
+                let section = parser.parse_section_doc();
+                Ok(ParsedSection::Raw(section.map(|s| (s, parser.into_arena()))))
+            }
             "SCHEMA"     => {
                 let mut schema_parser = make_section_parser!(SchemaSectionParser);
-                let block = schema_parser.parse_section();
+                let block = schema_parser.parse_section_doc();
                 // A malformed @SCHEMA must not silently vanish: an absent
                 // schema means NO validation, so a typo would quietly switch
                 // checking off for the whole file. Under Halt, refuse.
@@ -430,7 +470,7 @@ impl<'a> GeneralParser<'a> {
                     {
                         Err(ParseException::new(format!("@SCHEMA is malformed: {}", msg)))
                     }
-                    _ => Ok(ParsedSection::Schema(block)),
+                    _ => Ok(ParsedSection::Schema(block.map(|b| (b, schema_parser.into_arena())))),
                 }
             }
             _ => Err(ParseException::new(format!("Unknown section: @{}", section.name))),
@@ -449,25 +489,40 @@ impl<'a> GeneralParser<'a> {
     fn parse_and_assign_section(
         &self,
         section: &SectionData,
-        script:  &mut DixScript,
+        script:  &mut Document,
     ) -> Result<(), ParseException> {
         match self.parse_section_inner(section) {
-            Ok(parsed) => { self.assign_section_to_script(parsed, script); Ok(()) }
+            Ok(parsed) => { self.assign_section_to_document(parsed, script); Ok(()) }
             Err(e)     => self.handle_section_error(&section.name, e),
         }
     }
 
-    fn assign_section_to_script(&self, parsed: ParsedSection, script: &mut DixScript) {
+    fn assign_section_to_document(&self, parsed: ParsedSection, document: &mut Document) {
         match parsed {
-            ParsedSection::DLM(r)        => script.dlm             = r,
-            ParsedSection::Enums(r)      => script.enums           = r,
-            ParsedSection::Imports(r)    => script.imports         = r,
-            ParsedSection::QuickFuncs(r) => script.quick_functions = r,
-            ParsedSection::Data(r)       => script.data            = r,
-            ParsedSection::Security(r)   => script.security        = r,
-            // Append, not overwrite — see the ParsedSection::Raw doc comment.
-            ParsedSection::Raw(r)        => { if let Some(block) = r { script.raw.push(block); } }
-            ParsedSection::Schema(r)     => script.schema          = r,
+            ParsedSection::DLM(r)     => document.dlm     = r,
+            ParsedSection::Enums(r)   => document.enums   = r,
+            ParsedSection::Imports(r) => document.imports = r,
+            ParsedSection::QuickFuncs(r) => {
+                document.quick_functions =
+                    r.map(|(section, arena)| section.shifted(document.arena.append(&arena)));
+            }
+            ParsedSection::Data(r) => {
+                document.data = r.map(|(section, arena)| section.shifted(document.arena.append(&arena)));
+            }
+            ParsedSection::Security(r) => {
+                document.security =
+                    r.map(|(section, arena)| section.shifted(document.arena.append(&arena)));
+            }
+            ParsedSection::Raw(r) => {
+                if let Some((block, arena)) = r {
+                    let offsets = document.arena.append(&arena);
+                    document.raw.push(block.shifted(offsets));
+                }
+            }
+            ParsedSection::Schema(r) => {
+                document.schema =
+                    r.map(|(section, arena)| section.shifted(document.arena.append(&arena)));
+            }
         }
     }
 
@@ -504,7 +559,7 @@ impl<'a> GeneralParser<'a> {
 
     fn ensure_security_section_exists(
         &self,
-        script: &mut DixScript,
+        script: &mut Document,
     ) -> Result<(), ParseException> {
         let has_encryptor = script
             .dlm
@@ -512,12 +567,13 @@ impl<'a> GeneralParser<'a> {
             .map(|d| d.modules.iter().any(|m| matches!(m.module_type, DLMModuleType::DEncryptor)))
             .unwrap_or(false);
 
+        // Only a file with an encryptor module needs a security section, and the utility works on
+        // the owned type, so that file's section is exported, completed and imported again.
         if !has_encryptor { return Ok(()); }
 
-        script.security = Some(SecurityUtilities::ensure_valid_security_section(
-            script.security.take(),
-            script.dlm.as_ref(),
-        ));
+        let owned = script.security.take().map(|section| section.export(&script.arena));
+        let ensured = SecurityUtilities::ensure_valid_security_section(owned, script.dlm.as_ref());
+        script.security = Some(DocSecurity::from_owned(&mut script.arena, &ensured));
         Ok(())
     }
 

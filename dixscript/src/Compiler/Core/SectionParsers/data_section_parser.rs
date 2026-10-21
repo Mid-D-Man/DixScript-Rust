@@ -134,12 +134,30 @@ pub fn new_with_error_manager(
         scratch_props: Vec::new(),
     }
 }
+    /// Consumes the parser and returns its arena, which holds every node of the section
+    /// that [`parse_section_doc`](Self::parse_section_doc) returned.
+    pub fn into_arena(self) -> Arena {
+        self.arena
+    }
+
         /// Parses the section and returns it.
     ///
     /// Under the `halt` error strategy a parse error ends the section and the result is the
     /// section failure result. Under `continue` and `recover` the parser keeps going and returns
     /// the entries it could read.
     pub fn parse_section(&mut self) -> Option<DataSection> {
+        let section = self.parse_section_doc()?;
+        Some(section.export(&self.arena))
+    }
+
+    /// Parses the section and leaves it in the parser's own arena, returning it as a
+    /// [`DocData`] whose ids name nodes there.
+    ///
+    /// This is [`parse_section`](Self::parse_section) without the final export. Take the arena
+    /// with [`into_arena`](Self::into_arena) afterwards: a caller that parses several sections
+    /// appends their arenas to one with [`Arena::append`] and moves each section with its
+    /// `shifted` method. The error handling is the same as in `parse_section`.
+    pub fn parse_section_doc(&mut self) -> Option<DocData> {
         self.log_debug("Starting DATA section parse");
 
         let section_start_pos = Position::from_token(self.current());
@@ -218,7 +236,7 @@ pub fn new_with_error_manager(
             ));
         }
 
-        Some(DocData { entries: data_entries, position: section_start_pos }.export(&self.arena))
+        Some(DocData { entries: data_entries, position: section_start_pos })
     }
 fn reset_parse_state(&mut self) {
     self.last_position = usize::MAX;
@@ -3257,7 +3275,7 @@ fn skip_annotation_lookahead(&self, at: usize) -> (usize, bool) {
         self.error_manager.should_terminate_parsing()
     }
 
-    fn handle_section_failure(&self, start_pos: Position) -> Option<DataSection> {
+    fn handle_section_failure(&self, start_pos: Position) -> Option<DocData> {
         if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt {
             self.error_manager
                 .log_error("DATA section parsing halted due to errors");
@@ -3266,7 +3284,7 @@ fn skip_annotation_lookahead(&self, at: usize) -> (usize, bool) {
             self.error_manager.log_warning(
                 "DATA section parsing completed with errors — returning empty section",
             );
-            Some(DataSection::new(Vec::new(), start_pos))
+            Some(DocData { entries: Vec::new(), position: start_pos })
         }
     }
 

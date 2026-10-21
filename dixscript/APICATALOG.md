@@ -129,7 +129,7 @@ field and parameter types) for the five sections that hold values. `Document::fr
 `alloc_expr_list(&[ExprId]) -> ExprList`, `alloc_prop_list(&[ObjectPropNode]) -> PropList`,
 `alloc_stmt_list(&[StmtId]) -> StmtList`, `alloc_str_list(&[S]) -> StrList` and
 `alloc_case_list(&[SwitchCaseNode]) -> CaseList` store a run of ids, names or cases, and
-`alloc_case(SwitchCaseNode) -> CaseId` stores one case. `Document` implements `Display`, and `Arena::display(&item) -> ArenaDisplay`
+`alloc_case(SwitchCaseNode) -> CaseId` stores one case. `Arena::append(&Arena) -> ArenaOffsets` copies one arena onto the end of another, and `DocData`, `DocRawBlock`, `DocSecurity`, `DocSchema` and `DocQuickFuncs` each have `shifted(ArenaOffsets)` to move a section built in the appended arena. `GeneralParser::parse_document(self) -> Result<Document, ParseException>` parses a file into one merged `Document`, and each section parser has `parse_section_doc(&mut self)` and `into_arena(self)`. `Document` implements `Display`, and `Arena::display(&item) -> ArenaDisplay`
 pairs a `Doc*` section with its arena so that it prints; both print exactly what the owned types
 print. All five section parsers (`@SECURITY`, `@RAW`, `@SCHEMA`, `@DATA` and `@QUICKFUNCS`) build into an arena
 internally and return the owned section, so their public interfaces are unchanged; the rest of the

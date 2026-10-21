@@ -78,6 +78,9 @@ one `@RAW(...)` occurrence.
 **What it does:** Parses one `@RAW(...)` occurrence's tokens into a `RawBlock`.
 
 **Decisions:**
+- `parse_section_doc` is the real parse and returns the `DocRawBlock` section with its nodes left in the
+  parser's own arena, and `into_arena` returns that arena. `parse_section` is a wrapper that exports,
+  so existing callers are unchanged, and `general_parser.rs` uses the first two to merge the arenas.
 - Structure mirrors `security_section_parser.rs` closely (same recovery helpers, same field-list
   parsing for `meta_data` and `using`). `content`'s right-hand side is different from every other
   section value: it is never `{` or `}` tokens at the parser level, because the lexer already
@@ -166,6 +169,9 @@ constraint keys were supplied).
 `path = Schema.<Type>(literal, ...)`, commas between fields optional.
 
 **Decisions:**
+- `parse_section_doc` is the real parse and returns the `DocSchema` section with its nodes left in the
+  parser's own arena, and `into_arena` returns that arena. `parse_section` is a wrapper that exports,
+  so existing callers are unchanged, and `general_parser.rs` uses the first two to merge the arenas.
 - Its own mini-parser rather than wrapping `DataSectionParser`. The original plan was to reuse
   `@DATA`'s value grammar, but `@DATA`'s parser has no static-builtin-call arm
   (`IdentifierPatternType::StaticMethodCall` is only handled inside QuickFuncs), so it cannot parse
@@ -251,21 +257,33 @@ parse, and semantic analysis in sequence.
 
 ### `Compiler/Core/general_parser.rs`
 
-**What it does:** Top-level section dispatch — extracts each section's
-token stream, parses it, and assigns the result onto the `DixScript` AST.
+**What it does:** Top-level section dispatch: extracts each section's
+token stream, parses it, and assigns the result onto a `Document`, which `parse` exports as the
+`DixScript` AST.
 
 **Decisions:**
-- `assign_section_to_script` needed a third assignment mode for `@RAW`,
+- **`parse_document` is the real parse, and `parse` is a wrapper.** `parse_document` returns a
+  `Document`: one arena plus the sections. The sections are parsed in parallel, so each section
+  parser builds into its own arena (`parse_section_doc`, then `into_arena`), and the result of each
+  one comes back as a section together with its arena. The arenas are appended to the document's
+  arena in source order, after the parallel part, whichever thread finished first, so the result is
+  the same on every run. `parse` is `parse_document` followed by one `export`, so every existing
+  caller is unchanged. The stages that move to the arena call `parse_document` and read the
+  `Document`.
+- `@SECURITY` is the one section that is sometimes created by the parser: a file with an encryptor
+  module gets a section completed by `SecurityUtilities`, which works on the owned type. That file's
+  section is exported, completed and imported again into the document's arena.
+- `assign_section_to_document` needed a third assignment mode for `@RAW`,
   alongside the existing two: overwrite (singleton sections) and merge
   (`@DATA`/`@QUICKFUNCS`/`@ENUMS`, which combine same-name blocks into one
-  collection). `@RAW` appends — `ParsedSection::Raw(Some(block))` pushes
-  onto `script.raw` rather than replacing anything, so multiple `@RAW`
+  collection). `@RAW` appends — `ParsedSection::Raw(Some((block, arena)))` appends
+  the arena and pushes the shifted block onto `document.raw` rather than replacing anything, so multiple `@RAW`
   blocks in one file each land correctly instead of the last one
   overwriting the others.
 - `has_raw_enabled` follows the same `operational_settings.is_feature_enabled("raw")`
   pattern as every other gated section.
 - `@SCHEMA` is a singleton, so `ParsedSection::Schema` uses a plain
-  overwrite in `assign_section_to_script` (unlike `Raw`, which appends).
+  overwrite in `assign_section_to_document` (unlike `Raw`, which appends).
   Its dispatch arm also refuses a malformed section under Halt — see
   `schema_section_parser.rs`'s `first_error`.
 - `is_section_keyword_token` now lists `SectionRaw` and `SectionSchema`
@@ -340,6 +358,9 @@ is declared here and is the one submodule that is not re-exported flat, so it is
 integer, long, float, double, boolean, hex colour, `null` or `auto`.
 
 **Decisions:**
+- `parse_section_doc` is the real parse and returns the `DocSecurity` section with its nodes left in the
+  parser's own arena, and `into_arena` returns that arena. `parse_section` is a wrapper that exports,
+  so existing callers are unchanged, and `general_parser.rs` uses the first two to merge the arenas.
 - This is the first parser built on the arena AST, as a pilot. The parser owns an `Arena`, builds
   every field value as a node there, keeps entries and fields as `DocSecurityEntry` and
   `DocSecurityField` records that hold the value ids, and exports the finished section once, at
@@ -634,6 +655,9 @@ properties, group arrays and object properties, with scalars, arrays, objects, t
 regex constructors, identifiers, enum values and function calls (local and imported) as values.
 
 **Decisions:**
+- `parse_section_doc` is the real parse and returns the `DocData` section with its nodes left in the
+  parser's own arena, and `into_arena` returns that arena. `parse_section` is a wrapper that exports,
+  so existing callers are unchanged, and `general_parser.rs` uses the first two to merge the arenas.
 - This is the fourth parser built on the arena AST. The parser owns an `Arena`, builds every value
   and expression there as a node, keeps the entries as `DocDataEntry` records that hold the ids,
   and exports the finished section once, at the end of `parse_section`, through
@@ -677,6 +701,9 @@ operators, ternaries, postfix chains (members, indexes, calls), literals, arrays
 blob and regex constructors, interpolated strings and lambdas.
 
 **Decisions:**
+- `parse_section_doc` is the real parse and returns the `DocQuickFuncs` section with its nodes left in the
+  parser's own arena, and `into_arena` returns that arena. `parse_section` is a wrapper that exports,
+  so existing callers are unchanged, and `general_parser.rs` uses the first two to merge the arenas.
 - This is the fifth and last section parser built on the arena AST. The parser owns an `Arena`,
   builds every value, expression and statement there as a node, keeps the functions as
   `DocQuickFunction` records that hold the ids, and exports the finished section once, at the end
@@ -914,3 +941,30 @@ requires the larger to take less than 7 times as long.
 - **Where the arena stops paying:** the same as in the earlier parsers. The section is built in
   its own arena and copied out at the end, which adds a copy until consumers read a `Document`.
   This completes the section parsers; every consumer still reads the owned types.
+
+### Fixes and Problems: merging the section arenas
+
+- **`Compiler/Core/general_parser.rs`:** the change was checked with a throwaway harness that runs the
+  loader's tokenize, config and parse stages over the 84 corpus files and 422 crafted sources (the
+  `@DATA` and `@QUICKFUNCS` ones from the parser checks), each under all three strategies (1,518
+  runs). It hashes every section of the AST that `parse` returns (data, quick functions, security,
+  schema, raw, imports, DLM and enums) and the diagnostics. The output of the pristine origin and of
+  the changed tree is byte-identical, and each is the same on a second run. The hash of the whole
+  file and of `@CONFIG` is left out, because the compiler's output is not deterministic across runs in
+  the order of the `@CONFIG` entries (a `HashMap`), and including it made the baseline differ from
+  itself.
+- **The first comparison compared a binary with itself.** The harness for the pristine origin and for
+  my tree were first built into one shared target directory, and cargo did not rebuild the library for
+  the second tree, so both binaries were the same program and the "byte-identical" result meant
+  nothing. This was noticed because a check of the two binaries found them equal. The two were
+  rebuilt one after the other, with `cargo clean -p dixscript` between them, and each was checked for
+  symbols that only the changed tree can contain (`ArenaOffsets`, `parse_section_doc`, `into_arena`,
+  `assign_section_to_document`) before the comparison was repeated. Building a second full target
+  directory also filled the disk.
+- **`tests/arena_merge.rs`:** see the Fixes entry in `arena-ast.md`. Ten injected bugs were each
+  caught by the main merge test, after two were found to go undetected by the first version.
+- The arena of a parser is appended whole, so the `Document` that `parse_document` returns also holds
+  the unreferenced nodes that a failed sub-expression left behind. They are harmless and are copied by
+  the merge. A section that fails to parse at all returns no arena and adds nothing.
+- **Not changed:** the loader and the language server still call `parse`, and the analyzers still read
+  the owned AST. Nothing outside `general_parser.rs` calls `parse_document` yet.

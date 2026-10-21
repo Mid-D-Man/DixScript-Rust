@@ -114,12 +114,30 @@ impl<'a> RawSectionParser<'a> {
         }
     }
 
+    /// Consumes the parser and returns its arena, which holds every node of the section
+    /// that [`parse_section_doc`](Self::parse_section_doc) returned.
+    pub fn into_arena(self) -> Arena {
+        self.arena
+    }
+
     /// Parses the section and returns its block.
     ///
     /// Under the `halt` error strategy a parse error ends the section and the result is `None`.
     /// Under `continue` and `recover` the parser keeps going and returns the fields it could
     /// read, with a `Value::Error` standing in for a field whose value is missing.
     pub fn parse_section(&mut self) -> Option<RawBlock> {
+        let section = self.parse_section_doc()?;
+        Some(section.export(&self.arena))
+    }
+
+    /// Parses the section and leaves it in the parser's own arena, returning it as a
+    /// [`DocRawBlock`] whose ids name nodes there.
+    ///
+    /// This is [`parse_section`](Self::parse_section) without the final export. Take the arena
+    /// with [`into_arena`](Self::into_arena) afterwards: a caller that parses several sections
+    /// appends their arenas to one with [`Arena::append`] and moves each section with its
+    /// `shifted` method. The error handling is the same as in `parse_section`.
+    pub fn parse_section_doc(&mut self) -> Option<DocRawBlock> {
         let section_start_pos = Position::from_token(self.current());
         self.reset_parse_state();
 
@@ -278,15 +296,15 @@ impl<'a> RawSectionParser<'a> {
         Some(self.finish_block(meta_data, using, content, section_start_pos))
     }
 
-    /// Exports the block built in the arena as the owned `RawBlock`.
+        /// Wraps the finished block's parts as a `DocRawBlock`.
     fn finish_block(
         &self,
         meta_data: Vec<DocRawField>,
         using: Vec<DocRawField>,
         content: Option<RawContent>,
         position: Position,
-    ) -> RawBlock {
-        DocRawBlock { meta_data, using, content, position }.export(&self.arena)
+    ) -> DocRawBlock {
+        DocRawBlock { meta_data, using, content, position }
     }
 
     /// Parses `{ key = value, key = value }` for `meta_data` and `using`. The field-list
@@ -492,7 +510,7 @@ impl<'a> RawSectionParser<'a> {
         meta_data: Vec<DocRawField>,
         using: Vec<DocRawField>,
         content: Option<RawContent>,
-    ) -> Option<RawBlock> {
+    ) -> Option<DocRawBlock> {
         if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt {
             None
         } else {

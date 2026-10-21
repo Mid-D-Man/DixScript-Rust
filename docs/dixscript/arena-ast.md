@@ -616,13 +616,14 @@ all instructions.
 - Steps 3 and 4 (operator enum, whole-tree clones, re-measure).
 - The rest of step 6. Done: arena-aware `Display`, `Debug` and equality through handles
   (`ValueRef`, `ExprRef`, `StmtRef`), the arena-resident `Document`, and `Display` for `Document`
-  and the `Doc*` section twins, and all five section parsers building into the arena. Planned drops, each compiling with the tests intact:
-  1. Merging the per-section arenas by id offset. The sections are parsed in parallel, so each
-     section parser builds into its own arena and exports at the end of its section. Once the
-     arenas are merged the parsers can hand a `Document` onward. The export copy goes away only
-     when the last consumer that reads the owned types has moved.
-  2. Read-only consumers, then mutators (enhancer, resolver), then `Runtime`, then DLM. Siblings
-     last behind the 2.0.0 bump, `mdix-lsp` last of all.
+  and the `Doc*` section twins, all five section parsers building into the arena, and the merge of their arenas into one `Document` (`Arena::append`, `GeneralParser::parse_document`). Planned drops, each compiling with the tests intact:
+  1. Moving the consumers one section at a time. Each section's analyzer moves together with its
+     enhancer (only `@QUICKFUNCS` has one) and the part of the general scripts that handles it.
+     The analyzers read the owned section and fill a symbol table, so their outputs must come out
+     identical. Until the last consumer has moved, one `Document::export` after the converted
+     stages feeds the rest, and the symbol table stays as it is.
+  2. Then the resolver, `Runtime` and DLM. Siblings last behind the 2.0.0 bump, `mdix-lsp` last of
+     all.
 
 ## Modules
 
@@ -887,6 +888,33 @@ section type with a `Display` (`DocData`, `DocDataEntry`, `DocPropertyAssignment
 **Tests:** `tests/arena_document_display.rs`, and two doctests: `Arena::display` and the `Display`
 impl of `Document` (`cargo test -p dixscript --doc document_display`).
 
+### `Compiler/AST/arena/merge.rs`
+
+**What it does:** Appends one arena to another and shifts the sections built in the appended arena.
+`Arena::append` copies every store of the other arena onto the end of this one and returns an
+`ArenaOffsets`. A node names its children by position in the stores of the arena it was built in,
+so each node is rewritten as it is copied. The `shifted` method of `DocData`, `DocRawBlock`,
+`DocSecurity`, `DocSchema` and `DocQuickFuncs` applies the same offsets to a section that was
+built there.
+
+**Decisions:**
+- **Why it exists.** The section parsers run in parallel, so each builds into an arena of its own.
+  To hand one `Document` onward the arenas have to become one, and the ids cannot simply be reused
+  because every arena starts counting at zero.
+- **One offset per store.** There are eleven (values, expressions, statements, object properties,
+  switch cases, unknown elements, the four lists of ids or names, and the text). The offsets are the
+  sizes of the destination's stores at the moment of the append. They must only be applied to ids and
+  spans issued by the appended arena. Applying them to an id of the destination moves it to the
+  wrong place, which the documentation says.
+- **Append-only.** Nothing already in the destination moves, so every id it issued stays valid.
+- **Every `match` lists every variant with no wildcard arm**, so a new node variant stops the build
+  until its ids are handled. Variants with no ids share one arm. `UnknownData` holds only strings,
+  so it is cloned. A shifted id that would pass the `u32` range panics.
+- The cost is one pass over the appended arena. It replaces the export that each parser used to do
+  in its own thread.
+
+**Tests:** `tests/arena_merge.rs` and the `Arena::append` doctest.
+
 ### `tests/arena_roundtrip.rs`
 
 **What it does:** Proves the arena holds the `Value` family completely, and that its handles
@@ -990,6 +1018,31 @@ whole file, and parameter defaults left out. Each was caught by the section test
 The file was restored afterwards. The whole suite passes: 547 unit tests, 230 integration tests
 and 11 doctests (26 ignored, as before).
 
+### `tests/arena_merge.rs`
+
+**What it does:** Checks that nothing is lost or mixed up when arenas are appended: sections built in
+different arenas, appended and shifted into one, must export to exactly the owned sections they were
+built from.
+
+**Decisions:**
+- **Two samples that fill every store.** Files A and B each use all eleven stores and differ in
+  every value, including the `miss` body of a switch, the arguments of a qualified call, a security
+  level, a block-bodied lambda and the default of a parameter. Two nodes the parser does not produce,
+  an unknown element and a range, are added by hand.
+- **Three arenas, every section shifted.** The sections of A and B are appended in turn to the arena
+  of a third sample, so both sets of offsets are nonzero and every section is moved by the offsets of
+  its own arena. Both directions (A then B, B then A) are checked, and the whole file is compared
+  through `Debug` and `Display`.
+- A test reads the printed offsets and fails if any store was empty in the destination, because a
+  shift bug in an empty store would go unnoticed.
+- The corpus test puts each section of every compiled file in an arena of its own, merges them in the
+  file's section order and compares the export with the original: 70 files and every section in
+  them.
+- The empty-arena edge cases and an in-turn merge of five single-section arenas are covered too.
+
+**Tests:** `cargo test -p dixscript --test arena_merge`. Six tests, all passing on Rust 1.75. Ten
+deliberate bugs were injected to check them (see the Fixes entry below).
+
 ## Fixes and Problems
 
 ### `benches/arena_vs_box_benchmark.rs`
@@ -1057,6 +1110,16 @@ and 11 doctests (26 ignored, as before).
 - An item must have been built in the arena it is printed with. Like every id, a mismatch reads
   the wrong nodes or panics, and the documentation says so.
 
+### `Compiler/AST/arena/merge.rs`
+- `ArenaOffsets` are the destination's sizes at the time of the append, so they are only valid for
+  ids and spans of the appended arena. A test of mine shifted a section that was built in the
+  destination and failed, which is why the documentation says so.
+- `Document` has no method that takes a parsed section together with its arena. `general_parser`
+  writes `section.shifted(document.arena.append(&arena))` for each section.
+- The cost is not measured. `parse()` used to export in the threads of the section parsers, and it
+  now exports once, on the calling thread, after the merge. A file with several sections may be a
+  little slower to parse until the stages that read the owned AST have moved.
+
 ### `tests/arena_roundtrip.rs`
 - 14 corpus files do not compile in the sandbox. Four need network access to download cloud
   imports (`06_cloud_basic`, `07_cloud_verify_invalid`, `09_cloud_transitive`,
@@ -1084,3 +1147,16 @@ and 11 doctests (26 ignored, as before).
   whole-file tests alone, which is why each section has its own test and why the empty-sections
   test exists: it prints every section with no entries, so only a bug in how the file puts its
   sections together can fail it.
+
+### `tests/arena_merge.rs`
+- **The mutation check found the tests weaker than they looked.** Eight bugs injected together were
+  caught by three tests, which looked like enough. Run one at a time against the two main merge tests
+  (the corpus test was not run for each bug), two bugs were caught by neither: the id of a switch's
+  default case, because the two samples had identical `miss` bodies and reading the wrong case gave
+  the same text, and the end of a range, because no sample held a range. Three more were missed by
+  the main test: two because it left the data and security sections unshifted, and one because the two
+  samples held identical qualified calls. The samples now differ in every one of those places, the
+  merge shifts every section, and each of the ten bugs is caught by the main test on its own.
+- The test that merges five single-section arenas in turn is weaker, because the destination is empty
+  in some stores when a section is appended, and it misses three of the ten bugs. It stays as a
+  second check of a different order.

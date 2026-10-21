@@ -96,6 +96,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Game code outside an assembly definition can use `MidManStudio.Mdix.Core`. The Core DLL was marked
+  "explicitly referenced" in Unity, so only assemblies that list it by name could see it. A project
+  with no assembly definitions got `CS0234` on `using MidManStudio.Mdix.Core;` and `CS0246` on
+  `MdixDatabase`, which is the Quick Start in the README and the return type of `MdixAsset.Load()`.
+  The DLL is now auto-referenced. The package's own assembly definitions list it by name and are not
+  changed. (`Runtime/Plugins/MidManStudio.Mdix.Core.dll.meta`, and the template in
+  `build-upm.yml` that writes this file when it is missing.)
 - MDIX Studio: the highlighter's colour markup (`<color=#…>`) no longer reaches the text buffer.
   Setting the colour layer's text sent a change event that bubbled up to the code field, and the
   window took it for an edit. It went to the language server (hover reported hex colours that were

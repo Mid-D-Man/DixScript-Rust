@@ -289,6 +289,8 @@ pub fn run_show_ast(ast: &DixScript) -> CommandResult {
         ast.quick_functions.as_ref().map(|_| "@QUICKFUNCS"),
         ast.data.as_ref().map(|_| "@DATA"),
         ast.security.as_ref().map(|_| "@SECURITY"),
+        (!ast.raw.is_empty()).then_some("@RAW"),
+        ast.schema.as_ref().map(|_| "@SCHEMA"),
     ]
         .iter()
         .filter_map(|o| o.as_ref().map(|s| s.to_string()))

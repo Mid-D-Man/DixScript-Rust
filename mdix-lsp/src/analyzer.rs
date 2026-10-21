@@ -481,6 +481,8 @@ fn find_section_token_pos(
             | (TokenType::SectionImports,    TokenType::SectionImports)
             | (TokenType::SectionQuickFuncs, TokenType::SectionQuickFuncs)
             | (TokenType::SectionSecurity,   TokenType::SectionSecurity)
+            | (TokenType::SectionRaw,        TokenType::SectionRaw)
+            | (TokenType::SectionSchema,     TokenType::SectionSchema)
         )
     };
     tokens.iter()
@@ -570,7 +572,7 @@ fn describe_stray_token(
     index:  usize,
 ) -> (usize, usize, String, Option<String>) {
     let token = &tokens[index];
-    let valid = "Valid sections: @CONFIG, @IMPORTS, @DLM, @ENUMS, @QUICKFUNCS, @DATA, @SECURITY."
+    let valid = "Valid sections: @CONFIG, @IMPORTS, @DLM, @ENUMS, @QUICKFUNCS, @DATA, @SECURITY, @RAW, @SCHEMA."
         .to_string();
 
     match &token.token_type {

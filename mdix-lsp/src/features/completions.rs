@@ -621,6 +621,10 @@ fn section_snippet_completions() -> Vec<CompletionItem> {
         ("@QUICKFUNCS", "QUICKFUNCS(\n  ~${1:funcName}<${2:object}>(${3:param1}, ${4:param2}) {\n    return {\n      ${5:key} = ${6:param1}\n    }\n  }\n)",                                                           "Compile-time functions."),
         ("@DATA",       "DATA(\n  ${1:key} = ${2:value}\n\n  ${3:table}: ${4:field} = ${5:value}\n\n  ${6:array}::\n    ${7:item1},\n    ${8:item2}\n)",                                                              "Data payload."),
         ("@SECURITY",   "SECURITY(\n  encryption -> {\n    mode = \"${1|password,keyfile|}\",\n    algorithm = \"${2|aes256-gcm,aes128-gcm,chacha20-poly1305|}\"\n  }\n  keystore -> {\n    auto_generate = true\n  }\n)", "@SECURITY section — required when @DLM includes DEncryptor."),
+        ("@RAW",        "RAW(\n  meta_data -> { id = \"${1:name}\" }\n  content -> {\n    ---${2:tag001}\n${3:payload}\n---${2:tag001}\n  }\n)",
+                        "Verbatim payload block. `meta_data.id` is required and unique; the `---tag` delimiter lines must match."),
+        ("@SCHEMA",     "SCHEMA(\n  ${1:field} = Schema.${2|Int,Long,Float,Double,String,Bool,Array,Enum,Object,Tuple,Date,Timestamp,Hex,Blob,Regex|}()\n)",
+                        "Compile-time type constraints for @DATA. One per file; method names are capitalised."),
     ];
     sections.iter().map(|(label, snippet, doc)| CompletionItem {
         label:              label.to_string(),

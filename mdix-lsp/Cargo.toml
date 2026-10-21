@@ -20,18 +20,12 @@ path = "src/main.rs"
 
 [dependencies]
 tower-lsp          = { version = "0.20" }
-# Deliberately the published crates.io version, not `{ path = "../dixscript" }`
-# — same reasoning mdix-wasm/Cargo.toml documents for itself and mdix-cli/
-# Cargo.toml now uses too: this crate (both the mdix-lsp binary and the
-# mdix_lsp library downstream dialect crates depend on — see src/lib.rs /
-# src/extensions.rs) has no cross-crate type identity with the rest of
-# this workspace to preserve, so every build here — including CI —
-# exercises the same dixscript real external consumers get. Run the
-# "Sync Cargo.lock" workflow (workflow_dispatch, default target
-# "dixscript") once before publishing/`--locked` building off this, since
-# this changed from a path+version dep and the committed Cargo.lock hasn't
-# been regenerated to match yet.
-dixscript          = "1.0.0"
+# Path dependency while v2.0.0 is in progress: the LSP matches on `TokenType::SectionRaw` /
+# `SectionSchema` / `RawContent` and `SectionId::Raw` / `Schema`, which the published
+# crates.io 1.0.0 does not have. Keep `version` equal to ../dixscript/Cargo.toml's version
+# (bump both together when dixscript goes to 2.0.0), and publish dixscript before
+# publishing mdix-lsp, because a published mdix-lsp resolves this dep from crates.io.
+dixscript          = { path = "../dixscript", version = "1.0.0" }
 tokio              = { version = "1", features = ["full"] }
 dashmap            = "6"
 serde              = { version = "1.0", features = ["derive"] }

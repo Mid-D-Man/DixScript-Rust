@@ -166,6 +166,8 @@ fn definition_for(
         TokenType::SectionQuickFuncs => section_loc(&doc.tokens, &doc.uri, SectionId::QuickFuncs),
         TokenType::SectionData       => section_loc(&doc.tokens, &doc.uri, SectionId::Data),
         TokenType::SectionSecurity   => section_loc(&doc.tokens, &doc.uri, SectionId::Security),
+        TokenType::SectionRaw        => section_loc(&doc.tokens, &doc.uri, SectionId::Raw),
+        TokenType::SectionSchema     => section_loc(&doc.tokens, &doc.uri, SectionId::Schema),
 
         _ => None,
     }
@@ -767,6 +769,8 @@ fn section_keyword_len(id: SectionId) -> u32 {
         SectionId::QuickFuncs => 11,
         SectionId::Data       => 5,
         SectionId::Security   => 9,
+        SectionId::Raw        => 4,
+        SectionId::Schema     => 7,
         SectionId::None       => 1,
     }
 }

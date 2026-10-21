@@ -60,6 +60,8 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
         SectionId::QuickFuncs,
         SectionId::Data,
         SectionId::Security,
+        SectionId::Raw,
+        SectionId::Schema,
     ] {
         collect_outer_paren_fold(&doc.tokens, section_id, &mut ranges);
     }
@@ -185,6 +187,8 @@ fn is_section_keyword(tt: &TokenType) -> bool {
             | TokenType::SectionQuickFuncs
             | TokenType::SectionData
             | TokenType::SectionSecurity
+            | TokenType::SectionRaw
+            | TokenType::SectionSchema
     )
 }
 

@@ -684,7 +684,9 @@ fn classify(
         | TokenType::SectionEnums
         | TokenType::SectionQuickFuncs
         | TokenType::SectionData
-        | TokenType::SectionSecurity     => Some((TT_KEYWORD, MOD_READONLY)),
+        | TokenType::SectionSecurity
+        | TokenType::SectionRaw
+        | TokenType::SectionSchema       => Some((TT_KEYWORD, MOD_READONLY)),
 
         // Language keywords
         TokenType::Keyword(_)            => Some((TT_KEYWORD, 0)),
@@ -734,7 +736,10 @@ fn classify(
         TokenType::Identifier(_) => Some(state.classify_identifier(token, tokens, index)),
 
         // Structural / ignored
+        // `RawContent` is an opaque, usually multi-line @RAW payload; semantic tokens
+        // cannot span lines, so it is deliberately left unclassified.
         TokenType::Symbol(_)
+        | TokenType::RawContent { .. }
         | TokenType::EndOfFile
         | TokenType::Error(_)          => None,
     }
@@ -759,6 +764,8 @@ fn token_length(token: &Token) -> usize {
         TokenType::SectionQuickFuncs      => 11,
         TokenType::SectionData            =>  5,
         TokenType::SectionSecurity        =>  9,
+        TokenType::SectionRaw             =>  4,
+        TokenType::SectionSchema          =>  7,
         TokenType::DoubleColon            =>  2,
         TokenType::Arrow                  =>  2,
         TokenType::SwitchCase             =>  2,

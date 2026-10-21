@@ -99,6 +99,17 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
             "**Modes:** `\"keyfile\"` (auto-generated `.key` file), `\"password\"` (prompted at compile time), `\"manual\"` (you supply `key`/`iv` — ⚠️ plaintext in source)\n\n**Algorithms:** `\"aes256-gcm\"`, `\"aes128-gcm\"`, `\"chacha20-poly1305\"`, `\"aes256\"`, `\"aes128\"`, `\"chacha20\"`, `\"xor\"` (⚠️ obfuscation only)\n\n**Blocks:** `encryption`, `validation`, `keystore`, `override`, `metadata`\n\nCompile: `mdix compile secrets.mdix --password`"
         )),
 
+        TokenType::SectionRaw => Some(section_hover("@RAW",
+            "Verbatim payload blocks — the content is carried as-is, never parsed as DixScript.",
+            "@RAW(\n  meta_data -> { id = \"banner\" }\n  content -> {\n    ---tag001\nhello world\n---tag001\n  }\n)",
+            "**Entries:** `meta_data`, `using`, `content`.\n\n`meta_data.id` is required and must be unique in the file. The delimiter line is `---` followed by a bare tag on its own line (no trailing dashes); the same tag closes the block, and each block's tag must be unique. A file may contain several `@RAW` sections."
+        )),
+        TokenType::SectionSchema => Some(section_hover("@SCHEMA",
+            "Compile-time type constraints for `@DATA`.",
+            "@SCHEMA(\n  port = Schema.Int()\n  name = Schema.String()\n)",
+            "One `@SCHEMA` per file. Each entry is `path = Schema.<Method>(args)`.\n\n**Methods (capitalised):** `Int`, `Long`, `Float`, `Double`, `String`, `Bool`, `Array`, `Enum`, `Object`, `Tuple`, `Date`, `Timestamp`, `Hex`, `Blob`, `Regex`. Lowercase spellings are lexer keywords and cannot follow `Schema.`.\n\nCompile-time only — nothing from `@SCHEMA` is serialized or carried into the runtime data."
+        )),
+
         TokenType::Keyword(kw) => hover_keyword(kw),
         TokenType::Bool(b) => Some(format!(
             "**`{}`** — boolean literal\n\nType: `<bool>`.",
@@ -1713,6 +1724,9 @@ fn token_value_len(token: &Token) -> usize {
         TokenType::SectionQuickFuncs => 11,
         TokenType::SectionData       => 5,
         TokenType::SectionSecurity   => 9,
+        TokenType::SectionRaw        => 4,
+        TokenType::SectionSchema     => 7,
+        TokenType::RawContent { start, end, .. } => end.saturating_sub(*start).max(1),
         TokenType::DoubleColon       => 2,
         TokenType::Arrow             => 2,
         TokenType::SwitchCase        => 2,

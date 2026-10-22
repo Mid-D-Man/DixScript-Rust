@@ -735,8 +735,13 @@ impl DixLoader {
             self.error_manager.clone(),
         ).map_err(|e| format!("Parser init failed: {}", e.message()))?;
 
-        let ast = parser.parse()
+        // The parser returns a `Document` (one arena for every section). The stages that have
+        // not moved to the arena still read the owned tree, so it is exported once here,
+        // before stage 5. Each stage that moves reads `document` instead; when the last one
+        // has moved, this export goes away.
+        let document = parser.parse_document()
             .map_err(|e| format!("Parse failed: {}", e.message()))?;
+        let ast = document.export();
 
         // Acquire the enum-registry lock before touching anything that reads
         // or writes `enum_object::DIXSCRIPT_ENUMS`. Stage 5 (semantic
@@ -764,8 +769,13 @@ impl DixLoader {
             &ast,
             &operational_settings,
             self.error_manager.clone(),
-        );
+        )
+        .with_document(&document);
         let semantic_result   = semantic_analyzer.analyze();
+
+        // Nothing after stage 5 reads the arena yet, so release it before the later stages
+        // build their own trees.
+        drop(document);
 
         if !semantic_result.is_success {
             let msgs: Vec<String> = semantic_result.errors.iter()

@@ -21,7 +21,7 @@
 //! `Display` for the same reason: [`Arena::display`] pairs one with its arena so that it can
 //! print, and [`Document`] implements `Display` directly (see `document_display.rs`).
 
-use super::{Arena, ExprId, StmtList, ValueId, ValueList};
+use super::{Arena, ExprId, StmtList, ValueId, ValueList, ValueNode};
 use crate::Compiler::AST::{
     DataEntry, DataSection, DataType, DixScript, Position, PropertyAssignment, QuickFuncParam,
     QuickFuncsSection, QuickFunction, RawBlock, RawContent, RawField, SchemaBlock, SchemaField,
@@ -220,6 +220,46 @@ impl DocRawBlock {
     /// not the one the block was built in.
     pub fn export(&self, arena: &Arena) -> RawBlock {
         export_raw(arena, self)
+    }
+
+    /// Returns `meta_data.id` when the block has one and it is a string.
+    ///
+    /// This is [`RawBlock::id`] for the arena form. A block whose `id` is present but is not a
+    /// string (for example `id = 5`) gives `None`, the same as a block with no `id` at all, so the
+    /// analyzer reports both as a missing id.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an id in the block is out of range for `arena`, for example when `arena` is not
+    /// the one the block was built in.
+    pub fn id<'a>(&'a self, arena: &'a Arena) -> Option<&'a str> {
+        self.field_str(&self.meta_data, arena, "id")
+    }
+
+    /// Returns `meta_data.format` when the block has one and it is a string.
+    ///
+    /// This is [`RawBlock::format`] for the arena form, with the same rule for a value that is
+    /// not a string as [`id`](Self::id).
+    ///
+    /// # Panics
+    ///
+    /// Panics if an id in the block is out of range for `arena`, for example when `arena` is not
+    /// the one the block was built in.
+    pub fn format<'a>(&'a self, arena: &'a Arena) -> Option<&'a str> {
+        self.field_str(&self.meta_data, arena, "format")
+    }
+
+    /// Finds the first field named `key` and returns its value when that value is a string.
+    fn field_str<'a>(
+        &'a self,
+        fields: &'a [DocRawField],
+        arena: &'a Arena,
+        key: &str,
+    ) -> Option<&'a str> {
+        fields.iter().find(|f| f.key == key).and_then(|f| match arena.value(f.value) {
+            ValueNode::String { value, .. } => Some(arena.text(*value)),
+            _ => None,
+        })
     }
 }
 

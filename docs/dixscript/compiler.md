@@ -110,16 +110,26 @@ tests (`raw_section_allowed_by_default_advanced_mode`, `raw_section_allowed_with
 **What it does:** Semantic validation across every `@RAW` block in a file.
 
 **Decisions:**
-- Takes `&[RawBlock]`, not a single section — the cross-block checks
+- Takes every block at once, not a single section: the cross-block checks
   (unique `meta_data.id`, unique delimiter tag) need every block visible
-  at once, which no single `RawBlock` has on its own. Per-block checks
+  at once, which no single block has on its own. Per-block checks
   (required `id`/`format`/`content`, type-checking `size`/`checksum` when
   present) run first; cross-block uniqueness runs second, using an
-  `FxHashMap` keyed by id/tag.
+  `FxHashMap` keyed by id/tag. The map borrows its keys from the arena and
+  from the block, so the check allocates no strings.
+- **One implementation, two entry points.** `analyze_doc(&[DocRawBlock],
+  &Arena, ...)` holds the checks and reads values through the arena.
+  `analyze(&[RawBlock], ...)` stays for callers that only have an owned
+  `DixScript`: it copies the blocks into a scratch arena and calls
+  `analyze_doc`, so the two cannot disagree. `GeneralSemanticAnalyzer` calls
+  `analyze_doc` when it was given a `Document` and `analyze` when it was not.
 - `using` is deliberately not validated against a fixed key set — a
   `module`-specific decoder legitimately needs different hint keys, so
   only the well-known ones (`filter`/`compression`/`threads`/`module`)
   get a type check when present.
+
+**Tests:** `tests/raw_section_tests.rs` (through the loader) and
+`tests/raw_analyzer_document.rs` (the diagnostics themselves, on both paths).
 
 **Benchmarks:** `benches/raw_section_benchmark.rs`'s
 `raw_section_full_pipeline` group tracks how the uniqueness check scales
@@ -254,6 +264,12 @@ parse, and semantic analysis in sequence.
   `SchemaSectionAnalyzer::validate_resolved` against the resolved `@DATA`,
   so a schema can constrain values a QuickFunc computed. A file whose plain
   literals already failed never reaches it, so nothing is reported twice.
+- Stage 4 calls `GeneralParser::parse_document` and exports the `Document` once, into the owned
+  tree that the stages which have not moved still read. Stage 5 gets both, through
+  `with_document`, and the document is dropped straight after it, because nothing later reads the
+  arena. When the last stage that reads the owned tree has moved, the export goes away. Imported
+  files are still parsed by the imports resolver with `parse`, so their `@RAW` blocks take the
+  owned path.
 
 ### `Compiler/Core/general_parser.rs`
 
@@ -300,6 +316,16 @@ token stream, parses it, and assigns the result onto a `Document`, which `parse`
 - `analyze_phase7b_schema` runs straight after `@DATA`'s own phase,
   because `@SCHEMA` constrains `@DATA` and needs it analysed first. It only
   sees the unresolved AST; the post-resolution half lives in `DixLoader`.
+- **An optional `Document`.** `with_document(&Document)` gives the analyzer the arena form of the
+  file. A section whose analyzer has moved to the arena reads it from the document, and a section
+  that has not moved reads the owned `DixScript` as before. `@RAW` is the first to move:
+  `analyze_phase6b_raw` calls `RawSectionAnalyzer::analyze_doc` with the document's blocks and
+  arena when one is attached, and `analyze` (which copies into a scratch arena) when none is. The
+  constructors are unchanged, so the imports resolver, the language server and every test that
+  builds the analyzer from an owned tree compile and behave as they did.
+- The analyzer does not check that the document and the owned tree describe the same file. A pair
+  that disagrees is analysed as a mixture of both, and two tests build such a pair on purpose to
+  show which half a section reads.
 
 ### `Compiler/VersionControl/version_constraints.rs` and `version_manager.rs`
 
@@ -501,6 +527,34 @@ also pins the section's `Debug` text, which holds every source position.
 
 **Tests:** `cargo test -p dixscript --test quickfuncs_parser_tests`. 41 tests, all passing on Rust
 1.75. Ten deliberate bugs were injected to check them (see the Fixes entry below).
+
+### `tests/raw_analyzer_document.rs`
+
+**What it does:** Pins the diagnostics of the `@RAW` analyzer and checks that it gives the same ones
+when it reads a `Document` as when it reads the owned tree. The loader tests in
+`raw_section_tests.rs` mostly check only that a source is accepted or rejected, so they do not show
+which diagnostics were produced.
+
+**Decisions:**
+- **Twenty sources, three strategies.** Each source exercises one check: every error code
+  `RAW001` to `RAW008`, both warnings, the types `size`, `checksum` and `threads` may take, a blank
+  id, an id that is not a string, a repeated key, and `@RAW` next to `@DATA` and `@QUICKFUNCS`. The
+  comparison test runs each under `halt`, `continue` and `recover`, with and without a document, and
+  compares success, errors, warnings, positions, the per-section results and what reached the error
+  manager (60 comparisons).
+- **The expected ids were recorded, not derived.** The table in
+  `raw_diagnostic_matrix_matches_the_recording` was written from the output of the analyzer before it
+  moved, captured by the before and after harness (see the last Fixes entry). One row shows that
+  `halt` stops after the first block with errors and so never reaches the duplicate checks, and a
+  second test shows `continue` going on to report them.
+- **Two tests build a document and an owned tree that disagree on purpose.** One has duplicate ids
+  in the document and no blocks in the tree, the other the reverse. Nothing else can show which half
+  the analyzer reads, because for a matching pair the answers are the same.
+- The helpers `DocRawBlock::id` and `format` are compared with the owned `RawBlock::id` and `format`
+  on every block of every source, and a repeated key shows that the first one wins on both sides.
+
+**Tests:** `cargo test -p dixscript --test raw_analyzer_document`. 11 tests, all passing on Rust
+1.75. Eleven deliberate bugs were injected to check them (see the last Fixes entry).
 
 ## Fixes and Problems
 
@@ -966,5 +1020,49 @@ requires the larger to take less than 7 times as long.
 - The arena of a parser is appended whole, so the `Document` that `parse_document` returns also holds
   the unreferenced nodes that a failed sub-expression left behind. They are harmless and are copied by
   the merge. A section that fails to parse at all returns no arena and adds nothing.
-- **Not changed:** the loader and the language server still call `parse`, and the analyzers still read
-  the owned AST. Nothing outside `general_parser.rs` calls `parse_document` yet.
+- **Not changed in that drop:** the loader and the language server still called `parse`, and the
+  analyzers still read the owned AST. Nothing outside `general_parser.rs` called `parse_document`.
+  The loader has called it since the `@RAW` analyzer moved (see the last entry below).
+
+### Fixes and Problems: the `@RAW` analyzer reads the Document
+
+- **`Compiler/Core/SectionAnalyzers/raw_section_analyzer.rs`, `general_semantics_analyzer.rs` and
+  `Runtime/loader.rs`:** the change was checked with a throwaway harness that runs the loader's
+  tokenize, config, parse and semantic stages over the 84 corpus files and 21 crafted sources, the
+  crafted ones under all three strategies (147 runs, 2,198 lines). It prints the success flag, the
+  sorted errors and warnings with positions, the per-section results, the records the analyzers
+  left in the error manager, the short name and type indexes and the symbol table, with every map
+  sorted. It does not print the AST or `@CONFIG`, so the `HashMap` order of `@CONFIG` does not
+  matter. The output of the original code is the same on a second run, and the changed tree gives
+  byte-for-byte the same output through the owned entry point and through the `Document` one. The
+  comparison was repeated on the final build. The harness and its output are not delivered.
+- **The two binaries were checked to be different programs.** The symbol `analyze_doc` occurs four
+  times in the changed binary and not at all in the original one. This follows the earlier entry
+  about a comparison of a binary with itself.
+- **The corpus has no `@RAW` section,** so only the crafted sources reach the analyzer. The baseline
+  was checked to contain every error and warning code the analyzer can give, under all three
+  strategies, before it was relied on.
+- **`tests/raw_analyzer_document.rs`:** eleven bugs were injected behind an environment switch, in
+  one build and each run alone, with a control run that must pass: the document ignored by the
+  orchestrator, the wrapper copying only the first block, `size` rejecting an integer, `checksum`
+  expecting an integer, duplicate tags compared on their first character, the last of a repeated
+  key winning, `halt` never stopping, the duplicate id error pointing at the first block, the
+  emptiness check reading the owned tree, a blank id accepted, and `threads` rejecting a long. Ten
+  were caught by the tests as they stood when the check began. The eleventh, a `threads` value of
+  long type being rejected, was caught by nothing, so a source and two table rows for it were added
+  and it is caught now.
+- **The 16 tests in `raw_section_tests.rs` caught none of the eleven bugs.** They check through the
+  loader whether a source is accepted, so a wrong position, a wrong message or a duplicate that is
+  found for the wrong reason does not fail them.
+- **What no test can catch:** the loader forgetting to call `with_document`. The result is the same
+  by design, so no output differs. It was checked by reading the code, and an allocation count
+  taken once more consumers have moved would show it.
+- **Not changed:** `version_manager.rs` still tests `script.raw.is_empty()` on the owned tree, an
+  emptiness check with nothing to gain from the arena. The imports resolver and the language server
+  still call `parse`.
+- **Not measured:** speed and peak memory. During stage 5 the document and its export now exist at the
+  same time, where `parse` used to drop the arena inside the export. The corpus has no `@RAW`
+  section, so no gain is expected on it, and the `@RAW` analyzer is the smallest of the five (311
+  lines).
+- **Not run:** CI on stable Rust and the bench workflow. The results of the owner's runs could not be
+  read, because GitHub's API rate-limits the sandbox.

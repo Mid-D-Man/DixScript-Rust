@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use web_time::Instant;
 use crate::Compiler::AST::*;
+use crate::Compiler::AST::arena::Document;
 use crate::Compiler::Core::{
     ErrorHandlingStrategy,
     OperationalSettings,
@@ -24,6 +25,10 @@ use crate::Builtins::Static::enum_object;
 
 pub struct GeneralSemanticAnalyzer<'a> {
     ast:                  &'a DixScript,
+    /// The arena form of the same file, when the caller has one. Sections whose analyzer has
+    /// moved to the arena read from here; the rest still read `ast`. `None` means every
+    /// section reads `ast`. See [`with_document`](Self::with_document).
+    document:             Option<&'a Document>,
     operational_settings: &'a OperationalSettings,
     symbol_table:         SymbolTable,
     error_manager:        ErrorManager,
@@ -94,6 +99,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
         GeneralSemanticAnalyzer {
             ast,
+            document: None,
             operational_settings,
             symbol_table,
             error_manager,
@@ -124,6 +130,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
         GeneralSemanticAnalyzer {
             ast,
+            document: None,
             operational_settings,
             symbol_table: SymbolTable::new(),
             error_manager,
@@ -138,6 +145,37 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             propagate_error_manager: true,
             is_nested_import_analysis: false,
         }
+    }
+
+    /// Gives the analyzer the arena form of the file it is analyzing.
+    ///
+    /// Sections whose analyzer has moved to the arena (`@RAW` so far) then read the
+    /// `Document` instead of the owned tree. The result is the same either way; this only
+    /// saves the copy the owned entry points make.
+    ///
+    /// `document` must be the document `ast` was exported from. The analyzer does not check
+    /// this: a section that has not moved is read from `ast` and one that has moved is read
+    /// from `document`, so a pair that disagrees is analyzed as a mixture of both.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::Document;
+    /// use dixscript::Compiler::AST::DixScript;
+    /// use dixscript::Compiler::Core::{GeneralSemanticAnalyzer, OperationalSettings};
+    ///
+    /// let ast = DixScript::new();
+    /// let document = Document::from_owned(&ast);
+    /// let settings = OperationalSettings::default();
+    ///
+    /// let result = GeneralSemanticAnalyzer::new(&ast, &settings)
+    ///     .with_document(&document)
+    ///     .analyze();
+    /// assert!(result.errors.is_empty());
+    /// ```
+    pub fn with_document(mut self, document: &'a Document) -> Self {
+        self.document = Some(document);
+        self
     }
 
     /// Returns a cloned EM (LSP) or the shared singleton (CLI).
@@ -439,12 +477,19 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
     /// Mirrors `analyze_phase6_independent` (DLM) — `@RAW` doesn't feed
     /// into or depend on any other section's analysis, so this runs
-    /// unconditionally alongside it. Takes `&self.ast.raw` (a slice, not a
+    /// unconditionally alongside it. Takes every block (a slice, not a
     /// single section) since cross-block id/tag uniqueness needs every
     /// block visible at once — see `raw_section_analyzer.rs`'s top doc
     /// comment.
+    ///
+    /// Reads the `Document` when the caller attached one, and the owned tree otherwise.
     fn analyze_phase6b_raw(&mut self) {
-        if self.ast.raw.is_empty() {
+        let document = self.document;
+        let has_blocks = match document {
+            Some(doc) => !doc.raw.is_empty(),
+            None      => !self.ast.raw.is_empty(),
+        };
+        if !has_blocks {
             return;
         }
 
@@ -453,7 +498,10 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             self.operational_settings,
             em,
         );
-        let result = analyzer.analyze(&self.ast.raw, &mut self.symbol_table);
+        let result = match document {
+            Some(doc) => analyzer.analyze_doc(&doc.raw, &doc.arena, &mut self.symbol_table),
+            None      => analyzer.analyze(&self.ast.raw, &mut self.symbol_table),
+        };
         self.add_section_result("RAW", result);
     }
 

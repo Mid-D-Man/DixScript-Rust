@@ -133,7 +133,7 @@ field and parameter types) for the five sections that hold values. `Document::fr
 pairs a `Doc*` section with its arena so that it prints; both print exactly what the owned types
 print. All five section parsers (`@SECURITY`, `@RAW`, `@SCHEMA`, `@DATA` and `@QUICKFUNCS`) build into an arena
 internally and return the owned section, so their public interfaces are unchanged; the rest of the
-compiler still uses the owned types.
+compiler still uses the owned types. `GeneralSemanticAnalyzer::with_document(self, &Document) -> Self` gives the analyzer the arena form of the file, and `RawSectionAnalyzer::analyze_doc(&mut self, &[DocRawBlock], &Arena, &mut SymbolTable)` checks `@RAW` blocks through it; `DocRawBlock::id(&self, &Arena)` and `format(&self, &Arena)` return the `meta_data` strings.
 
 `Compiler::AST::Visitors` is also re-exported (`pub use Visitors::*`) but
 not catalogued in detail here — check the module directly if you need a
@@ -220,7 +220,7 @@ described here.
 | Path | What it does | Known entry points |
 |---|---|---|
 | `Compiler::Core::GeneralParser` | Token stream → raw AST | `GeneralParser::new(tokens, &config_section, &settings)?.parse()` |
-| `Compiler::Core::GeneralSemanticAnalyzer` | Symbol table construction + validation | `GeneralSemanticAnalyzer::new(&ast, &settings).analyze()` → `SemanticAnalysisResult { is_success, errors, warnings, symbol_table: Option<SymbolTable> }`; `symbol_table.namespaces` map exposes `.functions` for imported-namespace lookups |
+| `Compiler::Core::GeneralSemanticAnalyzer` | Symbol table construction + validation | `GeneralSemanticAnalyzer::new(&ast, &settings).analyze()` (add `.with_document(&doc)` when you hold the arena form) → `SemanticAnalysisResult { is_success, errors, warnings, symbol_table: Option<SymbolTable> }`; `symbol_table.namespaces` map exposes `.functions` for imported-namespace lookups |
 | `Compiler::Core::GeneralAstEnhancer` | AST normalization pass (post-parse, pre-resolve) | `GeneralAstEnhancer::new(&settings).enhance(&ast, Some(&semantic_result))` → `EnhancementResult { is_success, errors, total_enhancements, enhanced_ast }` |
 | `Compiler::Core::ValueResolution::ValueResolver` | Compile-time QuickFunc expression evaluator | `ValueResolver::new(ast, &symbol_table, debug_mode).resolve()` → `ResolutionResult { is_success, errors, function_calls_resolved, resolved_ast: Option<DixScript> }` |
 | `Compiler::Core::BinarySerialization::{BinaryPacker, BinaryUnpacker}` | Binary pack/unpack for `.mdix.enc` payloads | `BinaryPacker::new().pack(&ast)`, `BinaryUnpacker::new().unpack(&bytes)` |

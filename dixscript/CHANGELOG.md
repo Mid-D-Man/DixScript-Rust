@@ -34,6 +34,12 @@ Breaking release.
   prints; both print exactly what the owned types print. All five section parsers (`@SECURITY`, `@RAW`, `@SCHEMA`, `@DATA` and `@QUICKFUNCS`) build their values in an arena and export the finished section,
   with their public interfaces unchanged; the rest of the compiler still uses the owned types. It
   is the first piece of the arena AST described in `docs/dixscript/arena-ast.md`.
+- **`GeneralSemanticAnalyzer::with_document`**, which gives the analyzer the arena form of the file it
+  is analyzing, and **`RawSectionAnalyzer::analyze_doc`**, which checks `@RAW` blocks through an
+  `Arena`. `DocRawBlock::id` and `DocRawBlock::format` read a block's `meta_data` as
+  `RawBlock::id` and `format` do. The `@RAW` analyzer is the first consumer to read a `Document`;
+  `DixLoader` parses into one and passes it to the analyzer. Diagnostics are unchanged, and
+  `RawSectionAnalyzer::analyze` keeps its signature.
 
 ### Removed
 

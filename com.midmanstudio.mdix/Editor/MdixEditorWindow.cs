@@ -200,6 +200,12 @@ namespace MidManStudio.Mdix.Unity.Editor
             _codeField = new TextField
             {
                 multiline = true,
+                // Without this a multiline TextField stays in Unity's plain layout, where the mouse
+                // wheel and two-finger scroll do nothing and only moving the caret scrolls. Auto
+                // switches to the ScrollView-based layout: vertical scrollbar plus wheel scrolling.
+                // Keep it here, before the colour overlay attaches (InitializeLspIntegration below):
+                // the layout switch re-parents the field's inner text element.
+                verticalScrollerVisibility = ScrollerVisibility.Auto,
                 isDelayed = false,
                 style     =
                 {

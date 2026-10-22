@@ -1696,12 +1696,27 @@ namespace MidManStudio.Mdix.Unity.Editor
         }
 
         /// <summary>
-        /// Two-finger / wheel scrolling over the code. When the field scrolls through a ScrollView,
-        /// the wheel is applied to it directly; otherwise Unity's own handling is left alone.
+        /// Two-finger / wheel scrolling over the code. The code field is created with
+        /// <c>verticalScrollerVisibility = Auto</c>, which makes Unity scroll it through a ScrollView;
+        /// the wheel is then applied to that ScrollView directly, and Unity's own handling is left
+        /// alone when there is nothing to scroll.
         /// </summary>
         private void InstallCodeFieldWheel()
         {
             if (_codeField == null) return;
+
+            // If Unity ever stops giving the field a ScrollView, the wheel silently does nothing.
+            // Say so once, after the first layout, so it is not a mystery.
+            _codeField.schedule.Execute(() =>
+            {
+                if (_codeField != null && _codeField.Q<ScrollView>() == null)
+                {
+                    Debug.LogWarning(
+                        "[MDIX Studio] the code field has no ScrollView, so mouse-wheel scrolling " +
+                        "will not work in the Editor tab. Unity's multiline TextField layout may " +
+                        "have changed in this Unity version.");
+                }
+            }).ExecuteLater(500);
 
             _codeField.RegisterCallback<WheelEvent>(evt =>
             {

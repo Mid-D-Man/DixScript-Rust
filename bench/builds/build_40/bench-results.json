@@ -1,0 +1,77 @@
+{
+  "build": "40",
+  "branch": "master",
+  "commit": "cc1fa990",
+  "date": "",
+  "summary": {
+    "total": 6,
+    "suites": 1
+  },
+  "suites": [
+    {
+      "name": "raw_section_benchmark",
+      "benchmarks": [
+        {
+          "suite": "raw_section_benchmark",
+          "group": "raw_section_lexer_scan/payload_bytes",
+          "name": "256",
+          "full_name": "raw_section_benchmark/raw_section_lexer_scan/payload_bytes/256",
+          "lower_ns": 1387.3,
+          "mean_ns": 1388.5,
+          "upper_ns": 1390.1,
+          "std_ns": 0.7
+        },
+        {
+          "suite": "raw_section_benchmark",
+          "group": "raw_section_lexer_scan/payload_bytes",
+          "name": "4096",
+          "full_name": "raw_section_benchmark/raw_section_lexer_scan/payload_bytes/4096",
+          "lower_ns": 1475.5,
+          "mean_ns": 1476.1,
+          "upper_ns": 1476.6,
+          "std_ns": 0.27
+        },
+        {
+          "suite": "raw_section_benchmark",
+          "group": "raw_section_lexer_scan/payload_bytes",
+          "name": "65536",
+          "full_name": "raw_section_benchmark/raw_section_lexer_scan/payload_bytes/65536",
+          "lower_ns": 3813.6,
+          "mean_ns": 3830.1,
+          "upper_ns": 3861.5,
+          "std_ns": 11.98
+        },
+        {
+          "suite": "raw_section_benchmark",
+          "group": "raw_section_full_pipeline/blocks",
+          "name": "5",
+          "full_name": "raw_section_benchmark/raw_section_full_pipeline/blocks/5",
+          "lower_ns": 24325.0,
+          "mean_ns": 24364.0,
+          "upper_ns": 24394.0,
+          "std_ns": 17.25
+        },
+        {
+          "suite": "raw_section_benchmark",
+          "group": "raw_section_full_pipeline/blocks",
+          "name": "15",
+          "full_name": "raw_section_benchmark/raw_section_full_pipeline/blocks/15",
+          "lower_ns": 63453.0,
+          "mean_ns": 64519.0,
+          "upper_ns": 66948.0,
+          "std_ns": 873.75
+        },
+        {
+          "suite": "raw_section_benchmark",
+          "group": "raw_section_full_pipeline/blocks",
+          "name": "40",
+          "full_name": "raw_section_benchmark/raw_section_full_pipeline/blocks/40",
+          "lower_ns": 171270.0,
+          "mean_ns": 172070.0,
+          "upper_ns": 173000.0,
+          "std_ns": 432.5
+        }
+      ]
+    }
+  ]
+}

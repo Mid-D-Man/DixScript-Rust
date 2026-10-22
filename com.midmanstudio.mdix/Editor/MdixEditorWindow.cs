@@ -193,7 +193,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             _tabSearch?.RegisterCallback<ClickEvent>(_ => ShowTab(3));
 
             root.Q<Button>("btn-save")?.RegisterCallback<ClickEvent>(_ => SaveSource());
-            root.Q<Button>("btn-compile")?.RegisterCallback<ClickEvent>(_ => Compile());
+            root.Q<Button>("btn-compile")?.RegisterCallback<ClickEvent>(_ => CompileAndGenerate());
             _btnFoldAll = root.Q<Button>("btn-fold-all");
             _btnFoldAll?.RegisterCallback<ClickEvent>(_ => ToggleFoldAll());
 
@@ -360,6 +360,48 @@ namespace MidManStudio.Mdix.Unity.Editor
         }
 
         private string? _lastCompileError;
+
+        /// <summary>
+        /// The Compile button. Compiles the buffer; and when the file declares @DLM compression or
+        /// encryption, also writes its .mdix.enc and .mdix.key beside it (and gitignores the key).
+        /// Saving or opening a file only ever parses it: a new key is made only when you press this,
+        /// because every compile generates a different key.
+        /// </summary>
+        private void CompileAndGenerate()
+        {
+            if (!Compile()) return;
+            if (!MdixEncryption.DeclaresDlmOutput(_sourceText)) return;
+
+            if (string.IsNullOrEmpty(_currentPath))
+            {
+                SetStatus("✓  Compiles. Save the file, then press Compile again to write the .enc and .key.",
+                    error: false);
+                return;
+            }
+
+            // The .enc is built from the file on disk, so write the buffer out first.
+            if (_isDirty)
+            {
+                SaveSource();
+                if (_isDirty) return; // the save failed; SaveSource already said why
+            }
+
+            var outcome = MdixEncryption.Generate(_currentPath);
+            SetStatus((outcome.Success ? "✓  " : "✗  ") + outcome.Message, error: !outcome.Success);
+
+            if (outcome.Success && outcome.Generated)
+            {
+                Debug.Log(
+                    "[MDIX] " + outcome.Message + "\n" +
+                    "  " + outcome.EncPath + "\n  " + outcome.KeyPath + "\n" +
+                    (string.IsNullOrEmpty(outcome.GitIgnoreNote) ? string.Empty : "  " + outcome.GitIgnoreNote + "\n") +
+                    "  Ship the .enc. Never ship the .key: provide it from your own code with MdixKeys.Provide.");
+            }
+            else if (!outcome.Success)
+            {
+                Debug.LogError("[MDIX] Could not write the encrypted file: " + outcome.Message);
+            }
+        }
 
         /// <summary>
         /// After a successful write: compile (which refreshes the status bar and the Explorer) and

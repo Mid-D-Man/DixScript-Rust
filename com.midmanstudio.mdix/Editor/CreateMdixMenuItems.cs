@@ -68,6 +68,29 @@ namespace MidManStudio.Mdix.Unity.Editor
         private static bool ContextOpenStudioValidate() =>
             Selection.activeObject is MdixAsset;
 
+        [MenuItem("Assets/MDIX/Compile and Encrypt", false, 1202)]
+        private static void ContextCompileEncrypt()
+        {
+            var selected = Selection.activeObject as MdixAsset;
+            if (selected == null) return;
+
+            var outcome = MdixEncryption.Generate(AssetDatabase.GetAssetPath(selected));
+            if (outcome.Success)
+            {
+                Debug.Log("[MDIX] " + outcome.Message +
+                          (string.IsNullOrEmpty(outcome.GitIgnoreNote) ? string.Empty : "\n  " + outcome.GitIgnoreNote));
+            }
+            else
+            {
+                Debug.LogError("[MDIX] Could not write the encrypted file: " + outcome.Message);
+            }
+        }
+
+        // Only offered for a source that declares @DLM compression or encryption.
+        [MenuItem("Assets/MDIX/Compile and Encrypt", true)]
+        private static bool ContextCompileEncryptValidate() =>
+            Selection.activeObject is MdixAsset asset && MdixEncryption.DeclaresDlmOutput(asset.RawSource);
+
         // ── File creation helper ──────────────────────────────────────────────
 
         private static void CreateFile(string defaultName, string content)

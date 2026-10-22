@@ -204,28 +204,139 @@ Files written by earlier versions of the package still load.
 
 ---
 
-## Encrypted Data
+## Encrypted Data & Secrets
 
-For sensitive game data (server configs, API keys, premium content):
+For anything you do not want players reading (API keys, server addresses, premium content). Three files
+are involved, and each one has its own icon in the Project window:
+
+| File | Icon | What it is | Ships in the build? |
+|------|------|------------|---------------------|
+| `secrets.mdix` | blue | Your readable source. | **No.** It is the thing being hidden. |
+| `secrets.mdix.enc` | violet, **ENC** | The encrypted (and compressed) data. | **Yes.** |
+| `secrets.mdix.key` | red, **KEY** | The decryption key. | **Never.** |
+
+The point of the setup: the `.enc` goes out with the game, the key does not, and the only thing that can
+open the data at runtime is code **you** wrote, which hands the key over.
+
+### 1. Make the files
+
+1. **Create → MDIX → Encrypted Secrets**. The template has an `@DLM` section that asks for compression
+   and AES-256 encryption.
+2. Fill in your values in **MDIX Studio**.
+3. Press **Compile** in the Studio (or right-click the `.mdix` → **MDIX → Compile and Encrypt**).
+   This writes `secrets.mdix.enc` and `secrets.mdix.key` next to the source.
+
+Two things to know:
+
+- **Only Compile generates.** Saving or opening a file just parses it. Every compile makes a **new random
+  key**, so the `.enc` and `.key` are always a pair: if you compile again, ship the new `.enc` and
+  update the key wherever you keep it. An old key does not open a new `.enc`.
+- The files are written read-only. Compiling again replaces them.
+
+### 2. The guardrails
+
+- **gitignore.** The first compile adds `*.mdix.key` and `*.mdix.key.meta` to your project's `.gitignore`
+  (it creates the file if the project is a git repository). If you use another version control system,
+  ignore those two patterns yourself. A key that was committed *before* this was set up stays in git
+  history: rotate it by compiling again.
+- **Build guard.** A build fails, with the file names listed, if it would include a `.mdix.key`, or the
+  plaintext `.mdix` of an encrypted file. "Include" means referenced by an enabled scene, or in a
+  `Resources` folder or `StreamingAssets`, followed through dependencies. Run it any time from
+  **MidManStudio → MDIX Encryption → Check Build For Secrets**. It does not look inside Addressables
+  groups or AssetBundles you build yourself: keep keys and encrypted sources out of those.
+- **The key object holds nothing.** In the Project window a `.mdix.key` is an Editor-only stand-in; the
+  key text is never copied into the imported asset, so it cannot reach a build through it.
+- **Keep the source out of your game.** Do not drag `secrets.mdix` into a scene or prefab field, and do
+  not put it in `Resources` or `StreamingAssets`. A `MdixAsset` stores the whole source text in the build.
+
+### 3. Ship the `.enc` and provide the key
+
+Drag `secrets.mdix.enc` into a field. It is an `MdixEncAsset`: the encrypted bytes, included in the build
+on every platform, with no file path to resolve. Then give it the key from your own code:
+
 ```csharp
 using MidManStudio.Mdix.Unity;
+using UnityEngine;
 
-// Load encrypted file — key retrieved from your server at runtime.
-// The key never touches the player's disk.
+public class SecretsLoader : MonoBehaviour
+{
+    [SerializeField] private MdixEncAsset _secrets;      // drag secrets.mdix.enc here
+
+    private async void Start()
+    {
+        // YOUR code decides where the key comes from (see below).
+        string keyText = await MyBackend.FetchKeyAsync("secrets");
+        MdixKeys.Provide(_secrets.KeyName, keyText);      // KeyName is "secrets"
+
+        var result = _secrets.Load();
+        MdixKeys.Revoke(_secrets.KeyName);                // optional: don't keep the key in memory
+
+        if (result.IsFailure) { Debug.LogError(result.Error.Message); return; }
+
+        using var db = result.SuccessResult;
+        var apiKey = db.GetString("api_key").UnwrapOr("");
+    }
+}
+```
+
+`MdixKeys.Provide(name, text)` takes the text of the `.mdix.key` file. There is also
+`Provide(name, () => text)`, which calls your function each time the key is needed, so you can decode or
+fetch it inside the function instead of keeping it in a field. If no key was provided, `Load()` fails with a
+message that says exactly that. The rest of the loaders:
+
+| Call | Use when |
+|------|----------|
+| `asset.Load()` | You called `MdixKeys.Provide` first. |
+| `asset.LoadAs<T>(prefix)` | Same, and you want it bound straight into a class. |
+| `asset.LoadWithKey(keyText)` | You already hold the key text. |
+| `asset.LoadAsync(provider)` | Your own `IMdixKeyProvider` fetches it (server, vault, secure enclave). The provider is passed the key name. |
+| `asset.LoadWithPassword(keyText, password)` | Password-mode files (below). |
+
+**Where should the key come from?** That is the one decision MDIX leaves to you, because it is the one that
+matters:
+
+- **Your server** (strongest). Fetch the key after login or at startup. It never exists on the player's disk
+  and you can refuse to give it out. This is the right choice for anything valuable.
+- **Per player.** Derive or deliver a key tied to the account.
+- **Built into your code** (weakest). Better than a loose file, but anything the game can compute, someone
+  patient can extract from the game. Treat it as keeping honest players and casual file browsing out, not
+  as protection against a determined attacker.
+
+Nothing that runs on a player's device can be made impossible to extract. If a secret must stay secret
+(a server admin token, a payment key), do not ship it at all: keep it on your server.
+
+### 4. Password mode and other options
+
+- **Password mode.** A key file can be password-protected so the password, not a file, is the secret. The
+  Studio cannot compile these yet (it has no password prompt); compile them with the `mdix` command line
+  tool, then load with `LoadWithPassword(keyText, password)`.
+- **Files on disk instead of assets.** For data you download or save at runtime (not shipped), the
+  file-based helpers still work. The paths for encrypted files are `MdixPaths.EncConfigFile(...)` and
+  `MdixPaths.EncSaveFile(...)`:
+
+```csharp
+// Key fetched from your server each launch; it never touches the player's disk.
 var db = await MdixKeyStorage.LoadWithCloudKeyAsync(
-    MdixPaths.ConfigFile("server_settings"),
+    MdixPaths.EncConfigFile("server_settings"),
     "https://yourserver.com/api/keys/server_settings",
     cancellationToken);
-```
 
-For mobile with offline support:
-```csharp
-// Fetch key once when authenticated, cache locally in the app sandbox.
-// Subsequent launches use the cached key without a network call.
+// Mobile with offline support: fetch once, cache the key in the app sandbox.
 var db = await MdixKeyStorage.LoadWithCloudKeyAndCacheAsync(
-    MdixPaths.ConfigFile("premium_content"),
+    MdixPaths.EncConfigFile("premium_content"),
     "https://yourserver.com/api/keys/premium_content");
 ```
+
+### Troubleshooting
+
+| You see | Cause and fix |
+|---------|---------------|
+| "No key was provided for 'secrets'" | Call `MdixKeys.Provide("secrets", …)` before `Load()`. The name is the file name without `.mdix.enc`. |
+| Decryption fails after a recompile | Every compile makes a new key. Ship the new `.enc` **and** use the new key. |
+| Build stops with "would ship a secret" | A `.mdix.key` or encrypted plaintext `.mdix` is referenced or sits in `Resources` / `StreamingAssets`. The message lists the files. |
+| The key shows up in `git status` | It was tracked before it was ignored. `git rm --cached secrets.mdix.key`, then compile again for a fresh key. |
+| Compile says it needs a password | The file uses password mode. Compile it with the `mdix` command line tool. |
+| An unrelated `.enc` or `.key` file looks odd in the Project window | MDIX claims the `.enc` and `.key` extensions. Other files with those extensions are imported as harmless stand-ins and are not modified. |
 
 ---
 

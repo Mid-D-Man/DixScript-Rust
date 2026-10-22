@@ -111,6 +111,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (`Editor/Highlight/MdixCodeOverlay.cs`, `Editor/MdixEditorWindow.Lsp.cs`.)
 - MDIX Studio: Save now compiles, so the status line and the Explorer show the saved version, and a
   file that no longer compiles is reported as such instead of "Saved".
+- Encrypted files are now first-class in the Editor. `.mdix.enc` imports as an `MdixEncAsset` with a violet **ENC**
+  icon; `.mdix.key` gets a red **KEY** icon and an Editor-only stand-in object that never holds the key.
+  (`Editor/MdixEncImporter.cs`, `Editor/MdixKeyImporter.cs`, `Editor/MdixKeyAsset.cs`, `Editor/Icons/mdix_icon_enc.png`,
+  `Editor/Icons/mdix_icon_key.png`.)
+- The Studio **Compile** button (and **Assets ▸ MDIX ▸ Compile and Encrypt**) now writes `<name>.mdix.enc` and
+  `<name>.mdix.key` beside a source that declares `@DLM` compression or encryption, by loading the file the same way
+  `mdix compile` does. Saving and opening still only parse. Every compile makes a new key. The first compile adds
+  `*.mdix.key` and `*.mdix.key.meta` to `.gitignore`. (`Editor/MdixEncryption.cs`, `Editor/MdixEditorWindow.cs`,
+  `Editor/CreateMdixMenuItems.cs`.)
+- Build guard: a build now fails if it would include a `.mdix.key`, or the plaintext `.mdix` of an encrypted file
+  (referenced by an enabled scene, or in `Resources` / `StreamingAssets`, through dependencies).
+  **MidManStudio ▸ MDIX Encryption ▸ Check Build For Secrets** runs the same check on demand. (`Editor/MdixBuildGuard.cs`.)
+- New `MdixKeys` (provide a key from your own code: `MdixKeys.Provide("secrets", () => key)`) and `MdixEncAsset`
+  (`Load()`, `LoadAs<T>()`, `LoadWithKey()`, `LoadWithPassword()`, `LoadAsync(provider)`), so the `.enc` can ship in a
+  build as a normal asset while the key never does. (`Runtime/MdixKeys.cs`, `Runtime/MdixEncAsset.cs`.)
+- README: "Encrypted Data" is now "Encrypted Data & Secrets" (workflow, guardrails, where the key should come from,
+  troubleshooting) and its examples use `MdixPaths.EncConfigFile` (they used `ConfigFile`, which is the `.mdix` path).
 - MDIX Studio Editor tab: the mouse wheel, two-finger scroll and a vertical scrollbar now scroll the code.
   The field was in Unity's plain multiline layout, which only scrolls when the caret moves; it now sets
   `verticalScrollerVisibility = Auto`, which switches it to the ScrollView layout.

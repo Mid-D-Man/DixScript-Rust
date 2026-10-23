@@ -133,7 +133,7 @@ field and parameter types) for the five sections that hold values. `Document::fr
 pairs a `Doc*` section with its arena so that it prints; both print exactly what the owned types
 print. All five section parsers (`@SECURITY`, `@RAW`, `@SCHEMA`, `@DATA` and `@QUICKFUNCS`) build into an arena
 internally and return the owned section, so their public interfaces are unchanged; the rest of the
-compiler still uses the owned types. `GeneralSemanticAnalyzer::with_document(self, &Document) -> Self` gives the analyzer the arena form of the file, and `RawSectionAnalyzer::analyze_doc(&mut self, &[DocRawBlock], &Arena, &mut SymbolTable)` checks `@RAW` blocks through it; `DocRawBlock::id(&self, &Arena)` and `format(&self, &Arena)` return the `meta_data` strings.
+compiler still uses the owned types. `GeneralSemanticAnalyzer::with_document(self, &Document) -> Self` gives the analyzer the arena form of the file, and `RawSectionAnalyzer::analyze_doc(&mut self, &[DocRawBlock], &Arena, &mut SymbolTable)` checks `@RAW` blocks through it; `DocRawBlock::id(&self, &Arena)` and `format(&self, &Arena)` return the `meta_data` strings. `SecuritySectionAnalyzer::analyze_doc(&mut self, &DocSecurity, &Arena, &mut SymbolTable)` and `SchemaSectionAnalyzer::analyze_doc(&mut self, &DocSchema, Option<&DocData>, &Arena, &mut SymbolTable)` do the same for `@SECURITY` and `@SCHEMA`, and `DocSchemaField::path_string(&self)` gives a schema path in dotted form; the owned `analyze` and `validate_resolved` entry points of both keep their signatures.
 
 `Compiler::AST::Visitors` is also re-exported (`pub use Visitors::*`) but
 not catalogued in detail here — check the module directly if you need a

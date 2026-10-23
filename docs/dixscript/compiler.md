@@ -212,6 +212,34 @@ strategies and the halt message). `tests/schema_section_tests.rs` has flat and d
 optional commas, keyword-named path segments, negative bounds, lowercase type name, malformed
 section and non-literal argument, through the loader.
 
+### `Compiler/Core/SectionAnalyzers/security_section_analyzer.rs`
+
+**What it does:** Checks the `@SECURITY` section and reports what will fall back to a default: an
+empty section, an unknown or empty block, a missing or mistyped `mode`, `algorithm` or `kdf`, a weak
+algorithm (`xor`), key derivation parameters below their recommended minimum, a keystore
+`backup_count` outside 0 to 10, and a manual mode whose plaintext key warning was not accepted.
+
+**Decisions:**
+- **It only warns.** Every fallback is applied when the file is encrypted, so none of these stops a
+  compile and `result.errors` stays empty. Warning ids are `SEC_WARN001` to `SEC_WARN008`. The rule
+  that `@DLM` with an encryptor needs a `@SECURITY` section (`SEM0002`) belongs to the orchestrator,
+  not to this analyzer.
+- **One implementation, two entry points.** `analyze_doc(&DocSecurity, &Arena, ...)` holds the checks
+  and reads values through the arena. `analyze(&SecuritySection, ...)` stays for callers that only
+  have an owned `DixScript`: it copies the section into a scratch arena and calls `analyze_doc`, so
+  the two cannot disagree.
+- **A repeated key or block resolves in two different ways, and both are kept.** In the encryption
+  config, the keystore block and the validation block the last field with a key wins. The manual mode
+  check takes the first `manual_key_warning_accepted`. Of two blocks with the same name the last one
+  wins. These look inconsistent, but they are what the analyzer always did, so tests pin each one.
+- Block names and the `kdf` and checksum algorithm names are matched ignoring ASCII case. The `mode`
+  and `algorithm` names are matched exactly.
+- Key derivation parameters must be integers. A value written as a long, such as `100L`, is not
+  compared against the minimum and is ignored.
+
+**Tests:** `tests/security_section_tests.rs` (the parser) and `tests/security_analyzer_document.rs`
+(the diagnostics themselves, on both paths).
+
 ### `Compiler/Core/SectionAnalyzers/schema_section_analyzer.rs`
 
 **What it does:** Validates `@SCHEMA` descriptors, then checks `@DATA`
@@ -236,6 +264,18 @@ against them: presence, type, numeric `min`/`max`, string
   checks, not at the end of them — the Halt strategy returns early from
   inside the checks, and `SectionAnalysisResult::new` defaults it to false.
 - Error ids `SCH001`–`SCH007`; warning `SCHEMA_WARN001` (empty schema).
+- **One implementation, three entry points.** `analyze_doc(&DocSchema, Option<&DocData>, &Arena, ...)`
+  holds the checks and reads both sections through the arena. `analyze` and `validate_resolved` keep
+  their owned signatures and copy the schema and the data into a scratch arena before calling it, so
+  the three cannot disagree.
+- **The post-resolution pass pays for a copy.** `DixLoader` calls `validate_resolved` with the tree
+  that value resolution produced, which is still the owned type, so Stage 9 copies the resolved
+  `@DATA` section into an arena to check it. The semantic phase no longer copies anything. The extra
+  cost is one pass over the resolved data, and only for a file that has a `@SCHEMA`. It goes away
+  when the resolver reads the arena. It has not been measured.
+- The `Schema` builtin takes owned values, so `build_descriptor` copies the arguments of each field
+  out of the arena before calling it. They are a handful of literals, not the data section.
+- A string's length is its number of characters, not its bytes, so `"héllo wörld"` is 11.
 
 **Not done:** no nested-object shape validation (`Schema.Object` checks
 presence and kind only), no wildcard paths, no runtime validation of data
@@ -243,7 +283,8 @@ supplied after compilation — compile-time only.
 
 **Tests:** `tests/schema_section_tests.rs` — missing/optional fields, wrong
 type, numeric/string/array bounds, table and group-array paths, enums, the
-post-resolution stage, feature gating.
+post-resolution stage, feature gating. `tests/schema_analyzer_document.rs`
+pins the diagnostics themselves and compares the three entry points.
 
 ### `Runtime/loader.rs`
 
@@ -268,8 +309,9 @@ parse, and semantic analysis in sequence.
   tree that the stages which have not moved still read. Stage 5 gets both, through
   `with_document`, and the document is dropped straight after it, because nothing later reads the
   arena. When the last stage that reads the owned tree has moved, the export goes away. Imported
-  files are still parsed by the imports resolver with `parse`, so their `@RAW` blocks take the
-  owned path.
+  files are still parsed by the imports resolver with `parse`, so their `@RAW`, `@SECURITY` and
+  `@SCHEMA` sections take the owned path. Stage 9 still passes the resolved owned tree to
+  `SchemaSectionAnalyzer::validate_resolved`, which copies it into a scratch arena.
 
 ### `Compiler/Core/general_parser.rs`
 
@@ -318,9 +360,13 @@ token stream, parses it, and assigns the result onto a `Document`, which `parse`
   sees the unresolved AST; the post-resolution half lives in `DixLoader`.
 - **An optional `Document`.** `with_document(&Document)` gives the analyzer the arena form of the
   file. A section whose analyzer has moved to the arena reads it from the document, and a section
-  that has not moved reads the owned `DixScript` as before. `@RAW` is the first to move:
-  `analyze_phase6b_raw` calls `RawSectionAnalyzer::analyze_doc` with the document's blocks and
-  arena when one is attached, and `analyze` (which copies into a scratch arena) when none is. The
+  that has not moved reads the owned `DixScript` as before. `@RAW`, `@SECURITY` and `@SCHEMA` have
+  moved. Their phases (`analyze_phase6b_raw`, `analyze_phase8_generated` and
+  `analyze_phase7b_schema`) call the section analyzer's `analyze_doc` with the document's section and
+  arena when one is attached, and the owned `analyze` (which copies into a scratch arena) when none
+  is. `@SCHEMA` takes the `@DATA` section from the document too; the `@DATA` analyzer itself still
+  reads the owned tree. Whether a section is present is decided by the same tree that is analyzed,
+  and that includes the check that `@DLM` with an encryptor has a `@SECURITY` section. The
   constructors are unchanged, so the imports resolver, the language server and every test that
   builds the analyzer from an owned tree compile and behave as they did.
 - The analyzer does not check that the document and the owned tree describe the same file. A pair
@@ -555,6 +601,58 @@ which diagnostics were produced.
 
 **Tests:** `cargo test -p dixscript --test raw_analyzer_document`. 11 tests, all passing on Rust
 1.75. Eleven deliberate bugs were injected to check them (see the last Fixes entry).
+
+### `tests/security_analyzer_document.rs`
+
+**What it does:** Pins the diagnostics of the `@SECURITY` analyzer and checks that it gives the same
+ones when it reads a `Document` as when it reads the owned tree. The parser tests in
+`security_section_tests.rs` stop at the parse, so nothing else showed which warnings an analysis
+produced.
+
+**Decisions:**
+- **Thirty-eight sources, three strategies.** The sources cover every warning `SEC_WARN001` to
+  `SEC_WARN008`, all three modes, every algorithm class, the key derivation parameters (too low, the
+  wrong type, a long), keystore ranges at both ends, upper case block names, repeated keys, repeated
+  blocks, and `@SECURITY` next to `@DATA`, `@RAW` and `@DLM`. The comparison test runs each with and
+  without a document under `halt`, `continue` and `recover` (114 comparisons).
+- **The expected warnings were recorded, not derived.** The `RECORDING` table was written from the
+  output of the analyzer before it moved, captured by the before and after harness (see the last
+  Fixes entry). The strategy changes nothing here because the analyzer only warns, so each source
+  has one recorded case.
+- **`SEM0002` is reached through a pair that disagrees.** The parser adds a default `@SECURITY`
+  section when `@DLM` asks for an encryptor, so a parsed file never lacks one. The test takes the
+  section away from the owned tree, or attaches a document that has none, to show that the check
+  reads the same tree as the section.
+- Two tests build a document and an owned tree that disagree on purpose, one in each direction, as
+  `raw_analyzer_document.rs` does.
+
+**Tests:** `cargo test -p dixscript --test security_analyzer_document`. 12 tests, all passing on Rust
+1.75. Eleven deliberate bugs were injected to check them (see the last Fixes entry).
+
+### `tests/schema_analyzer_document.rs`
+
+**What it does:** Pins the diagnostics of the `@SCHEMA` analyzer and checks that it gives the same
+ones when it reads a `Document` as when it reads the owned tree, through all three entry points.
+
+**Decisions:**
+- **Thirty-one sources, three strategies.** The sources cover every error `SCH001` to `SCH007` and
+  the empty-schema warning, every value kind the analyzer classifies (integer, long, float, double,
+  string, bool, hex, date, timestamp, array, object, tuple, blob, regex, enum, null and a deferred
+  call), every path form (a property, an object, a table, a group array and a prefix of either),
+  explicit type annotations, repeated data names, unicode string lengths, and a QuickFunc value that
+  is only known after resolution. The comparison test runs each with and without a document (93
+  comparisons), and a second test compares `analyze`, `analyze_doc` and `validate_resolved`.
+- **The expected diagnostics were recorded, not derived.** The `RECORDING` table has a case per
+  source under `continue`, plus one under `halt` or `recover` where that strategy changes the
+  outcome (49 cases). It was written from the output of the analyzer before it moved.
+- **Two inputs are built by hand.** No parser produces a `NestedArray` value, so the recording can
+  never reach that arm, and the long-value range test needs a number the recording did not hold. Both
+  are written as explicit tests.
+- Four tests build a document and an owned tree that disagree, for the schema and for the data, in
+  each direction.
+
+**Tests:** `cargo test -p dixscript --test schema_analyzer_document`. 17 tests, all passing on Rust
+1.75. Twenty-two deliberate bugs were injected to check them (see the last Fixes entry).
 
 ## Fixes and Problems
 
@@ -1066,3 +1164,63 @@ requires the larger to take less than 7 times as long.
   lines).
 - **Not run:** CI on stable Rust and the bench workflow. The results of the owner's runs could not be
   read, because GitHub's API rate-limits the sandbox.
+
+### Fixes and Problems: the `@SECURITY` and `@SCHEMA` analyzers read the Document
+
+- **The change was checked with the same before and after harness as the `@RAW` analyzer,** extended
+  with 69 sources (38 for `@SECURITY` and 31 for `@SCHEMA`, some of which mix in other sections). It now
+  runs the 84 corpus files and 90 crafted sources, the crafted ones under all three strategies (354
+  runs, 5,227 lines), and for every source with a `@SCHEMA` it also calls `validate_resolved` and
+  prints its diagnostics. The output of the original code is the same on a second run, and the
+  changed tree gives byte-for-byte the same output through the owned entry points and through the
+  `Document` ones. The harness and its output are not delivered.
+- **One group of crafted sources never reached the code it was meant for, and one coverage gap was
+  found, both before the baseline was relied on.** A blob written as `b:("x")` is not valid base64,
+  so the `@DATA` analyzer stopped those files before `@SCHEMA` ran. Separately, a value kind that the
+  schema analyzer classifies only shows up in a message when it mismatches the schema, and only six
+  kinds had appeared, so sources that pair each kind with `Schema.Int` were added. After that every
+  kind that can appear in a mismatch message was seen, and every `SCH` and `SEC_WARN` code was seen
+  under all three strategies in the recording. A value that is only known after resolution is
+  accepted without a message by design, so it appears in the sources but not in a message.
+- **The two binaries were checked to be different programs.** The symbol `run_owned` occurs ten times
+  in the changed binary and not at all in the original one.
+- **The baseline was re-recorded once from the original code** to add three sources the mutation
+  checks needed. The changed files were put aside, the original ones restored, the harness rebuilt
+  and run twice, and the changes put back.
+- **`tests/security_analyzer_document.rs` and `tests/schema_analyzer_document.rs`:** 33 bugs were
+  injected behind an environment switch, in one build and each run alone, with a control run that
+  must pass. Eleven were in the `@SECURITY` path: the document ignored, the presence check reading
+  the owned tree, the wrapper copying an empty section, the first instead of the last repeated key,
+  the last instead of the first manual acceptance, the first instead of the last block, an exclusive
+  backup range, a minimum compared with `<=`, case-sensitive names, longs accepted as integers, and a
+  warning with no position. Twenty-two were in the `@SCHEMA` path, among them the document ignored
+  for the schema or for the data, the wrapper dropping the data, a path walk that ignores the key, the
+  last entry winning, byte length for strings, group arrays off by one, a tuple read as a blob, the
+  literal winning over the annotation, qualified enum names not matching, `halt` never stopping, a
+  wrong position, descriptor arguments truncated, a required null accepted, and a long truncated to
+  32 bits. Thirty-one were caught by the first version of the tests.
+- **Two bugs escaped, both gaps in the inputs, and tests were added for them.** A `NestedArray`
+  item count ignored was caught by nothing because no parser creates that value, so a test builds
+  the data by hand and runs it through both entry points. A long truncated to 32 bits before the
+  range check was caught by nothing because no source held a long above `i32::MAX` against a long
+  range, so a source for it was added. Both bugs are caught now.
+- **The existing tests caught few of the bugs.** The 42 loader-level tests in
+  `schema_section_tests.rs` caught seven of the 22 schema bugs, and the 10 parser tests in
+  `security_section_tests.rs` caught none of the 11 security bugs. They check whether a source is
+  accepted, or what it parses to, so a wrong position, a wrong message or a silent change of which
+  duplicate wins does not fail them.
+- **`SEM0002` cannot be reached from a parsed file.** The parser adds a default `@SECURITY` section
+  when `@DLM` asks for an encryptor. The first plan was to pin the error with a source that has an
+  encryptor and no section, and the recording showed that source analyzed without one, so the check
+  is tested through a pair of a tree and a document that disagree instead.
+- **What no test can catch:** the loader or the orchestrator calling the wrong entry point when both
+  give the same result. Results are the same by design, so no output differs.
+- **Not changed:** the `@DATA` analyzer, the `@QUICKFUNCS` analyzer and enhancer, and the resolver
+  still read the owned tree. The imports resolver and the language server still call `parse`.
+- **Not measured:** speed and peak memory. Stage 9 now copies the resolved `@DATA` section into an
+  arena, where it read the owned tree directly before, and the corpus has no `@SCHEMA` section to
+  show it. The corpus has twelve `@SECURITY` sections, and that analyzer is small.
+- **Not run:** CI on stable Rust and the bench workflow, because GitHub's API rate-limits the sandbox.
+  The language server, which now depends on `dixscript` by path, could not be type-checked here
+  either, because Cargo 1.75 cannot build its dependencies. No existing signature changed, and the
+  language server calls only constructors that are unchanged.

@@ -616,7 +616,8 @@ all instructions.
 - Steps 3 and 4 (operator enum, whole-tree clones, re-measure).
 - The rest of step 6. Done: arena-aware `Display`, `Debug` and equality through handles
   (`ValueRef`, `ExprRef`, `StmtRef`), the arena-resident `Document`, and `Display` for `Document`
-  and the `Doc*` section twins, all five section parsers building into the arena, and the merge of their arenas into one `Document` (`Arena::append`, `GeneralParser::parse_document`), and the first consumer: the `@RAW` analyzer reads the `Document` (see `compiler.md`). Planned drops, each compiling with the tests intact:
+  and the `Doc*` section twins, all five section parsers building into the arena, and the merge of their arenas into one `Document` (`Arena::append`, `GeneralParser::parse_document`), and the first consumers: the `@RAW`, `@SECURITY` and `@SCHEMA` analyzers read the `Document` (see
+`compiler.md`). Planned drops, each compiling with the tests intact:
   1. Moving the consumers one section at a time. Each section's analyzer moves together with its
      enhancer (only `@QUICKFUNCS` has one) and the part of the general scripts that handles it.
      The analyzers read the owned section and fill a symbol table, so their outputs must come out
@@ -860,6 +861,8 @@ its own `from_owned` and `export`, which the parsers use.
   `RawBlock::id` and `format` do. They exist so that the `@RAW` analyzer, the first consumer to read
   a `Document`, does not export a block to ask for its id. They take the arena as an argument, as
   `export` does.
+- `DocSchemaField::path_string` joins the path segments with `.`, as `SchemaField::path_string` does,
+  so the `@SCHEMA` analyzer can name a path in a diagnostic without exporting the field.
 
 ### `Compiler/AST/arena/document_display.rs`
 

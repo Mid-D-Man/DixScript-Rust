@@ -40,6 +40,12 @@ Breaking release.
   `RawBlock::id` and `format` do. The `@RAW` analyzer is the first consumer to read a `Document`;
   `DixLoader` parses into one and passes it to the analyzer. Diagnostics are unchanged, and
   `RawSectionAnalyzer::analyze` keeps its signature.
+- **`SecuritySectionAnalyzer::analyze_doc`** and **`SchemaSectionAnalyzer::analyze_doc`**, which check
+  `@SECURITY` and `@SCHEMA` (with the `@DATA` section it constrains) through an `Arena`, and
+  **`DocSchemaField::path_string`**. `GeneralSemanticAnalyzer::with_document` now covers these two
+  sections as well as `@RAW`. `analyze` and `SchemaSectionAnalyzer::validate_resolved` keep their
+  signatures and copy their input into a scratch arena, so `DixLoader`'s post-resolution schema check
+  copies the resolved `@DATA` section. Diagnostics are unchanged.
 
 ### Removed
 

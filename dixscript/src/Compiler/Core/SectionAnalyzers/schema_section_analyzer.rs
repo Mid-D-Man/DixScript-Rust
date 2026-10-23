@@ -45,12 +45,27 @@
 //! No nested-object shape validation (`Schema.Object` only checks presence
 //! and kind), no wildcard paths, and no runtime validation of data supplied
 //! after compilation — this is compile-time only.
+//!
+//! ## Reading the arena
+//! The checks run over the arena form of the sections:
+//! [`analyze_doc`](SchemaSectionAnalyzer::analyze_doc) reads a [`DocSchema`], the `@DATA` section
+//! as a [`DocData`], and the [`Arena`] both live in. `GeneralSemanticAnalyzer` calls it when it
+//! has a `Document`. [`analyze`](SchemaSectionAnalyzer::analyze) and
+//! [`validate_resolved`](SchemaSectionAnalyzer::validate_resolved) keep their owned-type
+//! signatures for callers that only have a `DixScript`: they copy both sections into a scratch
+//! arena and run the same checks, so the entry points cannot disagree. `DixLoader` still calls
+//! `validate_resolved` with the tree that value resolution produced, so that path pays for the
+//! copy until the resolver reads the arena too.
+//!
+//! The `Schema` builtin takes owned values, so `build_descriptor` copies the arguments of one
+//! field out of the arena before calling it.
 
 use std::collections::HashMap;
 
 use crate::Builtins::Core::{DixType, DixValue};
 use crate::Builtins::Resolver::resolve_static_call_with_conversion;
-use crate::Compiler::AST::{DataEntry, DataSection, DataType, Position, SchemaBlock, SchemaField, Value};
+use crate::Compiler::AST::arena::{Arena, DocData, DocDataEntry, DocSchema, DocSchemaField, ValueId, ValueNode};
+use crate::Compiler::AST::{DataSection, DataType, Position, SchemaBlock};
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::Compiler::Utilities::SymbolTable;
 use crate::ErrorManager::{ErrorManager, SemanticErrorType, DebugConfig};
@@ -164,8 +179,16 @@ impl Descriptor {
 }
 
 /// Evaluates a field's `Schema.<Method>(args...)` through the builtin.
-fn build_descriptor(field: &SchemaField) -> Result<Descriptor, String> {
-    let value = resolve_static_call_with_conversion("Schema", &field.method, &field.arguments)?;
+///
+/// The builtin takes owned values, so the arguments of this one field are copied out of the
+/// arena first. They are a handful of literals, not the data section.
+fn build_descriptor(field: &DocSchemaField, arena: &Arena) -> Result<Descriptor, String> {
+    let arguments: Vec<_> = arena
+        .value_list(field.arguments)
+        .iter()
+        .map(|&id| arena.export_value(id))
+        .collect();
+    let value = resolve_static_call_with_conversion("Schema", &field.method, &arguments)?;
     Descriptor::from_value(&value)
 }
 
@@ -175,31 +198,32 @@ fn build_descriptor(field: &SchemaField) -> Result<Descriptor, String> {
 
 enum Lookup<'a> {
     /// A concrete property (top-level, in a table, or inside an object).
-    Value { value: &'a Value, declared: Option<&'a DataType>, position: Position },
-    /// A `path:: a, b, c` group array — no single `Value` holds it.
+    Value { value: ValueId, declared: Option<&'a DataType>, position: Position },
+    /// A `path:: a, b, c` group array: no single value holds it.
     Group { len: usize, position: Position },
     /// The path names a table (or a prefix of one) rather than a property.
     Table { position: Position },
     Missing,
 }
 
-/// Follows `rest` through nested `Value::Object` properties.
-fn walk_value<'a>(value: &'a Value, rest: &[String]) -> Option<&'a Value> {
+/// Follows `rest` through nested object properties.
+fn walk_value(arena: &Arena, value: ValueId, rest: &[String]) -> Option<ValueId> {
     if rest.is_empty() {
         return Some(value);
     }
-    match value {
-        Value::Object { properties, .. } => properties
+    match arena.value(value) {
+        ValueNode::Object { properties, .. } => arena
+            .prop_list(*properties)
             .iter()
-            .find(|p| p.key == rest[0])
-            .and_then(|p| walk_value(&p.value, &rest[1..])),
+            .find(|p| arena.text(p.key) == rest[0])
+            .and_then(|p| walk_value(arena, p.value, &rest[1..])),
         _ => None,
     }
 }
 
 /// Resolves a dotted path against every `@DATA` entry shape:
 /// `name = v`, `name = { .. }`, `a.b: key = v`, and `a.b:: items`.
-fn lookup<'a>(data: &'a DataSection, segs: &[String]) -> Lookup<'a> {
+fn lookup<'a>(arena: &Arena, data: &'a DocData, segs: &[String]) -> Lookup<'a> {
     if segs.is_empty() {
         return Lookup::Missing;
     }
@@ -208,36 +232,43 @@ fn lookup<'a>(data: &'a DataSection, segs: &[String]) -> Lookup<'a> {
 
     for entry in &data.entries {
         match entry {
-            DataEntry::SimpleProperty { name, data_type, value, .. } => {
+            DocDataEntry::SimpleProperty { name, data_type, value, .. } => {
                 if *name == segs[0] {
                     if segs.len() == 1 {
                         return Lookup::Value {
-                            value,
+                            value: *value,
                             declared: data_type.as_ref(),
-                            position: value.position(),
+                            position: arena.value(*value).position(),
                         };
                     }
-                    if let Some(found) = walk_value(value, &segs[1..]) {
-                        return Lookup::Value { value: found, declared: None, position: found.position() };
+                    if let Some(found) = walk_value(arena, *value, &segs[1..]) {
+                        return Lookup::Value {
+                            value: found,
+                            declared: None,
+                            position: arena.value(found).position(),
+                        };
                     }
                 }
             }
-            DataEntry::ObjectProperty { name, data_type, object, .. } => {
+            DocDataEntry::ObjectProperty { name, data_type, object, .. } => {
                 if *name == segs[0] {
-                    let object_value: &Value = object.as_ref();
                     if segs.len() == 1 {
                         return Lookup::Value {
-                            value: object_value,
+                            value: *object,
                             declared: data_type.as_ref(),
-                            position: object_value.position(),
+                            position: arena.value(*object).position(),
                         };
                     }
-                    if let Some(found) = walk_value(object_value, &segs[1..]) {
-                        return Lookup::Value { value: found, declared: None, position: found.position() };
+                    if let Some(found) = walk_value(arena, *object, &segs[1..]) {
+                        return Lookup::Value {
+                            value: found,
+                            declared: None,
+                            position: arena.value(found).position(),
+                        };
                     }
                 }
             }
-            DataEntry::TableProperty { path, properties, position } => {
+            DocDataEntry::TableProperty { path, properties, position } => {
                 let p = &path.segments;
                 if segs.len() > p.len() && segs[..p.len()] == p[..] {
                     let key = &segs[p.len()];
@@ -245,13 +276,17 @@ fn lookup<'a>(data: &'a DataSection, segs: &[String]) -> Lookup<'a> {
                         if prop.name == *key {
                             if segs.len() == p.len() + 1 {
                                 return Lookup::Value {
-                                    value: &prop.value,
+                                    value: prop.value,
                                     declared: prop.data_type.as_ref(),
                                     position: prop.position,
                                 };
                             }
-                            if let Some(found) = walk_value(&prop.value, &segs[p.len() + 1..]) {
-                                return Lookup::Value { value: found, declared: None, position: found.position() };
+                            if let Some(found) = walk_value(arena, prop.value, &segs[p.len() + 1..]) {
+                                return Lookup::Value {
+                                    value: found,
+                                    declared: None,
+                                    position: arena.value(found).position(),
+                                };
                             }
                         }
                     }
@@ -259,7 +294,7 @@ fn lookup<'a>(data: &'a DataSection, segs: &[String]) -> Lookup<'a> {
                     table_hit.get_or_insert(*position);
                 }
             }
-            DataEntry::GroupArray { path, items, position } => {
+            DocDataEntry::GroupArray { path, items, position } => {
                 if path.segments.as_slice() == segs {
                     return Lookup::Group { len: items.len(), position: *position };
                 }
@@ -327,26 +362,26 @@ impl Kind {
     }
 }
 
-fn kind_of_value(v: &Value) -> Kind {
+fn kind_of_value(arena: &Arena, v: &ValueNode) -> Kind {
     match v {
-        Value::Integer { .. }            => Kind::Int,
-        Value::Long { .. }               => Kind::Long,
-        Value::Float { .. }              => Kind::Float,
-        Value::Double { .. }             => Kind::Double,
-        Value::ScientificNotation { .. } => Kind::Double,
-        Value::String { .. }             => Kind::Str,
-        Value::InterpolatedString { .. } => Kind::Str,
-        Value::Boolean { .. }            => Kind::Bool,
-        Value::HexColor { .. }           => Kind::Hex,
-        Value::Date { .. }               => Kind::Date,
-        Value::Timestamp { .. }          => Kind::Timestamp,
-        Value::Array { .. }              => Kind::Array,
-        Value::NestedArray { .. }        => Kind::Array,
-        Value::Object { .. }             => Kind::Object,
-        Value::EnumValue { enum_name, .. } => Kind::Enum(Some(enum_name.clone())),
-        Value::Null { .. }               => Kind::Null,
+        ValueNode::Integer { .. }            => Kind::Int,
+        ValueNode::Long { .. }               => Kind::Long,
+        ValueNode::Float { .. }              => Kind::Float,
+        ValueNode::Double { .. }             => Kind::Double,
+        ValueNode::ScientificNotation { .. } => Kind::Double,
+        ValueNode::String { .. }             => Kind::Str,
+        ValueNode::InterpolatedString { .. } => Kind::Str,
+        ValueNode::Boolean { .. }            => Kind::Bool,
+        ValueNode::HexColor { .. }           => Kind::Hex,
+        ValueNode::Date { .. }               => Kind::Date,
+        ValueNode::Timestamp { .. }          => Kind::Timestamp,
+        ValueNode::Array { .. }              => Kind::Array,
+        ValueNode::NestedArray { .. }        => Kind::Array,
+        ValueNode::Object { .. }             => Kind::Object,
+        ValueNode::EnumValue { enum_name, .. } => Kind::Enum(Some(arena.text(*enum_name).to_string())),
+        ValueNode::Null { .. }               => Kind::Null,
         // The data parser's prefixed constructors: b(...) blob, t(...) tuple, r(...) regex.
-        Value::PrefixedConstructor { prefix, .. } => match prefix.as_str() {
+        ValueNode::PrefixedConstructor { prefix, .. } => match arena.text(*prefix) {
             "b" => Kind::Blob,
             "t" => Kind::Tuple,
             "r" => Kind::Regex,
@@ -401,13 +436,13 @@ fn is_compatible(type_name: &str, kind: &Kind) -> bool {
     }
 }
 
-fn numeric_value(v: &Value) -> Option<f64> {
+fn numeric_value(v: &ValueNode) -> Option<f64> {
     match v {
-        Value::Integer { value, .. }            => Some(*value as f64),
-        Value::Long { value, .. }               => Some(*value as f64),
-        Value::Float { value, .. }              => Some(*value as f64),
-        Value::Double { value, .. }             => Some(*value),
-        Value::ScientificNotation { value, .. } => Some(*value),
+        ValueNode::Integer { value, .. }            => Some(*value as f64),
+        ValueNode::Long { value, .. }               => Some(*value as f64),
+        ValueNode::Float { value, .. }              => Some(*value as f64),
+        ValueNode::Double { value, .. }             => Some(*value),
+        ValueNode::ScientificNotation { value, .. } => Some(*value),
         _ => None,
     }
 }
@@ -445,32 +480,119 @@ impl<'a> SchemaSectionAnalyzer<'a> {
         }
     }
 
-    /// Semantic-phase entry. `data` is the `@DATA` AST as parsed; values not
-    /// yet knowable are skipped (see the module doc comment).
+    /// Semantic-phase entry for callers that hold the owned types. `data` is the `@DATA` AST
+    /// as parsed; values not yet knowable are skipped (see the module doc comment).
+    ///
+    /// The sections are copied into a scratch arena and checked by
+    /// [`analyze_doc`](Self::analyze_doc), so the diagnostics are the ones `analyze_doc` gives
+    /// for the same sections.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the sections need more nodes or text than an arena can address (more than
+    /// `u32::MAX` of either).
     pub fn analyze(
         &mut self,
         schema: &SchemaBlock,
         data: Option<&DataSection>,
         _symbol_table: &mut SymbolTable,
     ) -> SectionAnalysisResult {
-        self.run(schema, data)
+        self.run_owned(schema, data)
+    }
+
+    /// Semantic-phase entry for a `Document`. `schema` and `data` must be the `schema` and
+    /// `data` fields of the document whose `arena` is passed: the sections hold ids into it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::{Arena, DocData, DocSchema};
+    /// use dixscript::Compiler::AST::{
+    ///     DataEntry, DataSection, Position, SchemaBlock, SchemaField, TablePath, Value,
+    /// };
+    /// use dixscript::Compiler::Core::Config::OperationalSettings;
+    /// use dixscript::Compiler::Core::SectionAnalyzers::SchemaSectionAnalyzer;
+    /// use dixscript::Compiler::Utilities::SymbolTable;
+    ///
+    /// let pos = Position::new(1, 1);
+    /// // `port = 70000` checked against `Schema.Int(true, 1, 65535)`.
+    /// let schema = SchemaBlock::new(
+    ///     vec![SchemaField::new(
+    ///         TablePath::new(vec!["port".to_string()]),
+    ///         "Int".to_string(),
+    ///         vec![
+    ///             Value::Boolean { value: true, position: pos },
+    ///             Value::Integer { value: 1, position: pos },
+    ///             Value::Integer { value: 65535, position: pos },
+    ///         ],
+    ///         pos,
+    ///     )],
+    ///     pos,
+    /// );
+    /// let data = DataSection::new(
+    ///     vec![DataEntry::SimpleProperty {
+    ///         name: "port".to_string(),
+    ///         data_type: None,
+    ///         value: Value::Integer { value: 70000, position: pos },
+    ///         position: pos,
+    ///     }],
+    ///     pos,
+    /// );
+    ///
+    /// let mut arena = Arena::new();
+    /// let schema = DocSchema::from_owned(&mut arena, &schema);
+    /// let data = DocData::from_owned(&mut arena, &data);
+    ///
+    /// let settings = OperationalSettings::default();
+    /// let mut analyzer = SchemaSectionAnalyzer::new(&settings);
+    /// let result = analyzer.analyze_doc(&schema, Some(&data), &arena, &mut SymbolTable::new());
+    ///
+    /// assert!(!result.is_success);
+    /// assert_eq!(result.errors[0].error_id, "SCH005");
+    /// ```
+    pub fn analyze_doc(
+        &mut self,
+        schema: &DocSchema,
+        data: Option<&DocData>,
+        arena: &Arena,
+        _symbol_table: &mut SymbolTable,
+    ) -> SectionAnalysisResult {
+        self.run(schema, data, arena)
     }
 
     /// Post-resolution entry, called by `DixLoader` once value resolution
     /// has replaced computed values with concrete ones.
+    ///
+    /// It takes the owned types because value resolution still produces an owned tree. The
+    /// sections are copied into a scratch arena and checked by
+    /// [`analyze_doc`](Self::analyze_doc), so this costs a copy of the resolved `@DATA`
+    /// section that the semantic-phase entry no longer pays.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the sections need more nodes or text than an arena can address (more than
+    /// `u32::MAX` of either).
     pub fn validate_resolved(
         &mut self,
         schema: &SchemaBlock,
         data: Option<&DataSection>,
     ) -> SectionAnalysisResult {
-        self.run(schema, data)
+        self.run_owned(schema, data)
+    }
+
+    /// Copies the owned sections into a scratch arena and runs the checks over it.
+    fn run_owned(&mut self, schema: &SchemaBlock, data: Option<&DataSection>) -> SectionAnalysisResult {
+        let mut arena = Arena::new();
+        let doc_schema = DocSchema::from_owned(&mut arena, schema);
+        let doc_data = data.map(|d| DocData::from_owned(&mut arena, d));
+        self.run(&doc_schema, doc_data.as_ref(), &arena)
     }
 
     /// Wraps `run_checks` so `is_success` is derived from the error list on
     /// EVERY exit path — the Halt strategy returns early from inside the
     /// checks, and `DixLoader` trusts `is_success` at Stage 9.
-    fn run(&mut self, schema: &SchemaBlock, data: Option<&DataSection>) -> SectionAnalysisResult {
-        let mut result = self.run_checks(schema, data);
+    fn run(&mut self, schema: &DocSchema, data: Option<&DocData>, arena: &Arena) -> SectionAnalysisResult {
+        let mut result = self.run_checks(schema, data, arena);
         result.is_success = result.errors.is_empty();
 
         if self.debug_config.is_enabled {
@@ -483,7 +605,7 @@ impl<'a> SchemaSectionAnalyzer<'a> {
         result
     }
 
-    fn run_checks(&mut self, schema: &SchemaBlock, data: Option<&DataSection>) -> SectionAnalysisResult {
+    fn run_checks(&mut self, schema: &DocSchema, data: Option<&DocData>, arena: &Arena) -> SectionAnalysisResult {
         let mut result = SectionAnalysisResult::new("SCHEMA");
 
         if self.debug_config.is_enabled {
@@ -503,7 +625,7 @@ impl<'a> SchemaSectionAnalyzer<'a> {
 
         // Pass 1: build every descriptor; reject duplicate paths.
         let mut seen: HashMap<String, Position> = HashMap::new();
-        let mut built: Vec<(&SchemaField, Descriptor)> = Vec::with_capacity(schema.fields.len());
+        let mut built: Vec<(&DocSchemaField, Descriptor)> = Vec::with_capacity(schema.fields.len());
 
         for field in &schema.fields {
             let path = field.path_string();
@@ -525,7 +647,7 @@ impl<'a> SchemaSectionAnalyzer<'a> {
             }
             seen.insert(path.clone(), field.position);
 
-            match build_descriptor(field) {
+            match build_descriptor(field, arena) {
                 Ok(desc) => built.push((field, desc)),
                 Err(e) => {
                     self.add_error(
@@ -542,7 +664,7 @@ impl<'a> SchemaSectionAnalyzer<'a> {
 
         // Pass 2: check @DATA against every descriptor that built.
         for (field, desc) in &built {
-            self.check_field(field, desc, data, &mut result);
+            self.check_field(field, desc, data, arena, &mut result);
             if self.should_halt(&result) { return result; }
         }
 
@@ -551,21 +673,22 @@ impl<'a> SchemaSectionAnalyzer<'a> {
 
     fn check_field(
         &mut self,
-        field: &SchemaField,
+        field: &DocSchemaField,
         desc: &Descriptor,
-        data: Option<&DataSection>,
+        data: Option<&DocData>,
+        arena: &Arena,
         result: &mut SectionAnalysisResult,
     ) {
         let path = field.path_string();
 
         let found = match data {
-            Some(d) => lookup(d, &field.path.segments),
+            Some(d) => lookup(arena, d, &field.path.segments),
             None => Lookup::Missing,
         };
 
         // Normalise every lookup outcome to: kind, where it is, the literal
         // (if there is one), and an item count (if it is a collection).
-        let (kind, position, literal, item_count): (Kind, Position, Option<&Value>, Option<usize>) = match found {
+        let (kind, position, literal, item_count): (Kind, Position, Option<ValueId>, Option<usize>) = match found {
             Lookup::Missing => {
                 if desc.required {
                     self.add_error(
@@ -581,7 +704,7 @@ impl<'a> SchemaSectionAnalyzer<'a> {
             Lookup::Table { position } => (Kind::Object, position, None, None),
             Lookup::Group { len, position } => (Kind::Array, position, None, Some(len)),
             Lookup::Value { value, declared, position } => {
-                let literal_kind = kind_of_value(value);
+                let literal_kind = kind_of_value(arena, arena.value(value));
                 let declared_kind = declared.and_then(kind_of_declared);
                 let effective = match (&literal_kind, declared_kind) {
                     (Kind::Null, _)                    => Kind::Null,
@@ -589,8 +712,8 @@ impl<'a> SchemaSectionAnalyzer<'a> {
                     (_, Some(d))                       => d,
                     (_, None)                          => literal_kind.clone(),
                 };
-                let count = match value {
-                    Value::Array { values, .. } | Value::NestedArray { values, .. } => Some(values.len()),
+                let count = match arena.value(value) {
+                    ValueNode::Array { values, .. } | ValueNode::NestedArray { values, .. } => Some(values.len()),
                     _ => None,
                 };
                 (effective, position, Some(value), count)
@@ -625,7 +748,7 @@ impl<'a> SchemaSectionAnalyzer<'a> {
         // Constraint checks — only where the value is actually known.
         match desc.type_name.as_str() {
             "int" | "long" | "float" | "double" => {
-                if let Some(n) = literal.and_then(numeric_value) {
+                if let Some(n) = literal.and_then(|id| numeric_value(arena.value(id))) {
                     if let Some(min) = desc.min {
                         if n < min {
                             self.add_error(
@@ -651,8 +774,8 @@ impl<'a> SchemaSectionAnalyzer<'a> {
                 }
             }
             "string" => {
-                if let Some(Value::String { value, .. }) = literal {
-                    let len = value.chars().count() as i64;
+                if let Some(ValueNode::String { value, .. }) = literal.map(|id| arena.value(id)) {
+                    let len = arena.text(*value).chars().count() as i64;
                     if let Some(min) = desc.min_length {
                         if len < min {
                             self.add_error(

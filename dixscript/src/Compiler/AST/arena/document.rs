@@ -285,6 +285,16 @@ impl DocSecurity {
     }
 }
 
+impl DocSchemaField {
+    /// The dotted form of `path`, for diagnostics.
+    ///
+    /// This is [`SchemaField::path_string`] for the arena form: the path segments joined with
+    /// `.`.
+    pub fn path_string(&self) -> String {
+        self.path.to_string()
+    }
+}
+
 impl DocSchema {
     /// Copies an owned `@SCHEMA` section into `arena`.
     ///

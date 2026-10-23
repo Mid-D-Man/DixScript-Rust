@@ -541,49 +541,79 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
     /// references) are skipped here and re-checked by `DixLoader` once value
     /// resolution has made them concrete — see
     /// `schema_section_analyzer.rs`'s top doc comment.
+    ///
+    /// Reads the `Document` when the caller attached one, for both `@SCHEMA` and the `@DATA`
+    /// section it checks, and the owned tree otherwise.
     fn analyze_phase7b_schema(&mut self) {
-        let schema = match &self.ast.schema {
-            Some(s) => s,
-            None    => return,
+        let document = self.document;
+        let has_schema = match document {
+            Some(doc) => doc.schema.is_some(),
+            None      => self.ast.schema.is_some(),
         };
+        if !has_schema {
+            return;
+        }
 
         let em = self.make_error_manager();
         let mut analyzer = SchemaSectionAnalyzer::new_with_error_manager(
             self.operational_settings,
             em,
         );
-        let result = analyzer.analyze(schema, self.ast.data.as_ref(), &mut self.symbol_table);
+        let result = match document {
+            Some(Document { schema: Some(schema), data, arena, .. }) => {
+                analyzer.analyze_doc(schema, data.as_ref(), arena, &mut self.symbol_table)
+            }
+            _ => match &self.ast.schema {
+                Some(schema) => analyzer.analyze(schema, self.ast.data.as_ref(), &mut self.symbol_table),
+                None => return,
+            },
+        };
         self.add_section_result("SCHEMA", result);
     }
 
+    /// Checks `@SECURITY`, and reports a missing one when `@DLM` asks for an encryptor.
+    ///
+    /// Reads the `Document` when the caller attached one, and the owned tree otherwise. The
+    /// `@DLM` section is the same owned type in both, so it is read from the tree.
     fn analyze_phase8_generated(&mut self) {
         let requires_security = self.ast.dlm.as_ref()
             .map(|dlm| dlm.modules.iter().any(|m| matches!(m.module_type, DLMModuleType::DEncryptor)))
             .unwrap_or(false);
 
-        let security = match &self.ast.security {
-            Some(s) => s,
-            None => {
-                if requires_security {
-                    self.analysis_result.errors.push(SemanticErrorInfo {
-                        error_id:     "SEM0002".to_string(),
-                        error_type:   "MissingSection".to_string(),
-                        message:      "SECURITY section required when DEncryptor is used in @DLM".to_string(),
-                        section_name: "SECURITY".to_string(),
-                        suggestion:   "Add @SECURITY section with encryption configuration".to_string(),
-                        position:     None,
-                    });
-                }
-                return;
-            }
+        let document = self.document;
+        let has_security = match document {
+            Some(doc) => doc.security.is_some(),
+            None      => self.ast.security.is_some(),
         };
+
+        if !has_security {
+            if requires_security {
+                self.analysis_result.errors.push(SemanticErrorInfo {
+                    error_id:     "SEM0002".to_string(),
+                    error_type:   "MissingSection".to_string(),
+                    message:      "SECURITY section required when DEncryptor is used in @DLM".to_string(),
+                    section_name: "SECURITY".to_string(),
+                    suggestion:   "Add @SECURITY section with encryption configuration".to_string(),
+                    position:     None,
+                });
+            }
+            return;
+        }
 
         let em = self.make_error_manager();
         let mut analyzer = SecuritySectionAnalyzer::new_with_error_manager(
             self.operational_settings,
             em,
         );
-        let result = analyzer.analyze(security, &mut self.symbol_table);
+        let result = match document {
+            Some(Document { security: Some(security), arena, .. }) => {
+                analyzer.analyze_doc(security, arena, &mut self.symbol_table)
+            }
+            _ => match &self.ast.security {
+                Some(security) => analyzer.analyze(security, &mut self.symbol_table),
+                None => return,
+            },
+        };
         self.add_section_result("SECURITY", result);
     }
 

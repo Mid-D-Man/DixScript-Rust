@@ -205,7 +205,6 @@ namespace MidManStudio.Mdix.Unity.Editor
                 // switches to the ScrollView-based layout: vertical scrollbar plus wheel scrolling.
                 // Keep it here, before the colour overlay attaches (InitializeLspIntegration below):
                 // the layout switch re-parents the field's inner text element.
-                verticalScrollerVisibility = ScrollerVisibility.Auto,
                 isDelayed = false,
                 style     =
                 {
@@ -235,6 +234,13 @@ namespace MidManStudio.Mdix.Unity.Editor
                 _codeField.SetValueWithoutNotify(_sourceText);
 
             _panelEditor?.Add(_codeField);
+
+            // Configure the internal ScrollView for automatic vertical scroller visibility safely across versions
+            var scrollView = _codeField.Q<ScrollView>();
+            if (scrollView != null)
+            {
+                scrollView.verticalScrollerVisibility = ScrollerVisibility.Auto;
+            }
 
             ConstrainPanelHeights();
             InstallCodeFieldWheel();

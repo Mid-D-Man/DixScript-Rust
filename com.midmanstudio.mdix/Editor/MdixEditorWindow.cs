@@ -197,21 +197,21 @@ namespace MidManStudio.Mdix.Unity.Editor
             _btnFoldAll = root.Q<Button>("btn-fold-all");
             _btnFoldAll?.RegisterCallback<ClickEvent>(_ => ToggleFoldAll());
 
+            // Ensure editor panel grows correctly to fill layout space
+            if (_panelEditor != null)
+            {
+                _panelEditor.style.flexGrow  = 1f;
+                _panelEditor.style.flexShrink = 1f;
+                _panelEditor.style.flexBasis = 0f;
+            }
+
             _codeField = new TextField
             {
                 multiline = true,
-                // Without this a multiline TextField stays in Unity's plain layout, where the mouse
-                // wheel and two-finger scroll do nothing and only moving the caret scrolls. Auto
-                // switches to the ScrollView-based layout: vertical scrollbar plus wheel scrolling.
-                // Keep it here, before the colour overlay attaches (InitializeLspIntegration below):
-                // the layout switch re-parents the field's inner text element.
                 isDelayed = false,
                 style     =
                 {
                     flexGrow                = new StyleFloat(1f),
-                    // Basis 0 + min-height 0: take the space that is left, never the height of the
-                    // text. With "auto" a long file made the field taller than the window, which
-                    // pushed the problems list off-screen and left nothing to scroll.
                     flexBasis               = new StyleLength(0f),
                     flexShrink              = new StyleFloat(1f),
                     minHeight               = new StyleLength(0f),
@@ -227,19 +227,20 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             _codeField.RegisterValueChangedCallback(OnCodeFieldValueChanged);
 
-            // OnEnable can run LoadAsset() before CreateGUI() builds this field, which would
-            // leave it blank while _sourceText holds the file — and the next keystroke would
-            // then overwrite _sourceText with just what was typed.
             if (!string.IsNullOrEmpty(_sourceText))
                 _codeField.SetValueWithoutNotify(_sourceText);
 
             _panelEditor?.Add(_codeField);
 
-            // Configure the internal ScrollView for automatic vertical scroller visibility safely across versions
-            var scrollView = _codeField.Q<ScrollView>();
-            if (scrollView != null)
+            // Configure internal ScrollView to enable scrolling and active scrollers
+            var codeScrollView = _codeField.Q<ScrollView>();
+            if (codeScrollView != null)
             {
-                scrollView.verticalScrollerVisibility = ScrollerVisibility.Auto;
+                codeScrollView.style.flexGrow            = 1f;
+                codeScrollView.style.flexShrink          = 1f;
+                codeScrollView.style.flexBasis           = 0f;
+                codeScrollView.verticalScrollerVisibility   = ScrollerVisibility.Auto;
+                codeScrollView.horizontalScrollerVisibility = ScrollerVisibility.Auto;
             }
 
             ConstrainPanelHeights();

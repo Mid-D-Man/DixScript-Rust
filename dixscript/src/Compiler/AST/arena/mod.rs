@@ -648,6 +648,41 @@ impl Arena {
         self.values.len()
     }
 
+    /// The id of every value node, in allocation order.
+    ///
+    /// The arena is append-only, so this includes nodes that no section refers to any more, such
+    /// as the ones a failed sub-expression left behind. It exists so that a test or a tool can
+    /// visit every node without walking the tree.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::{Arena, ValueNode};
+    /// use dixscript::Compiler::AST::Position;
+    ///
+    /// let mut arena = Arena::new();
+    /// let pos = Position::new(1, 1);
+    /// arena.alloc_value(ValueNode::Null { position: pos });
+    /// arena.alloc_value(ValueNode::Boolean { value: true, position: pos });
+    ///
+    /// let ids: Vec<_> = arena.value_ids().collect();
+    /// assert_eq!(ids.len(), 2);
+    /// assert!(matches!(arena.value(ids[1]), ValueNode::Boolean { value: true, .. }));
+    /// ```
+    pub fn value_ids(&self) -> impl Iterator<Item = ValueId> {
+        (0..self.values.len()).map(|i| ValueId(to_u32(i)))
+    }
+
+    /// The id of every expression node, in allocation order. See [`value_ids`](Self::value_ids).
+    pub fn expr_ids(&self) -> impl Iterator<Item = ExprId> {
+        (0..self.exprs.len()).map(|i| ExprId(to_u32(i)))
+    }
+
+    /// The id of every statement node, in allocation order. See [`value_ids`](Self::value_ids).
+    pub fn stmt_ids(&self) -> impl Iterator<Item = StmtId> {
+        (0..self.stmts.len()).map(|i| StmtId(to_u32(i)))
+    }
+
     /// The number of expression nodes in the arena.
     pub fn expr_count(&self) -> usize {
         self.exprs.len()

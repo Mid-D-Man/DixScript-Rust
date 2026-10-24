@@ -1,6 +1,28 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/SectionAnalyzers/data_section_analyzer.rs"
+// ============================================================================
+//! Semantic validation of the `@DATA` section.
+//!
+//! The analyzer checks the two-tier ordering (flat properties before tables and group arrays),
+//! path and name uniqueness, declared against inferred types, array homogeneity, nesting depth,
+//! tuples, blobs, regexes, enum values and function calls. It also builds the two indexes the
+//! later stages use (short name to full paths, and path to type) and registers every property
+//! in the symbol table.
+//!
+//! The checks run over the arena form of the section:
+//! [`analyze_doc`](DataSectionAnalyzer::analyze_doc) reads a [`DocData`] and the [`Arena`] its
+//! values live in, and is what `GeneralSemanticAnalyzer` calls when it has a `Document`.
+//! [`analyze`](DataSectionAnalyzer::analyze) keeps the owned-type signature for callers that only
+//! have a `DixScript`: it copies the section into a scratch arena and runs the same checks, so
+//! the two entry points cannot disagree. Types are inferred with the arena entry points of
+//! `TypeInferenceVisitor`.
 
+use crate::Compiler::AST::arena::{
+    Arena, DocData, DocDataEntry, DocPropertyAssignment, ExprList, ValueId, ValueList, ValueNode,
+};
 use crate::Compiler::AST::{
-    DataSection, DataEntry, TablePath, PropertyAssignment, Value, Position, DataType,ElemType,
+    DataSection, TablePath, Position, DataType,ElemType,
 };
 use crate::Compiler::AST::Visitors::TypeInferenceVisitor;
 use crate::Compiler::Utilities::{SymbolTable, VariableInfo, PathBuilder};
@@ -88,11 +110,71 @@ pub fn new_with_error_manager(
         path_to_type:             FxHashMap::default(),
     }
 }
+    /// Analyzes a `@DATA` section held as the owned type.
+    ///
+    /// This is the entry point for callers that only have a `DixScript`. It copies the section
+    /// into a scratch arena and calls [`analyze_doc`](Self::analyze_doc), so the diagnostics and
+    /// the indexes are the ones `analyze_doc` gives for the same section.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the section needs more nodes or text than an arena can address (more than
+    /// `u32::MAX` of either).
     pub fn analyze(
-    &mut self,
-    section: &DataSection,
-    symbol_table: &mut SymbolTable,
-) -> SectionAnalysisResult {
+        &mut self,
+        section: &DataSection,
+        symbol_table: &mut SymbolTable,
+    ) -> SectionAnalysisResult {
+        let mut arena = Arena::new();
+        let doc_section = DocData::from_owned(&mut arena, section);
+        self.analyze_doc(&doc_section, &arena, symbol_table)
+    }
+
+    /// Analyzes the `@DATA` section of a `Document`.
+    ///
+    /// `section` and `arena` must come from the same `Document` (its `data` field and its
+    /// `arena` field): the section holds ids into the arena and has no meaning without it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::{Arena, DocData};
+    /// use dixscript::Compiler::AST::{DataEntry, DataSection, DataType, Position, Value};
+    /// use dixscript::Compiler::Core::Config::OperationalSettings;
+    /// use dixscript::Compiler::Core::SectionAnalyzers::DataSectionAnalyzer;
+    /// use dixscript::Compiler::Utilities::SymbolTable;
+    ///
+    /// let pos = Position::new(1, 1);
+    /// // `port<int> = "eighty"`: the declared type disagrees with the value.
+    /// let owned = DataSection::new(
+    ///     vec![DataEntry::SimpleProperty {
+    ///         name: "port".to_string(),
+    ///         data_type: Some(DataType::Int),
+    ///         value: Value::String { value: "eighty".to_string(), position: pos },
+    ///         position: pos,
+    ///     }],
+    ///     pos,
+    /// );
+    ///
+    /// let mut arena = Arena::new();
+    /// let section = DocData::from_owned(&mut arena, &owned);
+    ///
+    /// let settings = OperationalSettings::default();
+    /// let mut table = SymbolTable::new();
+    /// let mut analyzer = DataSectionAnalyzer::new(&settings);
+    /// let result = analyzer.analyze_doc(&section, &arena, &mut table);
+    ///
+    /// assert!(!result.is_success);
+    /// assert_eq!(result.errors[0].error_type, "TYPE_MISMATCH");
+    /// // The property is registered whether or not it type-checks.
+    /// assert!(table.data_variables.contains_key("port"));
+    /// ```
+    pub fn analyze_doc(
+        &mut self,
+        section: &DocData,
+        arena: &Arena,
+        symbol_table: &mut SymbolTable,
+    ) -> SectionAnalysisResult {
     let mut result = SectionAnalysisResult::new("DATA");
     let entry_count = section.entries.len();
 
@@ -126,7 +208,7 @@ pub fn new_with_error_manager(
         self.error_manager.log_debug("Phase 3: Validating entries and building indexes");
     }
     for entry in &section.entries {
-        self.validate_data_entry(entry, symbol_table, &mut result);
+        self.validate_data_entry(entry, arena, symbol_table, &mut result);
         if self.error_manager.should_terminate_parsing() {
             break;
         }
@@ -160,15 +242,15 @@ pub fn new_with_error_manager(
 
     fn validate_two_tier_ordering(
         &self,
-        section: &DataSection,
+        section: &DocData,
         result: &mut SectionAnalysisResult,
     ) {
         let mut has_seen_grouped = false;
 
         for entry in &section.entries {
             match entry {
-                DataEntry::SimpleProperty { name, position, .. }
-                | DataEntry::ObjectProperty { name, position, .. } => {
+                DocDataEntry::SimpleProperty { name, position, .. }
+                | DocDataEntry::ObjectProperty { name, position, .. } => {
                     if has_seen_grouped {
                         self.add_error(
                             result,
@@ -183,7 +265,7 @@ pub fn new_with_error_manager(
                         );
                     }
                 }
-                DataEntry::TableProperty { .. } | DataEntry::GroupArray { .. } => {
+                DocDataEntry::TableProperty { .. } | DocDataEntry::GroupArray { .. } => {
                     has_seen_grouped = true;
                 }
             }
@@ -194,7 +276,7 @@ pub fn new_with_error_manager(
 
     fn validate_table_path_uniqueness(
         &mut self,
-        section: &DataSection,
+        section: &DocData,
         result: &mut SectionAnalysisResult,
     ) {
         let estimated = section.entries.len() / 3;
@@ -205,7 +287,7 @@ pub fn new_with_error_manager(
 
         for entry in &section.entries {
             match entry {
-                DataEntry::TableProperty { path, position, .. } => {
+                DocDataEntry::TableProperty { path, position, .. } => {
                     let path_str = Self::join_path(&path.segments);
                     if !table_paths.insert(path_str.clone()) {
                         self.add_error(
@@ -219,7 +301,7 @@ pub fn new_with_error_manager(
                         self.declared_table_paths.insert(path_str);
                     }
                 }
-                DataEntry::GroupArray { path, position, .. } => {
+                DocDataEntry::GroupArray { path, position, .. } => {
                     let path_str = Self::join_path(&path.segments);
                     if !array_paths.insert(path_str.clone()) {
                         self.add_error(
@@ -250,41 +332,42 @@ pub fn new_with_error_manager(
     #[inline]
     fn validate_data_entry(
         &mut self,
-        entry: &DataEntry,
+        entry: &DocDataEntry,
+        arena: &Arena,
         symbol_table: &mut SymbolTable,
         result: &mut SectionAnalysisResult,
     ) {
         match entry {
-            DataEntry::SimpleProperty { name, data_type, value, position } => {
+            DocDataEntry::SimpleProperty { name, data_type, value, position } => {
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!("  Validating simple property: {}", name));
                 }
                 self.validate_simple_property(
-                    name, *data_type, value, *position, symbol_table, result,
+                    name, *data_type, *value, *position, arena, symbol_table, result,
                 );
             }
-            DataEntry::TableProperty { path, properties, position } => {
+            DocDataEntry::TableProperty { path, properties, position } => {
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "  Validating table property: {}", Self::join_path(&path.segments)
                     ));
                 }
-                self.validate_table_property(path, properties, *position, symbol_table, result);
+                self.validate_table_property(path, properties, *position, arena, symbol_table, result);
             }
-            DataEntry::GroupArray { path, items, position } => {
+            DocDataEntry::GroupArray { path, items, position } => {
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "  Validating group array: {}", Self::join_path(&path.segments)
                     ));
                 }
-                self.validate_group_array(path, items, *position, symbol_table, result);
+                self.validate_group_array(path, *items, *position, arena, symbol_table, result);
             }
-            DataEntry::ObjectProperty { name, data_type, object, position } => {
+            DocDataEntry::ObjectProperty { name, data_type, object, position } => {
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!("  Validating object property: {}", name));
                 }
                 self.validate_object_property(
-                    name, *data_type, object.as_ref(), *position, symbol_table, result,
+                    name, *data_type, *object, *position, arena, symbol_table, result,
                 );
             }
         }
@@ -294,8 +377,9 @@ pub fn new_with_error_manager(
     &mut self,
     name: &str,
     declared_type: Option<DataType>,
-    value: &Value,
+    value: ValueId,
     position: Position,
+    arena: &Arena,
     symbol_table: &mut SymbolTable,
     result: &mut SectionAnalysisResult,
 ) {
@@ -336,7 +420,7 @@ pub fn new_with_error_manager(
     let context = format!("property '{}'", name);
     let inferred_type = {
         let visitor = TypeInferenceVisitor::new(symbol_table, None);
-        self.validate_value(value, &context, symbol_table, &visitor, result)
+        self.validate_value(arena, value, &context, symbol_table, &visitor, result)
     };
 
     let full_path = PathBuilder::build(&[name]);
@@ -410,8 +494,9 @@ pub fn new_with_error_manager(
     fn validate_table_property(
     &mut self,
     path: &TablePath,
-    properties: &[PropertyAssignment],
+    properties: &[DocPropertyAssignment],
     _position: Position,
+    arena: &Arena,
     symbol_table: &mut SymbolTable,
     result: &mut SectionAnalysisResult,
 ) {
@@ -457,7 +542,7 @@ pub fn new_with_error_manager(
         let context = format!("table property '{}.{}'", full_path, assignment.name);
         let inferred_type = {
             let visitor = TypeInferenceVisitor::new(symbol_table, None);
-            self.validate_value(&assignment.value, &context, symbol_table, &visitor, result)
+            self.validate_value(arena, assignment.value, &context, symbol_table, &visitor, result)
         };
 
         if let (Some(decl), Some(mut inf)) = (assignment.data_type, inferred_type) {
@@ -526,8 +611,9 @@ pub fn new_with_error_manager(
     fn validate_group_array(
         &mut self,
         path: &TablePath,
-        items: &[Value],
+        items: ValueList,
         position: Position,
+        arena: &Arena,
         symbol_table: &mut SymbolTable,
         result: &mut SectionAnalysisResult,
     ) {
@@ -543,10 +629,10 @@ pub fn new_with_error_manager(
         {
             let visitor = TypeInferenceVisitor::new(symbol_table, None);
 
-            for (i, item) in items.iter().enumerate() {
+            for (i, &item) in arena.value_list(items).iter().enumerate() {
                 let context = format!("group array '{}[{}]'", full_path, i);
                 let item_type =
-                    self.validate_value(item, &context, symbol_table, &visitor, result);
+                    self.validate_value(arena, item, &context, symbol_table, &visitor, result);
 
                 if first_item_type.is_none() {
                     first_item_type = item_type;
@@ -561,24 +647,24 @@ pub fn new_with_error_manager(
                                 "Group array '{}' contains mixed types: {:?} and {:?}",
                                 full_path, first, current
                             ),
-                            item.position(),
+                            arena.value(item).position(),
                             Some("All items in a group array must be the same type."),
                         );
                     }
                 }
 
-                if let Value::Object { properties, .. } = item {
-                    for prop in properties {
+                if let ValueNode::Object { properties, .. } = arena.value(item) {
+                    for prop in arena.prop_list(*properties) {
                         let item_path =
-                            PathBuilder::build_array_item_property(&full_path, i, &prop.key);
+                            PathBuilder::build_array_item_property(&full_path, i, arena.text(prop.key));
                         self.short_name_to_full_paths
-                            .entry(prop.key.clone())
+                            .entry(arena.text(prop.key).to_string())
                             .or_default()
                             .push(item_path.clone());
 
                         if self.debug_config.is_verbose {
                             self.error_manager.log_debug(&format!(
-                                "  Indexed: {} -> {}", prop.key, item_path
+                                "  Indexed: {} -> {}", arena.text(prop.key), item_path
                             ));
                         }
                     }
@@ -601,8 +687,9 @@ pub fn new_with_error_manager(
     &mut self,
     name: &str,
     declared_type: Option<DataType>,
-    object: &Value,
+    object: ValueId,
     position: Position,
+    arena: &Arena,
     symbol_table: &mut SymbolTable,
     result: &mut SectionAnalysisResult,
 ) {
@@ -630,7 +717,7 @@ pub fn new_with_error_manager(
 
     {
         let visitor = TypeInferenceVisitor::new(symbol_table, None);
-        self.validate_object_literal(object, &context, symbol_table, &visitor, result);
+        self.validate_object_literal(arena, object, &context, symbol_table, &visitor, result);
     }
 
     let full_path = PathBuilder::build(&[name]);
@@ -669,19 +756,21 @@ pub fn new_with_error_manager(
     #[inline]
     fn validate_value(
         &mut self,
-        value: &Value,
+        arena: &Arena,
+        value: ValueId,
         context: &str,
         symbol_table: &SymbolTable,
         visitor: &TypeInferenceVisitor,
         result: &mut SectionAnalysisResult,
     ) -> Option<DataType> {
         self.current_nesting_depth = 0;
-        self.validate_value_recursive(value, context, symbol_table, visitor, result)
+        self.validate_value_recursive(arena, value, context, symbol_table, visitor, result)
     }
 
     fn validate_value_recursive(
         &mut self,
-        value: &Value,
+        arena: &Arena,
+        value: ValueId,
         context: &str,
         symbol_table: &SymbolTable,
         visitor: &TypeInferenceVisitor,
@@ -695,44 +784,44 @@ pub fn new_with_error_manager(
                     "Nesting depth exceeds maximum of {} levels in {}",
                     MAX_NESTING_DEPTH, context
                 ),
-                value.position(),
+                arena.value(value).position(),
                 Some("Flatten your data structure or break it into multiple properties"),
             );
             return None;
         }
 
-        let inferred_type = visitor.infer_type_from_value(value);
+        let inferred_type = visitor.infer_type_from_value_id(arena, value);
 
-        match value {
-            Value::Array { values, .. } | Value::NestedArray { values, .. } => {
-                return self.validate_array_value(values, context, symbol_table, visitor, result);
+        match arena.value(value) {
+            ValueNode::Array { values, .. } | ValueNode::NestedArray { values, .. } => {
+                return self.validate_array_value(arena, *values, context, symbol_table, visitor, result);
             }
-            Value::Object { .. } => {
+            ValueNode::Object { .. } => {
                 return Some(self.validate_object_literal(
-                    value, context, symbol_table, visitor, result,
+                    arena, value, context, symbol_table, visitor, result,
                 ));
             }
-            Value::PrefixedConstructor { prefix, arguments, position, .. } => {
+            ValueNode::PrefixedConstructor { prefix, arguments, position, .. } => {
                 return self.validate_prefixed_constructor(
-                    prefix, arguments, *position, context, symbol_table, visitor, result,
+                    arena, arena.text(*prefix), *arguments, *position, context, symbol_table, visitor, result,
                 );
             }
-            Value::EnumValue { enum_name, value: enum_val, position, .. } => {
+            ValueNode::EnumValue { enum_name, value: enum_val, position, .. } => {
                 return Some(self.validate_enum_value(
-                    enum_name, enum_val, *position, context, symbol_table, result,
+                    arena.text(*enum_name), arena.text(*enum_val), *position, context, symbol_table, result,
                 ));
             }
-            Value::QuickFuncCall { function_name, arguments, position, .. } => {
+            ValueNode::QuickFuncCall { function_name, arguments, position, .. } => {
                 return self.validate_function_call_value(
-                    function_name, arguments, *position, context, symbol_table, visitor, result,
+                    arena.text(*function_name), *arguments, *position, context, symbol_table, visitor, result,
                 );
             }
-            Value::Expression { .. } => {
+            ValueNode::Expression { .. } => {
                 self.add_error(
                     result,
                     ERROR_INVALID_EXPRESSION,
                     &format!("Expression values not allowed in DATA section at {}", context),
-                    value.position(),
+                    arena.value(value).position(),
                     Some("Use only literals, function calls, or enum values"),
                 );
                 return None;
@@ -745,7 +834,8 @@ pub fn new_with_error_manager(
 
     fn validate_array_value(
         &mut self,
-        values: &[Value],
+        arena: &Arena,
+        values: ValueList,
         context: &str,
         symbol_table: &SymbolTable,
         visitor: &TypeInferenceVisitor,
@@ -758,10 +848,10 @@ pub fn new_with_error_manager(
         self.current_nesting_depth += 1;
         let mut first_type: Option<DataType> = None;
 
-        for (i, element) in values.iter().enumerate() {
+        for (i, &element) in arena.value_list(values).iter().enumerate() {
             let elem_context = format!("{}[{}]", context, i);
             let element_type = self.validate_value_recursive(
-                element, &elem_context, symbol_table, visitor, result,
+                arena, element, &elem_context, symbol_table, visitor, result,
             );
 
             if first_type.is_none() {
@@ -777,7 +867,7 @@ pub fn new_with_error_manager(
                             "Array in {} contains mixed types: {:?} and {:?}",
                             context, first, current
                         ),
-                        element.position(),
+                        arena.value(element).position(),
                         Some("All array elements must be the same type."),
                     );
                 }
@@ -790,14 +880,15 @@ pub fn new_with_error_manager(
 
     fn validate_object_literal(
         &mut self,
-        value: &Value,
+        arena: &Arena,
+        value: ValueId,
         context: &str,
         symbol_table: &SymbolTable,
         visitor: &TypeInferenceVisitor,
         result: &mut SectionAnalysisResult,
     ) -> DataType {
-        let properties = match value {
-            Value::Object { properties, .. } => properties,
+        let properties = match arena.value(value) {
+            ValueNode::Object { properties, .. } => arena.prop_list(*properties),
             _ => return DataType::Object,
         };
 
@@ -814,33 +905,33 @@ pub fn new_with_error_manager(
         }
 
         for prop in properties {
-            if !seen_keys.insert(prop.key.as_str()) {
+            if !seen_keys.insert(arena.text(prop.key)) {
                 self.add_error(
                     result,
                     ERROR_DUPLICATE_PROPERTY,
-                    &format!("Duplicate property '{}' in object at {}", prop.key, context),
+                    &format!("Duplicate property '{}' in object at {}", arena.text(prop.key), context),
                     prop.position,
                     None,
                 );
             }
 
-            let prop_context = format!("{}.{}", context, prop.key);
+            let prop_context = format!("{}.{}", context, arena.text(prop.key));
             let property_type = self.validate_value_recursive(
-                &prop.value, &prop_context, symbol_table, visitor, result,
+                arena, prop.value, &prop_context, symbol_table, visitor, result,
             );
 
             let opt_path: Option<String> =
                 if let Some(caps) = OBJECT_PROP_CONTEXT_RE.captures(context) {
-                    Some(PathBuilder::build(&[&caps[1], &prop.key]))
+                    Some(PathBuilder::build(&[&caps[1], arena.text(prop.key)]))
                 } else if !object_path.is_empty() {
                     Some(PathBuilder::build_from(
                         &PathBuilder::ensure_root(&object_path),
-                        &[&prop.key],
+                        &[arena.text(prop.key)],
                     ))
                 } else {
                     if self.debug_config.is_verbose {
                         self.error_manager.log_debug(&format!(
-                            "    Skipping index for anonymous object property: {}", prop.key
+                            "    Skipping index for anonymous object property: {}", arena.text(prop.key)
                         ));
                     }
                     None
@@ -848,7 +939,7 @@ pub fn new_with_error_manager(
 
             if let Some(full_path) = opt_path {
                 self.short_name_to_full_paths
-                    .entry(prop.key.clone())
+                    .entry(arena.text(prop.key).to_string())
                     .or_default()
                     .push(full_path.clone());
 
@@ -858,7 +949,7 @@ pub fn new_with_error_manager(
 
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!(
-                        "    Indexed: {} -> {} ({:?})", prop.key, full_path, property_type
+                        "    Indexed: {} -> {} ({:?})", arena.text(prop.key), full_path, property_type
                     ));
                 }
             }
@@ -871,8 +962,9 @@ pub fn new_with_error_manager(
     #[inline]
     fn validate_prefixed_constructor(
         &mut self,
+        arena: &Arena,
         prefix: &str,
-        arguments: &[Value],
+        arguments: ValueList,
         position: Position,
         context: &str,
         symbol_table: &SymbolTable,
@@ -881,17 +973,18 @@ pub fn new_with_error_manager(
     ) -> Option<DataType> {
         match prefix.to_lowercase().as_str() {
             "t" => self.validate_tuple_constructor(
-                arguments, position, context, symbol_table, visitor, result,
+                arena, arguments, position, context, symbol_table, visitor, result,
             ),
-            "b" => self.validate_blob_constructor(arguments, position, context, result),
-            "r" => self.validate_regex_constructor(arguments, position, context, result),
+            "b" => self.validate_blob_constructor(arena, arguments, position, context, result),
+            "r" => self.validate_regex_constructor(arena, arguments, position, context, result),
             _ => Some(DataType::Any),
         }
     }
 
     fn validate_tuple_constructor(
         &mut self,
-        arguments: &[Value],
+        arena: &Arena,
+        arguments: ValueList,
         position: Position,
         context: &str,
         symbol_table: &SymbolTable,
@@ -913,9 +1006,9 @@ pub fn new_with_error_manager(
             );
         }
 
-        for (i, arg) in arguments.iter().enumerate() {
+        for (i, &arg) in arena.value_list(arguments).iter().enumerate() {
             let elem_context = format!("{}[{}]", context, i);
-            self.validate_value_recursive(arg, &elem_context, symbol_table, visitor, result);
+            self.validate_value_recursive(arena, arg, &elem_context, symbol_table, visitor, result);
         }
 
         Some(DataType::Tuple)
@@ -923,7 +1016,8 @@ pub fn new_with_error_manager(
 
     fn validate_blob_constructor(
         &mut self,
-        arguments: &[Value],
+        arena: &Arena,
+        arguments: ValueList,
         position: Position,
         context: &str,
         result: &mut SectionAnalysisResult,
@@ -941,14 +1035,14 @@ pub fn new_with_error_manager(
             return Some(DataType::Blob);
         }
 
-        let arg = &arguments[0];
-        if let Value::String { value: str_val, .. } = arg {
-            if general_purpose::STANDARD.decode(str_val).is_err() {
+        let arg = arena.value_list(arguments)[0];
+        if let ValueNode::String { value: str_val, .. } = arena.value(arg) {
+            if general_purpose::STANDARD.decode(arena.text(*str_val)).is_err() {
                 self.add_error(
                     result,
                     ERROR_INVALID_BLOB_CONTENT,
                     &format!("Invalid base64 content in blob at {}", context),
-                    arg.position(),
+                    arena.value(arg).position(),
                     Some("Ensure the string is valid base64 encoded data"),
                 );
             }
@@ -957,7 +1051,7 @@ pub fn new_with_error_manager(
                 result,
                 ERROR_INVALID_BLOB_CONTENT,
                 &format!("Blob constructor in {} requires a string literal", context),
-                arg.position(),
+                arena.value(arg).position(),
                 Some("Use format: b:(\"base64EncodedData\")"),
             );
         }
@@ -967,7 +1061,8 @@ pub fn new_with_error_manager(
 
     fn validate_regex_constructor(
         &mut self,
-        arguments: &[Value],
+        arena: &Arena,
+        arguments: ValueList,
         position: Position,
         context: &str,
         result: &mut SectionAnalysisResult,
@@ -985,14 +1080,14 @@ pub fn new_with_error_manager(
             return Some(DataType::Regex);
         }
 
-        let arg = &arguments[0];
-        if let Value::String { value: str_val, .. } = arg {
-            if Regex::new(str_val).is_err() {
+        let arg = arena.value_list(arguments)[0];
+        if let ValueNode::String { value: str_val, .. } = arena.value(arg) {
+            if Regex::new(arena.text(*str_val)).is_err() {
                 self.add_error(
                     result,
                     ERROR_INVALID_REGEX_PATTERN,
                     &format!("Invalid regex pattern in {}", context),
-                    arg.position(),
+                    arena.value(arg).position(),
                     Some("Fix the regular expression syntax"),
                 );
             }
@@ -1001,7 +1096,7 @@ pub fn new_with_error_manager(
                 result,
                 ERROR_INVALID_REGEX_PATTERN,
                 &format!("Regex constructor in {} requires a string literal", context),
-                arg.position(),
+                arena.value(arg).position(),
                 Some("Use format: r:(\"pattern\")"),
             );
         }
@@ -1189,7 +1284,7 @@ pub fn new_with_error_manager(
     fn validate_function_call_value(
         &mut self,
         function_name: &str,
-        _arguments: &[crate::Compiler::AST::Expression],
+        _arguments: ExprList,
         position: Position,
         context: &str,
         symbol_table: &SymbolTable,

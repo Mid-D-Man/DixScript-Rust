@@ -46,6 +46,13 @@ Breaking release.
   sections as well as `@RAW`. `analyze` and `SchemaSectionAnalyzer::validate_resolved` keep their
   signatures and copy their input into a scratch arena, so `DixLoader`'s post-resolution schema check
   copies the resolved `@DATA` section. Diagnostics are unchanged.
+- **`DataSectionAnalyzer::analyze_doc`**, which checks `@DATA` through an `Arena`, and the four arena
+  entry points of `TypeInferenceVisitor` (`infer_type_from_value_id`, `infer_type_from_expression_id`,
+  `infer_element_type_from_value_id` and `infer_element_type_from_expression_id`), which give the
+  answers of their owned twins for the same tree. `Arena::value_ids`, `expr_ids` and `stmt_ids` visit
+  every node. `GeneralSemanticAnalyzer::with_document` now covers `@DATA` as well, and
+  `DataSectionAnalyzer::analyze` keeps its signature. Diagnostics, indexes and symbol table entries
+  are unchanged.
 
 ### Removed
 

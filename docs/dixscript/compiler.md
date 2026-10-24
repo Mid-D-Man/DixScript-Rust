@@ -212,6 +212,57 @@ strategies and the halt message). `tests/schema_section_tests.rs` has flat and d
 optional commas, keyword-named path segments, negative bounds, lowercase type name, malformed
 section and non-literal argument, through the loader.
 
+### `Compiler/AST/Visitors/type_inference_visitor.rs`
+
+**What it does:** Infers the type of a value or an expression from the symbol table and from the
+types of the local variables it was given: literals, function and method calls, arithmetic,
+qualified identifiers (enum access, namespaced calls, methods on typed collections), index and
+property access. The `@DATA` analyzer, the `@QUICKFUNCS` analyzer and the language server use it.
+
+**Decisions:**
+- **This file reads the owned `Value` and `Expression` types and is unchanged in behavior.**
+  `type_inference_arena.rs` adds the same four entry points for a node in an `Arena` (see
+  `arena-ast.md`). The two implementations share every function that depends on names alone, so a
+  few private items here (the method tables, the identifier and function lookups, the numeric
+  check) and the three fields became `pub(super)`. Nothing else here changed.
+- **Both implementations exist on purpose, for now.** The `@QUICKFUNCS` analyzer and the language
+  server still call the owned entry points, and the analyzer calls them from inside its own
+  recursion, so turning them into a wrapper that copies each subtree into an arena would make that
+  analyzer slower until it moves. When it moves, these entry points become wrappers over the arena
+  ones and the duplicated tree-walking code is deleted.
+- This file is the oracle for `tests/type_inference_arena.rs`, which compares the two on every node
+  of the corpus.
+
+### `Compiler/Core/SectionAnalyzers/data_section_analyzer.rs`
+
+**What it does:** Checks the `@DATA` section: the two-tier ordering (flat properties before tables
+and group arrays), unique table paths, group array paths, flat names and table property names,
+reserved keywords, declared against inferred types (with the int to long and int to float
+widenings), array homogeneity, nesting depth (12 levels), object literal duplicates, tuples (6
+elements), blob and regex constructors, enum values and function calls. It builds the two indexes
+the later stages use (short name to full paths, and path to type) and registers every property in
+the symbol table.
+
+**Decisions:**
+- **One implementation, two entry points.** `analyze_doc(&DocData, &Arena, ...)` holds the checks
+  and reads values through the arena. `analyze(&DataSection, ...)` stays for callers that only have
+  an owned `DixScript`: it copies the section into a scratch arena and calls `analyze_doc`, so the
+  two cannot disagree.
+- **Types are inferred with the arena entry points of `TypeInferenceVisitor`,** at every nesting
+  level as before. Exporting each value to the owned type to call the owned visitor would copy every
+  subtree at every level, which would make the largest section slower than it was.
+- The arena is passed down through the validators as an argument. Storing a reference to it in the
+  analyzer would add a second lifetime to a type that is built in several places.
+- The checks and the order they run in are unchanged, so the diagnostics, their positions, the
+  indexes and the symbol table entries are the same. The exemption that lets two objects sit
+  together in an array is redundant (two objects already compare equal) and was left as it was.
+- Some branches cannot be reached from text, because the parser merges or drops the input first: a
+  flat property after a table, an expression value, a blob or regex with no or a non-string
+  argument, a nested array value. Tests build those sections by hand.
+
+**Tests:** `tests/data_parser_tests.rs` (the parser) and `tests/data_analyzer_document.rs` (the
+diagnostics, indexes and symbol table entries, on both paths).
+
 ### `Compiler/Core/SectionAnalyzers/security_section_analyzer.rs`
 
 **What it does:** Checks the `@SECURITY` section and reports what will fall back to a default: an
@@ -360,12 +411,13 @@ token stream, parses it, and assigns the result onto a `Document`, which `parse`
   sees the unresolved AST; the post-resolution half lives in `DixLoader`.
 - **An optional `Document`.** `with_document(&Document)` gives the analyzer the arena form of the
   file. A section whose analyzer has moved to the arena reads it from the document, and a section
-  that has not moved reads the owned `DixScript` as before. `@RAW`, `@SECURITY` and `@SCHEMA` have
-  moved. Their phases (`analyze_phase6b_raw`, `analyze_phase8_generated` and
-  `analyze_phase7b_schema`) call the section analyzer's `analyze_doc` with the document's section and
+  that has not moved reads the owned `DixScript` as before. `@RAW`, `@SECURITY`, `@SCHEMA` and
+  `@DATA` have moved. Their phases (`analyze_phase6b_raw`, `analyze_phase8_generated`,
+  `analyze_phase7b_schema` and `analyze_phase7_data_driven`) call the section analyzer's
+  `analyze_doc` with the document's section and
   arena when one is attached, and the owned `analyze` (which copies into a scratch arena) when none
-  is. `@SCHEMA` takes the `@DATA` section from the document too; the `@DATA` analyzer itself still
-  reads the owned tree. Whether a section is present is decided by the same tree that is analyzed,
+  is. `@SCHEMA` takes the `@DATA` section from the document too, and the indexes the `@DATA`
+  analyzer builds are returned from the section that was read. Whether a section is present is decided by the same tree that is analyzed,
   and that includes the check that `@DLM` with an encryptor has a `@SECURITY` section. The
   constructors are unchanged, so the imports resolver, the language server and every test that
   builds the analyzer from an owned tree compile and behave as they did.
@@ -601,6 +653,33 @@ which diagnostics were produced.
 
 **Tests:** `cargo test -p dixscript --test raw_analyzer_document`. 11 tests, all passing on Rust
 1.75. Eleven deliberate bugs were injected to check them (see the last Fixes entry).
+
+### `tests/data_analyzer_document.rs`
+
+**What it does:** Pins the diagnostics, the two indexes and the symbol table entries of the `@DATA`
+analyzer, and checks that it gives the same ones when it reads a `Document` as when it reads the
+owned tree. The parser tests in `data_parser_tests.rs` stop at the parse, and the loader tests only
+ask whether a file is accepted.
+
+**Decisions:**
+- **Forty-nine parsed sources, three strategies.** They cover all 17 `@DATA` error codes except the
+  ones the parser cannot produce, the nesting limit on both sides of the boundary, mixed and nested
+  arrays, group arrays, tables, typed and untyped properties, null values, enums with and without a
+  namespace, function calls, constructors and short-name indexing. The comparison test runs each
+  with and without a document (147 comparisons) and also compares the indexes.
+- **The expected output was recorded, not derived.** `RECORDING` holds, per source, the section's
+  diagnostics, the short-name index, the type index and the registered variables, written from the
+  analyzer before it moved (63 cases: one under `continue` per source, and one under `halt` or
+  `recover` where that strategy changes something).
+- **Twenty-one sections are built by hand,** for the branches the parser cannot reach. `HAND_RECORDING`
+  holds the recorded output of each under three strategies (63 blocks), and the test runs every one
+  through `analyze` and through `analyze_doc`.
+- Two tests build a document and an owned tree that disagree on purpose, as the other analyzer
+  tests do, and a third takes the document of one file and the tree of another to show that the
+  indexes describe the section that was read.
+
+**Tests:** `cargo test -p dixscript --test data_analyzer_document`. 11 tests, all passing on Rust
+1.75. Eighteen deliberate bugs were injected to check them (see the last Fixes entry).
 
 ### `tests/security_analyzer_document.rs`
 
@@ -1224,3 +1303,44 @@ requires the larger to take less than 7 times as long.
   The language server, which now depends on `dixscript` by path, could not be type-checked here
   either, because Cargo 1.75 cannot build its dependencies. No existing signature changed, and the
   language server calls only constructors that are unchanged.
+
+### Fixes and Problems: the `@DATA` analyzer reads the Document
+
+- **The change was checked with the same before and after harness as the earlier analyzers,** with 49
+  `@DATA` sources added. It now runs 84 corpus files and 138 crafted sources, the crafted ones under
+  three strategies (498 runs, 7,164 lines), and a second mode analyzes 21 hand-built sections under
+  three strategies (507 lines). The output of the original code is the same on a second run, and the
+  changed tree gives byte-for-byte the same output through the owned entry points and through the
+  `Document` ones, for both modes. The two binaries were checked to be different programs: the symbol
+  `infer_type_from_value_id` occurs four times in the changed binary and not at all in the original.
+- **Some of the first sources never reached the code they were meant for.** A table followed by a
+  flat property is merged into the table by the parser, so `ORDERING_VIOLATION` never appeared. The
+  expression values (`1 + 2`) produced no diagnostic. Blob and regex constructors with no argument or
+  a non-string argument produced none either, and a source that held several constructors recorded
+  only the first. The constructors were split into one source each, and what could not be reached
+  from text moved into the hand-built mode. After that all 17 error codes were seen.
+- **`tests/data_analyzer_document.rs`:** eighteen bugs were injected behind an environment switch, in
+  one build and each run alone, with a control run that must pass: the document ignored, the presence
+  check reading the owned tree, the wrapper copying an empty section, the nesting limit off by one,
+  the nesting depth never counted, duplicate object keys never reported, a group array error pointing
+  at the array, blob and regex checks skipped, the tuple limit off by one, a group array not counted
+  as grouped data, duplicate table property names not reported, the wrong item index in the short-name
+  index, constructor prefixes matched with case, tuple arguments not checked, inference switched off,
+  and the enum name and value swapped. Seventeen were caught.
+- **One bug could not be caught because it changes nothing.** Dropping the exemption that lets two
+  objects sit together in an array is an equivalent mutant: two objects already compare equal, so the
+  second condition of that check is false whenever the exemption applies.
+- **The existing loader tests in `runtime_tests.rs` caught one of the eighteen bugs** (the swapped enum
+  name and value). They check whether a file is accepted, so a wrong position, a wrong index entry or
+  a skipped check does not fail them.
+- **Not changed:** the `@QUICKFUNCS` analyzer and enhancer, the value resolver and the runtime still
+  read the owned tree, and so does `version_constraints.rs`, whose `@DATA` and `@QUICKFUNCS` checks
+  run as a separate stage on the exported tree. `AstVisitorBase`, which only the language server
+  implements, is untouched.
+- **Speed:** a timing of the harness binaries on the corpus, three runs each, in a debug build, gave
+  the same time (about 28.7 seconds) for the original code, the owned entry point of the changed code
+  and the `Document` path. That is not a benchmark, and it stops at semantic analysis. It shows no
+  gain and no loss. Memory was not measured.
+- **Not run:** CI on stable Rust and the bench workflow, because GitHub's API rate-limits the sandbox.
+  The language server could not be type-checked either, because Cargo 1.75 cannot build its
+  dependencies. No existing signature changed.

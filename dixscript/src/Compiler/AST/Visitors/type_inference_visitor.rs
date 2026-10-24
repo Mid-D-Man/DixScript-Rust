@@ -1,4 +1,7 @@
-// dixscript/src/Compiler/AST/Visitors/type_inference_visitor.rs
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/AST/Visitors/type_inference_visitor.rs"
+// ============================================================================
 
 use crate::Compiler::AST::*;
 use crate::Compiler::Utilities::SymbolTable;
@@ -12,7 +15,7 @@ use std::collections::HashMap;
 /// Array instance methods whose return value IS the stored element.
 /// `pop` and `shift` are NOT here — in DixScript they return a NEW ARRAY
 /// (functional/immutable style), not the removed element.
-const ARRAY_ELEMENT_METHODS: &[&str] = &[
+pub(super) const ARRAY_ELEMENT_METHODS: &[&str] = &[
     "first", "last", "get",
 ];
 
@@ -26,7 +29,7 @@ const ARRAY_ELEMENT_METHODS: &[&str] = &[
 ///
 /// NOTE: `flatten` is intentionally absent — it dissolves the TypedArray
 /// nesting and is handled separately (always returns plain Array).
-const ARRAY_PRESERVING_METHODS: &[&str] = &[
+pub(super) const ARRAY_PRESERVING_METHODS: &[&str] = &[
     "set", "push", "pop", "shift", "unshift",
     "slice", "reverse", "sort", "concat",
     "filter", "distinct",
@@ -34,7 +37,7 @@ const ARRAY_PRESERVING_METHODS: &[&str] = &[
 
 /// Tuple instance methods that map to a **specific positional slot** of a
 /// TypedTuple annotation.  The index in this array is the TypedTuple slot index.
-const TUPLE_POSITIONAL_METHODS: &[(&str, usize)] = &[
+pub(super) const TUPLE_POSITIONAL_METHODS: &[(&str, usize)] = &[
     ("first",  0),
     ("second", 1),
     ("third",  2),
@@ -45,26 +48,26 @@ const TUPLE_POSITIONAL_METHODS: &[(&str, usize)] = &[
 
 /// Tuple instance methods that return an element but whose slot index is not
 /// statically known at the call site (e.g. `get(i)`).
-const TUPLE_DYNAMIC_ELEMENT_METHODS: &[&str] = &["get"];
+pub(super) const TUPLE_DYNAMIC_ELEMENT_METHODS: &[&str] = &["get"];
 
 /// All tuple element-returning methods (positional + dynamic) for quick lookup.
-const TUPLE_ELEMENT_METHODS: &[&str] = &[
+pub(super) const TUPLE_ELEMENT_METHODS: &[&str] = &[
     "first", "second", "third", "fourth", "fifth", "sixth", "get",
 ];
 
 /// Tuple instance methods that return `DixType::Tuple` but change element
 /// ordering, making the TypedTuple slot annotations inaccurate.
 /// These return plain `DataType::Tuple` even when the receiver is TypedTuple.
-const TUPLE_PRESERVING_METHODS: &[&str] = &["reverse", "swap"];
+pub(super) const TUPLE_PRESERVING_METHODS: &[&str] = &["reverse", "swap"];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TypeInferenceVisitor
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub struct TypeInferenceVisitor<'a> {
-    symbol_table:         &'a SymbolTable,
-    local_variable_types: HashMap<String, Option<DataType>>,
-    element_type_hints:   HashMap<String, DataType>,
+    pub(super) symbol_table:         &'a SymbolTable,
+    pub(super) local_variable_types: HashMap<String, Option<DataType>>,
+    pub(super) element_type_hints:   HashMap<String, DataType>,
 }
 
 impl<'a> TypeInferenceVisitor<'a> {
@@ -283,7 +286,7 @@ impl<'a> TypeInferenceVisitor<'a> {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    fn infer_identifier_type(&self, name: &str) -> Option<DataType> {
+    pub(super) fn infer_identifier_type(&self, name: &str) -> Option<DataType> {
         if let Some(local_type) = self.local_variable_types.get(name) {
             return *local_type;
         }
@@ -469,7 +472,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         None
     }
 
-    fn infer_imported_function_call_type(
+    pub(super) fn infer_imported_function_call_type(
         &self,
         namespace_name: &str,
         function_name:  &str,
@@ -511,7 +514,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     #[inline]
-    fn is_numeric_type(dt: DataType) -> bool {
+    pub(super) fn is_numeric_type(dt: DataType) -> bool {
         matches!(dt, DataType::Int | DataType::Long | DataType::Float | DataType::Double)
     }
 
@@ -537,7 +540,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    fn infer_function_call_type(&self, function_name: &str) -> Option<DataType> {
+    pub(super) fn infer_function_call_type(&self, function_name: &str) -> Option<DataType> {
         self.symbol_table
             .try_get_function(function_name)
             .and_then(|sig| sig.return_type)
@@ -550,13 +553,13 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    fn infer_quick_func_call_type(&self, name: &str) -> Option<DataType> {
+    pub(super) fn infer_quick_func_call_type(&self, name: &str) -> Option<DataType> {
         self.symbol_table
             .try_get_function(name)
             .and_then(|sig| sig.return_type)
     }
 
-    fn infer_dix_function_call_type(&self, function_name: &str) -> Option<DataType> {
+    pub(super) fn infer_dix_function_call_type(&self, function_name: &str) -> Option<DataType> {
         match function_name {
             "Format" | "Join" => Some(DataType::String),
             _ => None,
@@ -711,7 +714,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         self.infer_static_method_call_return_type(object_name, method_name)
     }
 
-    fn infer_static_method_call_return_type(
+    pub(super) fn infer_static_method_call_return_type(
         &self,
         object_name: &str,
         method_name: &str,
@@ -928,7 +931,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     /// Returns the 0-based TypedTuple slot index for a positional tuple accessor.
     /// Returns `None` for non-positional methods (`get`, etc.).
     #[inline]
-    fn tuple_method_slot_index(method_name: &str) -> Option<usize> {
+    pub(super) fn tuple_method_slot_index(method_name: &str) -> Option<usize> {
         match method_name {
             "first"  => Some(0),
             "second" => Some(1),

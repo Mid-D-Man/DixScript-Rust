@@ -5,6 +5,7 @@
 //! without modifying them.
 
 pub mod ast_visitor_base;
+pub mod type_inference_arena;
 pub mod type_inference_visitor;
 
 // Re-exports

@@ -616,8 +616,8 @@ all instructions.
 - Steps 3 and 4 (operator enum, whole-tree clones, re-measure).
 - The rest of step 6. Done: arena-aware `Display`, `Debug` and equality through handles
   (`ValueRef`, `ExprRef`, `StmtRef`), the arena-resident `Document`, and `Display` for `Document`
-  and the `Doc*` section twins, all five section parsers building into the arena, and the merge of their arenas into one `Document` (`Arena::append`, `GeneralParser::parse_document`), and the first consumers: the `@RAW`, `@SECURITY` and `@SCHEMA` analyzers read the `Document` (see
-`compiler.md`). Planned drops, each compiling with the tests intact:
+  and the `Doc*` section twins, all five section parsers building into the arena, and the merge of their arenas into one `Document` (`Arena::append`, `GeneralParser::parse_document`), and the first consumers: the `@RAW`, `@SECURITY`, `@SCHEMA` and `@DATA` analyzers read the `Document`
+and `TypeInferenceVisitor` can infer types over the arena (see `compiler.md`). Planned drops, each compiling with the tests intact:
   1. Moving the consumers one section at a time. Each section's analyzer moves together with its
      enhancer (only `@QUICKFUNCS` has one) and the part of the general scripts that handles it.
      The analyzers read the owned section and fill a symbol table, so their outputs must come out
@@ -731,6 +731,9 @@ The module re-exports everything under it and carries the crate-facing documenta
   a `# Panics` section, and the module, `Arena`, `import_value`, `export_value`, `ValueRef` and
   `Document` carry runnable examples, and so do the seven list and case allocators (thirteen doctests). `cargo doc`
   reports no warnings for the module.
+- **Tests can visit every node.** `Arena::value_ids`, `expr_ids` and `stmt_ids` yield the id of every
+  node in allocation order. The arena is append-only, so this includes nodes a failed sub-expression
+  left behind, and a test cannot miss a nested one by walking the tree.
 - **Parsers allocate list runs through the `alloc_*_list` methods.** A parser that builds a list
   node by node collects the child ids and stores the run once: `alloc_value_list`,
   `alloc_expr_list`, `alloc_prop_list`, `alloc_stmt_list`, `alloc_str_list` (for names) and
@@ -1051,6 +1054,51 @@ built from.
 **Tests:** `cargo test -p dixscript --test arena_merge`. Six tests, all passing on Rust 1.75. Ten
 deliberate bugs were injected to check them (see the Fixes entry below).
 
+### `Compiler/AST/Visitors/type_inference_arena.rs`
+
+**What it does:** Adds four entry points to `TypeInferenceVisitor` for a node in an `Arena`:
+`infer_type_from_value_id`, `infer_type_from_expression_id`, `infer_element_type_from_value_id` and
+`infer_element_type_from_expression_id`. Each gives the answer its owned twin in
+`type_inference_visitor.rs` gives for the same tree.
+
+**Decisions:**
+- **Only the code that reads the tree is repeated.** Everything that depends on names alone is shared
+  with the owned implementation: the method tables, the identifier lookup, the function return types
+  and the builtin registries. The two differ in how they walk a node, so a divergence can only come
+  from a node shape, and that is what the differential test compares.
+- **Independent of the owned implementation, not a wrapper around it.** A wrapper would copy every
+  subtree before inferring it, at every nesting level of the caller's own recursion.
+- **The owned implementation stays until the `@QUICKFUNCS` analyzer moves,** because that analyzer
+  and the language server call it. Then the owned entry points become wrappers and the duplicated
+  walking code goes.
+- The entry points panic when an id is out of range for the arena, like every other arena accessor.
+
+### `tests/type_inference_arena.rs`
+
+**What it does:** Compares the owned and the arena implementations on every value and every
+expression node of every file in `mdix_files/` and of four crafted sources, for the type of the node
+and for its element type, under three visitor configurations (no locals, locals of assorted types,
+and locals with element-type hints).
+
+**Decisions:**
+- **The owned implementation is the oracle.** It is unchanged by the arena work, so a difference is a
+  bug in the port. It is not a recording, so it needs no re-recording.
+- **The nodes come from `Arena::value_ids` and `expr_ids`,** which includes orphan nodes. The symbol
+  table is the one the semantic analysis of the same file produced, so functions, data variables,
+  enums and imported namespaces resolve. The locals are synthesized from every identifier in the
+  document and cycle through 14 types, including typed arrays and tuples, so the branches that
+  depend on a local's type are reached.
+- **The test is not allowed to pass vacuously.** It asserts a minimum number of files and
+  comparisons, a mix of typed and untyped results, and that integers, strings, booleans, doubles,
+  enums, objects, arrays, typed arrays and typed tuples were all inferred somewhere.
+- **Four tests build nodes by hand** for shapes the corpus does not contain: upper-case constructor
+  prefixes, a data variable reached through an object access, index access over every kind of
+  collection, and conditionals and arrays with typeless items.
+
+**Tests:** `cargo test -p dixscript --test type_inference_arena`. 6 tests, all passing on Rust 1.75. On
+the corpus it makes 160,545 comparisons (144,574 with a type and 15,971 without) over 84 files, and
+708 more on the crafted sources.
+
 ## Fixes and Problems
 
 ### `benches/arena_vs_box_benchmark.rs`
@@ -1168,3 +1216,21 @@ deliberate bugs were injected to check them (see the Fixes entry below).
 - The test that merges five single-section arenas in turn is weaker, because the destination is empty
   in some stores when a section is appended, and it misses three of the ten bugs. It stays as a
   second check of a different order.
+
+### Fixes and Problems: the arena type inference visitor
+
+- **The port was checked node by node before anything used it.** `tests/type_inference_arena.rs`
+  passed on its first run. Sixteen deliberate bugs were then injected into the arena implementation
+  behind an environment switch, each run alone, to see whether it could have failed: an array that is
+  never typed, an object typed as an array, a tuple prefix matched with case, a tuple limited to five
+  arguments, the wrong enum name looked up, the long rule of arithmetic dropped, the conditional
+  branches swapped, the same-type check of `Array.of` skipped, the object access path joined with the
+  wrong separator, the array element methods inverted, the wrong tuple slot for an index, element
+  hints ignored, the uniform element check inverted, the `!` operator typed as an integer, a tuple
+  that is never typed, and a value expression that is never inferred.
+- **Three escaped the corpus, and tests were added for them.** Matching the tuple prefix with case, the
+  path separator of an object access and the tuple slot of an index access are not exercised by any
+  corpus file: no file writes an upper-case constructor prefix, and none contains an object access or an
+  index access over a typed tuple. Hand-built nodes now cover each, and all three are caught.
+- **The language server and the `@QUICKFUNCS` analyzer still use the owned implementation,** so the
+  work here changes nothing for them.

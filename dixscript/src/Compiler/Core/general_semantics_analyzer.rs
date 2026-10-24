@@ -505,18 +505,33 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.add_section_result("RAW", result);
     }
 
+    /// Checks `@DATA` and takes the two indexes the later stages use from the analyzer.
+    ///
+    /// Reads the `Document` when the caller attached one, and the owned tree otherwise.
     fn analyze_phase7_data_driven(&mut self) -> bool {
-        let data = match &self.ast.data {
-            Some(s) => s,
-            None    => return true,
+        let document = self.document;
+        let has_data = match document {
+            Some(doc) => doc.data.is_some(),
+            None      => self.ast.data.is_some(),
         };
+        if !has_data {
+            return true;
+        }
 
         let em = self.make_error_manager();
         let mut analyzer = DataSectionAnalyzer::new_with_error_manager(
             self.operational_settings,
             em,
         );
-        let result = analyzer.analyze(data, &mut self.symbol_table);
+        let result = match document {
+            Some(Document { data: Some(data), arena, .. }) => {
+                analyzer.analyze_doc(data, arena, &mut self.symbol_table)
+            }
+            _ => match &self.ast.data {
+                Some(data) => analyzer.analyze(data, &mut self.symbol_table),
+                None => return true,
+            },
+        };
         let phase_ok = result.is_success;
         let (short_name_idx, type_idx) = analyzer.get_indexes();
 

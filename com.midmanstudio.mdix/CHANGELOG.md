@@ -132,8 +132,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   The field was in Unity's plain multiline layout, which only scrolls when the caret moves; it now sets
   `verticalScrollerVisibility = Auto`, which switches it to the ScrollView layout.
   (`Editor/MdixEditorWindow.cs`, `Editor/MdixEditorWindow.Lsp.cs`.)
-- MDIX Studio: a long file scrolls. The code field and panels took the height of their content, which
-  pushed the problems list out of the window and left nothing to scroll.
+- MDIX Studio: the code field scrolls with the mouse wheel, two fingers and a scrollbar. Unity only
+  builds a multiline TextField's scrolling layout once its vertical scroller visibility is set, and it
+  starts out Hidden; on 2022.3 that is the method `SetVerticalScrollerVisibility`, which was never
+  called (the property of the same name does not exist there and failed to compile). The panels also
+  took the height of their content, which pushed the problems list out of the window.
+  (`Editor/MdixEditorWindow.cs`, `Editor/MdixEditorWindow.Lsp.cs`.)
 - MDIX Studio: hover follows the mouse instead of the caret and sits below the pointer.
 - MDIX Studio Search tab: the query box no longer stretches to half the panel.
 - MDIX Studio "Generate ScriptableObject" window: it can be resized wider, and opens wide enough to

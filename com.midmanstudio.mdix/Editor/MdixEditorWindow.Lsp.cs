@@ -1696,44 +1696,33 @@ namespace MidManStudio.Mdix.Unity.Editor
         }
 
         /// <summary>
-        /// Two-finger / wheel scrolling over the code. The code field is created with
-        /// <c>verticalScrollerVisibility = Auto</c>, which makes Unity scroll it through a ScrollView;
-        /// the wheel is then applied to that ScrollView directly, and Unity's own handling is left
-        /// alone when there is nothing to scroll.
+        /// Switches the code field to Unity's ScrollView-based multiline layout (wheel, two-finger
+        /// and scrollbar scrolling). In Unity 2022.3 that is a method,
+        /// TextField.SetVerticalScrollerVisibility(ScrollerVisibility); later versions expose a
+        /// verticalScrollerVisibility property instead. Reflection, so neither version can break
+        /// compilation: writing it as a property did exactly that on 2022.3.13.
         /// </summary>
-        private void InstallCodeFieldWheel()
+        private static void EnableCodeFieldScroller(TextField field)
         {
-            if (_codeField == null) return;
+            var type = typeof(TextField);
 
-            // If Unity ever stops giving the field a ScrollView, the wheel silently does nothing.
-            // Say so once, after the first layout, so it is not a mystery.
-            _codeField.schedule.Execute(() =>
+            var method = type.GetMethod("SetVerticalScrollerVisibility", new[] { typeof(ScrollerVisibility) });
+            if (method != null)
             {
-                if (_codeField != null && _codeField.Q<ScrollView>() == null)
-                {
-                    Debug.LogWarning(
-                        "[MDIX Studio] the code field has no ScrollView, so mouse-wheel scrolling " +
-                        "will not work in the Editor tab. Unity's multiline TextField layout may " +
-                        "have changed in this Unity version.");
-                }
-            }).ExecuteLater(500);
+                method.Invoke(field, new object[] { ScrollerVisibility.Auto });
+                return;
+            }
 
-            _codeField.RegisterCallback<WheelEvent>(evt =>
+            var property = type.GetProperty("verticalScrollerVisibility");
+            if (property != null && property.CanWrite)
             {
-                var scroll = _codeField?.Q<ScrollView>();
-                if (scroll == null) return;
+                property.SetValue(field, ScrollerVisibility.Auto);
+                return;
+            }
 
-                var viewport = scroll.contentViewport.layout.height;
-                var content  = scroll.contentContainer.layout.height;
-                if (float.IsNaN(viewport) || float.IsNaN(content) || content <= viewport + 1f) return;
-
-                var offset = scroll.scrollOffset;
-                scroll.scrollOffset = new Vector2(
-                    offset.x + evt.delta.x * scroll.mouseWheelScrollSize,
-                    offset.y + evt.delta.y * scroll.mouseWheelScrollSize);
-
-                evt.StopPropagation();
-            }, TrickleDown.TrickleDown);
+            Debug.LogWarning(
+                "[MDIX Studio] This Unity version has no way to switch the code field to its scrolling " +
+                "layout, so long files will not scroll with the mouse wheel.");
         }
 
         /// <summary>A Copy button next to the toolbar buttons, and right-click Copy on the status line.</summary>

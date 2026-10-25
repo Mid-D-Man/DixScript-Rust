@@ -225,6 +225,13 @@ namespace MidManStudio.Mdix.Unity.Editor
                 },
             };
 
+            // A multiline TextField only gets its ScrollView-based layout once its vertical scroller
+            // visibility is set, and it starts out Hidden. Without the layout the field never scrolls
+            // with the mouse wheel or two fingers (only moving the caret scrolls), and a long file just
+            // runs off the bottom. This has to happen now, before the colour overlay attaches in
+            // InitializeLspIntegration below: the switch re-parents the field's inner text element.
+            EnableCodeFieldScroller(_codeField);
+
             _codeField.RegisterValueChangedCallback(OnCodeFieldValueChanged);
 
             if (!string.IsNullOrEmpty(_sourceText))
@@ -244,7 +251,6 @@ namespace MidManStudio.Mdix.Unity.Editor
             }
 
             ConstrainPanelHeights();
-            InstallCodeFieldWheel();
             InstallCopyAffordances();
 
             InitializeLspIntegration();

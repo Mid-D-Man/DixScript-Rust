@@ -25,11 +25,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   members, expressions, tuples and hex/binary numbers stay read-only.
   (`Editor/MdixSourceMap.cs`, `Editor/MdixLiteralEdit.cs`.)
 - MDIX Studio Explorer: dates (`2026-01-15`), timestamps (`2025-01-15T10:30:00.250+05:30`), regex
-  values (`r:("...")`) and `raw` backtick strings on one line can be edited in place the same way.
-  A timestamp keeps its zone and fraction digits, a date or timestamp is refused unless it is a
-  real one, a regex is typed as the pattern and escaped for you, and a raw string cannot hold a
-  backtick. Blobs (`b:("...")`) and raw strings that span several lines stay read-only for now.
-  (`Editor/Popups/MdixTemporalText.cs`.)
+  values (`r:("...")`) and `raw` backtick strings can be edited the same way. A timestamp keeps its
+  zone and fraction digits, a date or timestamp is refused unless it is a real one, a regex is
+  typed as the pattern and escaped for you, and a raw string cannot hold a backtick. Blobs
+  (`b:("...")`) stay read-only for now. (`Editor/Popups/MdixTemporalText.cs`.)
+- MDIX Studio Explorer: popup editors. Click a date or timestamp to pick it from a month grid (with
+  time boxes and a None / UTC / Offset zone for a timestamp, a text box for the whole value, and a
+  Today / Now button). Click a raw string, or text longer than 100 characters or with line breaks,
+  to edit it in a text area (Ctrl or Cmd + Enter applies). Esc cancels, and a refused edit is
+  shown in the popup, which stays open. A popup changes the text through the same checked path as
+  the inline field. (`Editor/Popups/`, `Editor/MdixEditorWindow.Popups.cs`.)
 - MDIX Studio Explorer: blob and regex values show `blob  4.2 KB  PNG` and `r:(pattern)` instead
   of `?`. The type is read from the first bytes only, so a large blob costs nothing to show.
   (`Editor/Popups/MdixBlobInfo.cs`.)

@@ -419,7 +419,7 @@ choose **MDIX → Open in MDIX Studio**.
   capped (200 items per array) and says so.
 
   **Editing values in place.** A value written out in the file as a plain number, text, `true` /
-  `false`, colour, date, timestamp, regex or one-line `raw` string is highlighted when you hover it. Click it, type, and press Enter: the change
+  `false`, colour, date, timestamp, regex or `raw` string is highlighted when you hover it. Click it, type, and press Enter: the change
   is made in the text of the Editor tab and compiled, and Esc (or clicking away) cancels. A number
   keeps its type (a `Long` keeps its `L`, a `Float` its `f`, a `Double` stays a double), and text is
   escaped for you. A timestamp keeps its zone and fraction digits, and a regex is edited as the
@@ -428,11 +428,17 @@ choose **MDIX → Open in MDIX Studio**.
   from the one you changed are allowed to move, and the status bar names them. Nothing is written to
   disk until **Save**.
 
+  A date or timestamp opens a **picker**: a month grid (use « ‹ › » to move, or type the whole
+  value in the box at the top), and for a timestamp the time boxes and a zone of None, UTC or an
+  offset. **Today** / **Now** fills in the current date or time. A `raw` string, and any text that
+  is longer than 100 characters or has line breaks, opens a **text area** (Ctrl or Cmd + Enter
+  applies). In a popup Enter applies, Esc cancels, and a refused edit is explained in the popup,
+  which stays open.
+
   Only plain literals can be edited: a value produced by a function call (the `createEnemy("Goblin",
-  50, ...)` kind), an enum member, an expression, a tuple, `null`, a hex or binary number, a blob or
-  a `raw` string that spans several lines stays read-only, because there is no single piece of text
-  that a one-line field can hold. Change those in the Editor tab, where a function argument is the
-  thing to edit.
+  50, ...)` kind), an enum member, an expression, a tuple, `null`, a hex or binary number or a blob
+  stays read-only, because there is no single piece of text behind it that a field can hold. Change
+  those in the Editor tab, where a function argument is the thing to edit.
 - **Editor tab** — source text editor with live compile status, syntax highlighting and
   language-server features (diagnostics, completion, hover — see below). **Save** on an
   unsaved scratch document asks where to put it.
@@ -533,8 +539,12 @@ com.midmanstudio.mdix/
 │   ├── MdixEditorWindow.cs
 │   ├── MdixEditorWindow.Explorer.cs          ← tree view, folding, in-place editing
 │   ├── MdixSourceMap.cs                      ← where each plain literal sits in the text
+│   ├── MdixEditorWindow.Popups.cs            ← opens the value popups from the Explorer
 │   ├── MdixLiteralEdit.cs                    ← formats, applies and checks one edit
 │   ├── Popups/
+│   │   ├── MdixPopup.cs                      ← the modal card: Apply, Cancel, error line
+│   │   ├── MdixDateTimePicker.cs             ← month grid, time boxes and zone
+│   │   ├── MdixDateTimeModel.cs              ← what the picker edits (no Unity types)
 │   │   ├── MdixTemporalText.cs               ← reads and writes date and timestamp text
 │   │   └── MdixBlobInfo.cs                   ← names a blob's type from its first bytes
 │   ├── CreateMdixMenuItems.cs

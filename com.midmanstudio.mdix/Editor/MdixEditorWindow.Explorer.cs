@@ -27,7 +27,8 @@ namespace MidManStudio.Mdix.Unity.Editor
     /// is compiled first and refused unless the value reads back exactly as entered and the data keeps the same
     /// paths; values computed from the edited one are allowed to change, and the status bar says which. Values
     /// produced by function calls, enum members, expressions and tuples are not literals and stay read-only, as
-    /// do blobs (long base64) and raw strings that span several lines, which a one-line field cannot hold.
+    /// do blobs (long base64). Dates, timestamps, raw strings and long or multi-line text open a popup instead
+    /// of the one-line field (see MdixEditorWindow.Popups.cs); both go through <see cref="ApplyExplorerEdit"/>.
     /// Nothing is written to disk until Save.
     /// </summary>
     public sealed partial class MdixEditorWindow
@@ -77,6 +78,8 @@ namespace MidManStudio.Mdix.Unity.Editor
         private void BuildExplorer(MdixDatabase db)
         {
             if (_panelExplorer == null) return;
+
+            CloseValuePopup();                                   // it was opened on text that is about to be read again
 
             // After an edit the list stays where it was, instead of jumping back to the top.
             var scrollBefore = Vector2.zero;
@@ -416,18 +419,20 @@ namespace MidManStudio.Mdix.Unity.Editor
             MdixValueSpan span;
             if (_valueSpans == null || !_valueSpans.TryGetValue(path, out span)) return;
 
-            // A one-line field is the wrong tool for these two: a blob is a long base64 text, and a raw string
-            // with line breaks would lose them. They stay read-only here.
+            // A blob is a long base64 text: no one-line field suits it, and its viewer is not built yet.
             if (span.Kind == MdixLiteralKind.Blob) return;
-            if (span.Kind == MdixLiteralKind.RawString && span.TextIn(_sourceText).IndexOf('\n') >= 0) return;
 
             // The span comes from a quick reading of the text; it only counts when the compiled value agrees.
             if (!MdixSourceMap.Matches(db, path, span, _sourceText)) return;
 
             var initial    = MdixLiteralEdit.EditText(db, path, span, _sourceText);
             var oldLiteral = span.TextIn(_sourceText);
+            var kind       = span.Kind;
+            var popup      = UsesValuePopup(kind, initial);
 
-            label.tooltip = "Click to edit. Enter applies the change to the text, Esc cancels.";
+            label.tooltip = popup
+                ? "Click to edit."
+                : "Click to edit. Enter applies the change to the text, Esc cancels.";
             label.AddToClassList("mdix-kv__value--editable");
 
             label.RegisterCallback<PointerEnterEvent>(_ =>
@@ -438,7 +443,8 @@ namespace MidManStudio.Mdix.Unity.Editor
             label.RegisterCallback<ClickEvent>(evt =>
             {
                 evt.StopPropagation();
-                BeginExplorerEdit(label, initial, path, oldLiteral);
+                if (popup) OpenValuePopup(kind, path, initial, oldLiteral);
+                else       BeginExplorerEdit(label, initial, path, oldLiteral);
             });
         }
 
@@ -502,29 +508,41 @@ namespace MidManStudio.Mdix.Unity.Editor
         {
             if (!ReferenceEquals(_editField, field)) return;      // already closed
 
+            ApplyExplorerEdit(path, text, _editOldLiteral, EndExplorerEdit);
+        }
+
+        /// <summary>
+        /// The one way an Explorer edit reaches the text, for the inline field and every popup: the new literal is
+        /// compiled first and refused unless the value reads back as entered. <paramref name="closeEditor"/> runs once
+        /// the edit is accepted (or found stale) and before the text is changed, which rebuilds the Explorer.
+        /// Returns null when the edit was accepted, unchanged or stale (the status bar says which), or the message
+        /// when it was refused, in which case the editor stays open to be corrected.
+        /// </summary>
+        private string ApplyExplorerEdit(string path, string text, string expectedOldLiteral, Action closeEditor)
+        {
             var result = MdixLiteralEdit.Apply(_sourceText, path, text);
 
             if (!result.Ok)
             {
-                SetStatus("✗  " + result.Error, error: true);     // the field stays open, to be corrected
-                return;
+                SetStatus("✗  " + result.Error, error: true);
+                return result.Error;
             }
 
             // The text may have changed since the Explorer was drawn (typing in the Editor tab).
-            if (result.OldText != _editOldLiteral)
+            if (result.OldText != expectedOldLiteral)
             {
-                EndExplorerEdit();
+                closeEditor();
                 SetStatus("✗  The file changed since this value was shown, so nothing was applied.", error: true);
                 RebuildExplorer();
-                return;
+                return null;
             }
 
-            EndExplorerEdit();
+            closeEditor();
 
             if (result.Unchanged)
             {
                 SetStatus("✓  " + path + " is already " + result.NewText, error: false);
-                return;
+                return null;
             }
 
             _keepExplorerScroll = true;
@@ -550,6 +568,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                     message += " and " + (result.AlsoChangedCount - result.AlsoChanged.Count) + " more";
             }
             SetStatus(message, error: false);
+            return null;
         }
 
         // ── Names ─────────────────────────────────────────────────────────────

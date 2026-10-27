@@ -534,8 +534,27 @@ namespace MidManStudio.Mdix.Unity.Editor
                 MdixValueType.Array     => "[array]",
                 MdixValueType.Object    => "{object}",
                 MdixValueType.Tuple     => "(tuple)",
+                MdixValueType.Blob      => BlobSummary(db, path),
+                MdixValueType.Regex     => RegexSummary(db, path),
                 _                       => "?",
             };
+        }
+
+        /// <summary>For example "blob  4.2 KB  PNG": only the start of the data is read to name its type.</summary>
+        private static string BlobSummary(MdixDatabase db, string path)
+        {
+            var blob = db.GetBlob(path);
+            return blob.IsSuccess ? MdixBlobInfo.Summary(blob.SuccessResult.RawBase64) : "blob  ?";
+        }
+
+        /// <summary>The pattern as r:(pattern), cut after 80 characters.</summary>
+        private static string RegexSummary(MdixDatabase db, string path)
+        {
+            var regex = db.GetRegex(path);
+            if (regex.IsFailure) return "r:(?)";
+
+            var pattern = regex.SuccessResult.Pattern;
+            return "r:(" + (pattern.Length > 80 ? pattern.Substring(0, 80) + "…" : pattern) + ")";
         }
 
         // ── Templates panel ───────────────────────────────────────────────────

@@ -22,8 +22,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   escaped, and the edit is refused unless the compiled value is exactly what was entered and the
   data keeps the same paths. Values calculated from the edited one may change and are named in
   the status bar. The list keeps its scroll position. Values from function calls, enum
-  members, expressions, `raw` strings, dates and hex/binary numbers stay read-only.
+  members, expressions, tuples and hex/binary numbers stay read-only.
   (`Editor/MdixSourceMap.cs`, `Editor/MdixLiteralEdit.cs`.)
+- MDIX Studio Explorer: dates (`2026-01-15`), timestamps (`2025-01-15T10:30:00.250+05:30`), regex
+  values (`r:("...")`) and `raw` backtick strings on one line can be edited in place the same way.
+  A timestamp keeps its zone and fraction digits, a date or timestamp is refused unless it is a
+  real one, a regex is typed as the pattern and escaped for you, and a raw string cannot hold a
+  backtick. Blobs (`b:("...")`) and raw strings that span several lines stay read-only for now.
+  (`Editor/Popups/MdixTemporalText.cs`.)
+- MDIX Studio Explorer: blob and regex values show `blob  4.2 KB  PNG` and `r:(pattern)` instead
+  of `?`. The type is read from the first bytes only, so a large blob costs nothing to show.
+  (`Editor/Popups/MdixBlobInfo.cs`.)
 - MDIX Studio language-server support, powered by the bundled `mdix-lsp`
   (`Editor/Bin/<platform>/`). In the Editor tab:
   - Live diagnostics: problem underlines after a short typing pause, and a

@@ -47,6 +47,19 @@ namespace MidManStudio.Mdix.Unity.Editor
                 case MdixLiteralKind.Bool:     return db.GetBool(path).UnwrapOr(false) ? "true" : "false";
                 case MdixLiteralKind.String:   return db.GetString(path).UnwrapOr(string.Empty);
                 case MdixLiteralKind.HexColor: return span.TextIn(source);
+                case MdixLiteralKind.RawString: return db.GetString(path).UnwrapOr(string.Empty);
+                case MdixLiteralKind.Date:
+                case MdixLiteralKind.Timestamp: return db.GetString(path).UnwrapOr(string.Empty);
+                case MdixLiteralKind.Regex:
+                {
+                    var r = db.GetRegex(path);
+                    return r.IsSuccess ? r.SuccessResult.Pattern : string.Empty;
+                }
+                case MdixLiteralKind.Blob:
+                {
+                    var r = db.GetBlob(path);
+                    return r.IsSuccess ? r.SuccessResult.RawBase64 : string.Empty;
+                }
             }
             return string.Empty;
         }
@@ -122,21 +135,53 @@ namespace MidManStudio.Mdix.Unity.Editor
                 {
                     if (input == null) input = string.Empty;
                     var quote = oldLiteral.Length > 0 && oldLiteral[0] == '\'' ? '\'' : '"';
-                    var sb = new StringBuilder(input.Length + 2);
-                    sb.Append(quote);
-                    foreach (var c in input)
-                    {
-                        if (c == '\0') { error = "A text cannot contain a null character."; return false; }
-                        if (c == '\\')            sb.Append("\\\\");
-                        else if (c == quote)      sb.Append('\\').Append(c);
-                        else if (c == '\n')       sb.Append("\\n");
-                        else if (c == '\r')       sb.Append("\\r");
-                        else if (c == '\t')       sb.Append("\\t");
-                        else                      sb.Append(c);
-                    }
-                    sb.Append(quote);
-                    literal  = sb.ToString();
+                    if (!TryQuote(input, quote, out literal, out error)) return false;
                     expected = input;
+                    return true;
+                }
+                case MdixLiteralKind.RawString:
+                {
+                    if (input == null) input = string.Empty;
+                    if (input.IndexOf('`') >= 0)
+                    { error = "A raw string cannot contain a backtick (it is the delimiter)."; return false; }
+                    literal  = "`" + input + "`";
+                    expected = input;
+                    return true;
+                }
+                case MdixLiteralKind.Date:
+                {
+                    int y, m, d;
+                    if (!MdixTemporalText.TryParseDate(text, false, out y, out m, out d))
+                    { error = "Enter a real date, like 2026-01-15."; return false; }
+                    literal = expected = MdixTemporalText.FormatDate(y, m, d);
+                    return true;
+                }
+                case MdixLiteralKind.Timestamp:
+                {
+                    MdixTimestampParts parts;
+                    if (!MdixTemporalText.TryParseTimestamp(text, false, out parts, out error)) return false;
+                    literal = expected = MdixTemporalText.FormatTimestamp(parts);
+                    return true;
+                }
+                case MdixLiteralKind.Regex:
+                {
+                    // The pattern is typed as the pattern, not as source text: backslashes are written for the
+                    // person ("\\d" in the file for \d). A raw `backtick` pattern stays raw while it can.
+                    if (input == null) input = string.Empty;
+                    if (!TryWriteCall('r', oldLiteral, input, out literal, out error)) return false;
+                    expected = input;
+                    return true;
+                }
+                case MdixLiteralKind.Blob:
+                {
+                    byte[] bytes;
+                    try { bytes = Convert.FromBase64String(StripWhitespace(input ?? string.Empty)); }
+                    catch (FormatException) { error = "That is not valid base64."; return false; }
+
+                    // Written back in canonical form (standard alphabet, padded), which is what the compiler accepts.
+                    var canonical = Convert.ToBase64String(bytes);
+                    if (!TryWriteCall('b', oldLiteral, canonical, out literal, out error)) return false;
+                    expected = MdixBlobInfo.Fingerprint(canonical);
                     return true;
                 }
                 case MdixLiteralKind.HexColor:
@@ -152,6 +197,59 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             error = "This kind of value cannot be edited here.";
             return false;
+        }
+
+        /// <summary>Text as a quoted literal: the compiler's escapes written for backslash, the quote, newline, return and tab.</summary>
+        private static bool TryQuote(string value, char quote, out string literal, out string error)
+        {
+            literal = null; error = null;
+            var sb = new StringBuilder(value.Length + 2);
+            sb.Append(quote);
+            foreach (var c in value)
+            {
+                if (c == '\0') { error = "A text cannot contain a null character."; return false; }
+                if (c == '\\')            sb.Append("\\\\");
+                else if (c == quote)      sb.Append('\\').Append(c);
+                else if (c == '\n')       sb.Append("\\n");
+                else if (c == '\r')       sb.Append("\\r");
+                else if (c == '\t')       sb.Append("\\t");
+                else                      sb.Append(c);
+            }
+            sb.Append(quote);
+            literal = sb.ToString();
+            return true;
+        }
+
+        /// <summary>
+        /// <c>r:(arg)</c> or <c>b:(arg)</c> holding <paramref name="value"/>, with the argument written the way the old
+        /// literal wrote it: the same quote character, or a raw backtick string when it was one and the value allows it.
+        /// </summary>
+        private static bool TryWriteCall(char prefix, string oldLiteral, string value, out string literal, out string error)
+        {
+            literal = null; error = null;
+
+            string oldArg;
+            var quote = '"';
+            var raw   = false;
+            if (MdixSourceMap.TrySplitCall(oldLiteral, out oldArg) && oldArg.Length > 0)
+            {
+                if (oldArg[0] == '`') raw = true;
+                else if (oldArg[0] == '\'') quote = '\'';
+            }
+
+            string arg;
+            if (raw && value.IndexOf('`') < 0) arg = "`" + value + "`";
+            else if (!TryQuote(value, quote, out arg, out error)) return false;
+
+            literal = prefix + ":(" + arg + ")";
+            return true;
+        }
+
+        private static string StripWhitespace(string s)
+        {
+            var sb = new StringBuilder(s.Length);
+            foreach (var c in s) if (!char.IsWhiteSpace(c)) sb.Append(c);
+            return sb.ToString();
         }
 
         // ── Applying an edit ──────────────────────────────────────────────────
@@ -251,6 +349,12 @@ namespace MidManStudio.Mdix.Unity.Editor
                 return null;
             }
 
+            // The runtime reads dates and timestamps through these, so they must succeed too.
+            if (kind == MdixLiteralKind.Date && db.GetDate(path).IsFailure)
+                return "The file reads the new date, but the runtime cannot parse it as a date.";
+            if (kind == MdixLiteralKind.Timestamp && db.GetTimestamp(path).IsFailure)
+                return "The file reads the new timestamp, but the runtime cannot parse it as a timestamp.";
+
             var shown = Display(db, path, type);
             if (expected != null && shown != expected)
                 return "The file reads the new value as \"" + Shorten(shown) + "\", not \"" + Shorten(expected) + "\", so it was not applied.";
@@ -268,7 +372,12 @@ namespace MidManStudio.Mdix.Unity.Editor
                 case MdixLiteralKind.Float:    return MdixValueType.Float;
                 case MdixLiteralKind.Double:   return MdixValueType.Double;
                 case MdixLiteralKind.Bool:     return MdixValueType.Bool;
-                case MdixLiteralKind.String:   return MdixValueType.String;
+                case MdixLiteralKind.String:
+                case MdixLiteralKind.RawString: return MdixValueType.String;
+                case MdixLiteralKind.Date:     return MdixValueType.Date;
+                case MdixLiteralKind.Timestamp: return MdixValueType.Timestamp;
+                case MdixLiteralKind.Regex:    return MdixValueType.Regex;
+                case MdixLiteralKind.Blob:     return MdixValueType.Blob;
                 default:                       return MdixValueType.HexColor;
             }
         }
@@ -335,6 +444,16 @@ namespace MidManStudio.Mdix.Unity.Editor
                 }
                 case MdixValueType.Date:
                 case MdixValueType.Timestamp: return db.GetString(path).UnwrapOr("?");
+                case MdixValueType.Regex:
+                {
+                    var r = db.GetRegex(path);
+                    return r.IsSuccess ? r.SuccessResult.Pattern : "?";
+                }
+                case MdixValueType.Blob:      // a fingerprint, so a large blob is not copied into the snapshot
+                {
+                    var r = db.GetBlob(path);
+                    return r.IsSuccess ? MdixBlobInfo.Fingerprint(r.SuccessResult.RawBase64) : "?";
+                }
                 case MdixValueType.Null:      return "null";
                 default:                      return "(" + type + ")";
             }

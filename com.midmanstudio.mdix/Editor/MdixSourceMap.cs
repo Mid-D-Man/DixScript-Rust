@@ -6,8 +6,11 @@ using MidManStudio.Mdix.Core;
 
 namespace MidManStudio.Mdix.Unity.Editor
 {
-    /// <summary>The kinds of literal the Explorer can edit in place.</summary>
-    internal enum MdixLiteralKind { Int, Long, Float, Double, Bool, String, HexColor }
+    /// <summary>
+    /// The kinds of literal the Explorer can edit. Regex and Blob are written <c>r:("...")</c> and
+    /// <c>b:("...")</c>; their span covers the whole of that, prefix and parentheses included.
+    /// </summary>
+    internal enum MdixLiteralKind { Int, Long, Float, Double, Bool, String, HexColor, RawString, Date, Timestamp, Regex, Blob }
 
     /// <summary>Where one literal sits in the source text.</summary>
     internal readonly struct MdixValueSpan
@@ -31,8 +34,9 @@ namespace MidManStudio.Mdix.Unity.Editor
     /// can change a value by replacing exactly those characters.
     ///
     /// Only what can be located with certainty is mapped: a literal that is the whole value of a property,
-    /// an object member or an array item. Anything computed (function-call arguments, enum members,
-    /// expressions, tuples, raw `backtick` strings, dates) is left out, so it stays read-only.
+    /// an object member or an array item. That includes `backtick` raw strings, dates, timestamps and the
+    /// regex and blob constructors <c>r:("...")</c> / <c>b:("...")</c>. Anything computed (function-call
+    /// arguments, enum members, expressions, tuples) is left out, so it stays read-only.
     ///
     /// This is a small reader of the syntax, not the compiler's parser, so nothing it says is trusted on
     /// its own: <see cref="Matches"/> checks each span against the compiled data, and
@@ -124,6 +128,35 @@ namespace MidManStudio.Mdix.Unity.Editor
                     var v = c.SuccessResult;
                     return Near(v.R, r1) && Near(v.G, g1) && Near(v.B, b1) && Near(v.A, a1);
                 }
+                case MdixLiteralKind.RawString:
+                {
+                    if (type != MdixValueType.String || text.Length < 2) return false;
+                    var r = db.GetString(path);
+                    return r.IsSuccess && string.Equals(r.SuccessResult, text.Substring(1, text.Length - 2), StringComparison.Ordinal);
+                }
+                case MdixLiteralKind.Date:
+                case MdixLiteralKind.Timestamp:
+                {
+                    // The engine keeps a date or timestamp as the text that was written.
+                    var want = span.Kind == MdixLiteralKind.Date ? MdixValueType.Date : MdixValueType.Timestamp;
+                    if (type != want) return false;
+                    var r = db.GetString(path);
+                    return r.IsSuccess && string.Equals(r.SuccessResult, text, StringComparison.Ordinal);
+                }
+                case MdixLiteralKind.Regex:
+                {
+                    string arg;
+                    if (type != MdixValueType.Regex || !TryReadCallArgument(text, out arg)) return false;
+                    var r = db.GetRegex(path);
+                    return r.IsSuccess && string.Equals(r.SuccessResult.Pattern, arg, StringComparison.Ordinal);
+                }
+                case MdixLiteralKind.Blob:
+                {
+                    string arg;
+                    if (type != MdixValueType.Blob || !TryReadCallArgument(text, out arg)) return false;
+                    var r = db.GetBlob(path);
+                    return r.IsSuccess && string.Equals(r.SuccessResult.RawBase64, arg, StringComparison.Ordinal);
+                }
             }
             return false;
         }
@@ -161,6 +194,62 @@ namespace MidManStudio.Mdix.Unity.Editor
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Splits <c>r:("...")</c> or <c>b:("...")</c> into its argument literal exactly as written (quotes or
+        /// backticks included). False when the text is not that shape.
+        /// </summary>
+        internal static bool TrySplitCall(string literal, out string argument)
+        {
+            argument = null;
+            if (literal == null || literal.Length < 6 || literal[1] != ':' || literal[2] != '(') return false;
+
+            int i = 3;
+            while (i < literal.Length && char.IsWhiteSpace(literal[i])) i++;
+            if (i >= literal.Length) return false;
+
+            var open = literal[i];
+            int j;
+            if (open == '`')
+            {
+                j = literal.IndexOf('`', i + 1);
+                if (j < 0) return false;
+            }
+            else if (open == '"' || open == '\'')
+            {
+                j = i + 1;
+                while (j < literal.Length)
+                {
+                    if (literal[j] == '\\') { j += 2; continue; }
+                    if (literal[j] == open) break;
+                    j++;
+                }
+                if (j >= literal.Length) return false;
+            }
+            else return false;
+
+            argument = literal.Substring(i, j - i + 1);
+
+            int k = j + 1;
+            while (k < literal.Length && char.IsWhiteSpace(literal[k])) k++;
+            return k == literal.Length - 1 && literal[k] == ')';
+        }
+
+        /// <summary>The characters of an argument literal: quoted text with the compiler's escapes applied, raw text as it is.</summary>
+        internal static string ReadArgument(string argument) =>
+            argument.Length >= 2 && argument[0] == '`'
+                ? argument.Substring(1, argument.Length - 2)
+                : DecodeString(argument);
+
+        /// <summary>The decoded text inside <c>r:(...)</c> or <c>b:(...)</c>.</summary>
+        internal static bool TryReadCallArgument(string literal, out string value)
+        {
+            value = null;
+            string argument;
+            if (!TrySplitCall(literal, out argument)) return false;
+            value = ReadArgument(argument);
+            return true;
+        }
+
         internal static bool TryParseHex(string text, out float r, out float g, out float b, out float a)
         {
             r = g = b = 0f; a = 1f;
@@ -186,7 +275,7 @@ namespace MidManStudio.Mdix.Unity.Editor
 
         // ── Tokens ────────────────────────────────────────────────────────────
 
-        private enum TokType { Ident, Number, Other, Str, RawStr, Hex, Sym }
+        private enum TokType { Ident, Number, Other, Str, RawStr, Hex, Sym, Temporal }
 
         private sealed class Tok
         {
@@ -196,7 +285,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             public bool            Newline;        // a line break came before this token
             public bool            BlankLine;      // two or more did
             public string          Sym = string.Empty;
-            public MdixLiteralKind Num;            // for Number
+            public MdixLiteralKind Num;            // for Number and Temporal
         }
 
         private static bool IsIdentStart(char c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
@@ -347,8 +436,17 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             if (isDate || isTs)
             {
-                tok.Type = TokType.Other;
+                // The scan is as loose as the compiler's, so "5-3" comes this far too. Only text that is
+                // really a date or a timestamp becomes one; anything else stays an unmapped token.
                 tok.End  = j;
+                tok.Type = TokType.Other;
+
+                var text = s.Substring(start, j - start);
+                if (isTs ? MdixTemporalText.IsTimestampLiteral(text) : MdixTemporalText.IsDateLiteral(text))
+                {
+                    tok.Type = TokType.Temporal;
+                    tok.Num  = isTs ? MdixLiteralKind.Timestamp : MdixLiteralKind.Date;
+                }
                 return;
             }
 
@@ -582,13 +680,16 @@ namespace MidManStudio.Mdix.Unity.Editor
                 if (tok.Type == TokType.Sym && tok.Sym == "{") { ParseObject(path, depth + 1); return; }
                 if (tok.Type == TokType.Sym && tok.Sym == "[") { ParseArray(path, depth + 1);  return; }
 
+                if (tok.Type == TokType.Ident && TryMapPrefixed(path)) return;
+
                 MdixLiteralKind kind;
                 var literal = IsEditableLiteral(tok, out kind);
 
                 // A value that is one token (a number, text, date, colour, word): done when nothing joins it
                 // into a longer expression. Calls, members and arithmetic are stepped over whole.
                 if (tok.Type == TokType.Number || tok.Type == TokType.Str || tok.Type == TokType.RawStr ||
-                    tok.Type == TokType.Hex    || tok.Type == TokType.Other || tok.Type == TokType.Ident)
+                    tok.Type == TokType.Hex    || tok.Type == TokType.Other || tok.Type == TokType.Ident ||
+                    tok.Type == TokType.Temporal)
                 {
                     var at = _p;
                     _p++;
@@ -610,6 +711,42 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             private bool IsBoolWord(int idx) => IsIdentText(idx, "true") || IsIdentText(idx, "false");
 
+            /// <summary>
+            /// Maps <c>r:("...")</c> and <c>b:("...")</c> as one literal. The compiler reads these only when the
+            /// letter, the colon and the opening parenthesis touch, and takes exactly one string as the argument
+            /// (a quoted string or a raw backtick one); anything else, <c>t:(...)</c> tuples included, is not mapped.
+            /// </summary>
+            private bool TryMapPrefixed(string path)
+            {
+                var at = _p;
+                var id = _t[at];
+                if (id.End - id.Start != 1) return false;
+
+                var letter = _src[id.Start];
+                if (letter != 'r' && letter != 'b') return false;
+
+                if (!IsSym(at + 1, ":") || _t[at + 1].Start != id.End)         return false;
+                if (!IsSym(at + 2, "(") || _t[at + 2].Start != _t[at + 1].End) return false;
+
+                var argAt = at + 3;
+                if (argAt >= _t.Count) return false;
+
+                var arg = _t[argAt];
+                var isText = arg.Type == TokType.Str ||
+                             (arg.Type == TokType.RawStr && arg.End - arg.Start >= 2 && _src[arg.End - 1] == '`');
+                if (!isText || !IsSym(argAt + 1, ")")) return false;
+
+                var close = argAt + 1;
+                if (close + 1 < _t.Count && ContinuesExpression(close + 1)) return false;
+
+                _spans[path] = new MdixValueSpan(
+                    id.Start, _t[close].End - id.Start,
+                    letter == 'r' ? MdixLiteralKind.Regex : MdixLiteralKind.Blob);
+
+                _p = close + 1;
+                return true;
+            }
+
             private bool IsEditableLiteral(Tok tok, out MdixLiteralKind kind)
             {
                 kind = MdixLiteralKind.String;
@@ -617,6 +754,11 @@ namespace MidManStudio.Mdix.Unity.Editor
                 {
                     case TokType.Number: kind = tok.Num; return true;
                     case TokType.Str:    kind = MdixLiteralKind.String; return true;
+                    case TokType.Temporal: kind = tok.Num; return true;
+                    case TokType.RawStr:
+                        // Only a raw string that has its closing backtick.
+                        kind = MdixLiteralKind.RawString;
+                        return tok.End - tok.Start >= 2 && _src[tok.End - 1] == '`';
                     case TokType.Hex:
                     {
                         var len = tok.End - tok.Start - 1;

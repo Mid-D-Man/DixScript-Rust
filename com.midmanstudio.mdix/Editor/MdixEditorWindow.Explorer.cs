@@ -21,13 +21,14 @@ namespace MidManStudio.Mdix.Unity.Editor
     /// returns keys in no fixed order, so names are reduced to their first segment and sorted here.
     /// Large data is capped (items per array, rows overall, depth) and says so when it is.
     ///
-    /// Inline editing: a value that is a plain literal in the file (a number, text, true/false or colour that
-    /// is written out, not computed) can be clicked and changed here. Enter edits the text in the Editor tab
-    /// and compiles it, Esc or clicking away cancels. The new text is compiled first and refused unless the
-    /// value reads back exactly as entered and the data keeps the same paths; values computed from the edited
-    /// one are allowed to change, and the status bar says which. Values produced by function calls, enum
-    /// members, expressions, `raw` strings and dates are not literals and stay read-only. Nothing is written to
-    /// disk until Save.
+    /// Inline editing: a value that is a plain literal in the file (a number, text, true/false, colour, date,
+    /// timestamp, regex or raw `backtick` string that is written out, not computed) can be clicked and changed
+    /// here. Enter edits the text in the Editor tab and compiles it, Esc or clicking away cancels. The new text
+    /// is compiled first and refused unless the value reads back exactly as entered and the data keeps the same
+    /// paths; values computed from the edited one are allowed to change, and the status bar says which. Values
+    /// produced by function calls, enum members, expressions and tuples are not literals and stay read-only, as
+    /// do blobs (long base64) and raw strings that span several lines, which a one-line field cannot hold.
+    /// Nothing is written to disk until Save.
     /// </summary>
     public sealed partial class MdixEditorWindow
     {
@@ -414,6 +415,11 @@ namespace MidManStudio.Mdix.Unity.Editor
         {
             MdixValueSpan span;
             if (_valueSpans == null || !_valueSpans.TryGetValue(path, out span)) return;
+
+            // A one-line field is the wrong tool for these two: a blob is a long base64 text, and a raw string
+            // with line breaks would lose them. They stay read-only here.
+            if (span.Kind == MdixLiteralKind.Blob) return;
+            if (span.Kind == MdixLiteralKind.RawString && span.TextIn(_sourceText).IndexOf('\n') >= 0) return;
 
             // The span comes from a quick reading of the text; it only counts when the compiled value agrees.
             if (!MdixSourceMap.Matches(db, path, span, _sourceText)) return;

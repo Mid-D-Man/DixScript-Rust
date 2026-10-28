@@ -500,3 +500,59 @@
     margin-top: 8px;
     margin-left: 0;
 }
+
+/* Regex popup */
+.mdix-rx {
+    width: 480px;
+}
+
+.mdix-rx__caption {
+    color: #7A98C4;
+    font-size: 11px;
+    margin-top: 6px;
+    margin-bottom: 2px;
+}
+
+.mdix-rx__test {
+    height: 70px;
+}
+
+.mdix-rx__status {
+    color: #6FD68F;
+    font-size: 11px;
+    margin-top: 6px;
+    min-height: 14px;
+    white-space: normal;
+}
+
+.mdix-rx__note {
+    color: #E0B25C;
+    font-size: 11px;
+    margin-top: 4px;
+    white-space: normal;
+}
+
+.mdix-rx__list {
+    max-height: 160px;
+    margin-top: 6px;
+    padding: 4px 6px;
+    background-color: #0A0F1A;
+    border-width: 1px;
+    border-color: #1E2B45;
+    border-radius: 3px;
+}
+
+.mdix-rx__hit {
+    color: #E8EDF5;
+    font-size: 11px;
+    -unity-font-style: bold;
+    margin-top: 2px;
+    white-space: normal;
+}
+
+.mdix-rx__group {
+    color: #7A98C4;
+    font-size: 11px;
+    margin-left: 14px;
+    white-space: normal;
+}

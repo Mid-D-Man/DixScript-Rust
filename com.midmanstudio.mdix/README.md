@@ -430,7 +430,11 @@ choose **MDIX → Open in MDIX Studio**.
 
   A date or timestamp opens a **picker**: a month grid (use « ‹ › » to move, or type the whole
   value in the box at the top), and for a timestamp the time boxes and a zone of None, UTC or an
-  offset. **Today** / **Now** fills in the current date or time. A `raw` string, and any text that
+  offset. **Today** / **Now** fills in the current date or time. A **regex** opens an editor with a
+  test-text box: as you type, the matches and their groups are listed, checked by the language
+  server with the same `regex` engine the compiler uses (so an invalid pattern is explained and
+  cannot be applied). Without the server the check falls back to .NET's engine and is marked
+  approximate. A `raw` string, and any text that
   is longer than 100 characters or has line breaks, opens a **text area** (Ctrl or Cmd + Enter
   applies). In a popup Enter applies, Esc cancels, and a refused edit is explained in the popup,
   which stays open.
@@ -545,6 +549,8 @@ com.midmanstudio.mdix/
 │   │   ├── MdixPopup.cs                      ← the modal card: Apply, Cancel, error line
 │   │   ├── MdixDateTimePicker.cs             ← month grid, time boxes and zone
 │   │   ├── MdixDateTimeModel.cs              ← what the picker edits (no Unity types)
+│   │   ├── MdixRegexEditor.cs                ← pattern box, test text, match list
+│   │   ├── MdixRegexTest.cs                  ← runs and reads regex tests (no Unity types)
 │   │   ├── MdixTemporalText.cs               ← reads and writes date and timestamp text
 │   │   └── MdixBlobInfo.cs                   ← names a blob's type from its first bytes
 │   ├── CreateMdixMenuItems.cs

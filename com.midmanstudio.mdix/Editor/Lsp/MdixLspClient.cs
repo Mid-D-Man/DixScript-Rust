@@ -605,6 +605,20 @@ namespace MidManStudio.Mdix.Unity.Editor.Lsp
                 "textDocument/hover", p, timeout ?? TimeSpan.FromSeconds(5));
         }
 
+        /// <summary>
+        /// Runs the server's <c>mdix.testRegex</c> command: the pattern over the text, with the Rust regex crate the
+        /// compiler itself uses. Needs no open document. Null when the server is not running, does not answer in
+        /// time, or returns an error; <see cref="MdixRegexTest.FromServer"/> reads the answer.
+        /// </summary>
+        public async Task<MdixJsonValue?> RequestTestRegexAsync(
+            string pattern, string testText, TimeSpan? timeout = null)
+        {
+            return await SendRequestAsync(
+                "workspace/executeCommand",
+                MdixRegexTest.BuildParams(pattern, testText),
+                timeout ?? TimeSpan.FromSeconds(3));
+        }
+
         private static MdixJsonValue MakeTextDocumentIdentifier(string uri)
         {
             var td = MdixJsonValue.Object();

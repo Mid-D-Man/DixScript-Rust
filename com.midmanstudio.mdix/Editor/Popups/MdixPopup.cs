@@ -20,16 +20,18 @@ namespace MidManStudio.Mdix.Unity.Editor
         private readonly Button        _apply;
         private readonly Func<string>  _onApply;       // returns an error message, or null when done
         private readonly bool          _enterApplies;
+        private readonly Action        _onClosed;
 
         private bool _open;
         private bool _applying;
 
         public bool IsOpen { get { return _open; } }
 
-        private MdixPopup(string title, string subtitle, VisualElement body, Func<string> onApply, string applyLabel, bool enterApplies)
+        private MdixPopup(string title, string subtitle, VisualElement body, Func<string> onApply, string applyLabel, bool enterApplies, Action onClosed)
         {
             _onApply      = onApply;
             _enterApplies = enterApplies;
+            _onClosed     = onClosed;
 
             // Layout is set here so the card is placed even if the stylesheet fails to load; the look is in the USS.
             _scrim = new VisualElement { focusable = true };
@@ -84,12 +86,14 @@ namespace MidManStudio.Mdix.Unity.Editor
         /// <summary>
         /// Shows a card on <paramref name="host"/> (the window's root).
         /// <paramref name="onApply"/> returns null when the change was made, or the message to show when it was refused.
+        /// <paramref name="onClosed"/> runs once when the card goes away, however it was closed.
         /// </summary>
         public static MdixPopup Open(
             VisualElement host, string title, string subtitle, VisualElement body,
-            Func<string> onApply, string applyLabel = "Apply", VisualElement focus = null, bool enterApplies = true)
+            Func<string> onApply, string applyLabel = "Apply", VisualElement focus = null, bool enterApplies = true,
+            Action onClosed = null)
         {
-            var popup = new MdixPopup(title, subtitle, body, onApply, applyLabel, enterApplies) { _open = true };
+            var popup = new MdixPopup(title, subtitle, body, onApply, applyLabel, enterApplies, onClosed) { _open = true };
             host.Add(popup._scrim);
 
             // Focus goes to the scrim at least, so Esc works whatever else is in the card.
@@ -104,6 +108,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             if (!_open) return;
             _open = false;
             _scrim.RemoveFromHierarchy();
+            if (_onClosed != null) _onClosed();
         }
 
         /// <summary>Shows a message under the content, or hides the line when it is null or empty.</summary>
@@ -137,12 +142,24 @@ namespace MidManStudio.Mdix.Unity.Editor
                 if (evt.target is Button) return;       // Enter on a focused button presses that button
 
                 var withModifier = (evt.modifiers & (EventModifiers.Control | EventModifiers.Command)) != 0;
-                if (_enterApplies || withModifier)
+
+                // In a multi-line field Enter is a line break, whatever the popup's rule: only Ctrl or Cmd applies.
+                if ((_enterApplies && !InMultilineField(evt.target)) || withModifier)
                 {
                     evt.StopImmediatePropagation();
                     RequestApply();
                 }
             }
+        }
+
+        private static bool InMultilineField(IEventHandler target)
+        {
+            for (var element = target as VisualElement; element != null; element = element.parent)
+            {
+                var field = element as TextField;
+                if (field != null && field.multiline) return true;
+            }
+            return false;
         }
 
         // Work that rebuilds the window is done after the event that asked for it has finished.

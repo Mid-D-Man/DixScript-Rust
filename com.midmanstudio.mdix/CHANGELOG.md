@@ -35,6 +35,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   to edit it in a text area (Ctrl or Cmd + Enter applies). Esc cancels, and a refused edit is
   shown in the popup, which stays open. A popup changes the text through the same checked path as
   the inline field. (`Editor/Popups/`, `Editor/MdixEditorWindow.Popups.cs`.)
+- MDIX Studio Explorer: click a regex to edit it with live matching. Type some test text and the
+  matches and their groups are listed as you type, checked by the language server with the same
+  Rust `regex` engine the compiler uses; an invalid pattern shows the engine's message and blocks
+  Apply. If the server cannot be reached the check falls back to .NET's regex engine and says it
+  is approximate (.NET accepts look-around and backreferences, which DixScript rejects); Apply
+  still compiles the edit with the real engine first. The last test text is kept for the next
+  regex popup. (`Editor/Popups/MdixRegexEditor.cs`, `Editor/Popups/MdixRegexTest.cs`,
+  `MdixLspClient.RequestTestRegexAsync`.)
 - MDIX Studio Explorer: blob and regex values show `blob  4.2 KB  PNG` and `r:(pattern)` instead
   of `?`. The type is read from the first bytes only, so a large blob costs nothing to show.
   (`Editor/Popups/MdixBlobInfo.cs`.)

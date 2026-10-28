@@ -412,8 +412,9 @@ token stream, parses it, and assigns the result onto a `Document`, which `parse`
 - **An optional `Document`.** `with_document(&Document)` gives the analyzer the arena form of the
   file. A section whose analyzer has moved to the arena reads it from the document, and a section
   that has not moved reads the owned `DixScript` as before. `@RAW`, `@SECURITY`, `@SCHEMA` and
-  `@DATA` have moved. Their phases (`analyze_phase6b_raw`, `analyze_phase8_generated`,
-  `analyze_phase7b_schema` and `analyze_phase7_data_driven`) call the section analyzer's
+  `@DATA` and `@QUICKFUNCS` have moved. Their phases (`analyze_phase6b_raw`,
+  `analyze_phase8_generated`, `analyze_phase7b_schema`, `analyze_phase7_data_driven` and
+  `analyze_phase5_functions`) call the section analyzer's
   `analyze_doc` with the document's section and
   arena when one is attached, and the owned `analyze` (which copies into a scratch arena) when none
   is. `@SCHEMA` takes the `@DATA` section from the document too, and the indexes the `@DATA`
@@ -654,6 +655,47 @@ which diagnostics were produced.
 **Tests:** `cargo test -p dixscript --test raw_analyzer_document`. 11 tests, all passing on Rust
 1.75. Eleven deliberate bugs were injected to check them (see the last Fixes entry).
 
+### `Compiler/Core/SectionAnalyzers/quickfuncs_section_analyzer.rs`
+
+**What it does:** Checks the `@QUICKFUNCS` section: function names, parameters and defaults, return
+types and scopes, body size and nesting, every statement and expression form, variable declaration
+and assignment rules, collection limits, call arity, enum and namespace access, unused variables and
+unreachable return paths. It records the qualified identifier resolutions the enhancer reads, and it
+registers each function (except a name defined twice) in the symbol table. About 80 error and warning
+codes are reachable from text or from hand-built input.
+
+**Decisions:**
+- **One implementation, two entry points.** `analyze_doc(&DocQuickFuncs, &Arena, ...)` holds the
+  checks and reads statements, expressions and values through the arena. `analyze(&QuickFuncsSection,
+  ...)` stays for callers that only have an owned `DixScript`: it copies the section into a scratch
+  arena and calls `analyze_doc`, so the two cannot disagree.
+- **Types are inferred with the arena entry points of `TypeInferenceVisitor`.** The owned visitor is no
+  longer called from here, but the language server still uses it, so it stays.
+- **The arena is passed down as an argument** (31 validators take it), as in the `@DATA` analyzer.
+- **Resolutions are keyed by position and name parts, not by node,** so the map the enhancer reads is
+  the same whichever tree was analyzed.
+- **A default value is copied out of the arena** when a function is registered, because the symbol
+  table keeps `ParameterInfo.default_value` as the owned `Expression`.
+- **Three codes cannot be reached and are left as they are.** `QFUNC003B` and `QFUNC007` check that a
+  data type is valid, and every data type is. `QFUNC073` checks the depth budget, but the statement
+  nesting limit (50) stops the recursion long before the budget (100 or more) can run out.
+- **Two things in the output depend on hash order and are not changed here.** The "Valid values",
+  "Available functions" and "Available enums" suggestions list names in the order of a `HashMap`, and
+  the cycle detector starts each reported cycle from a different function on each run. Tests and the
+  verification harness normalize both. Sorting them in the analyzer would make the diagnostics
+  deterministic.
+
+**Tests:** `tests/quickfuncs_parser_tests.rs` (the parser) and `tests/quickfuncs_analyzer_document.rs`
+(diagnostics, resolutions and registered functions, on both paths).
+
+### `Compiler/Core/Functions/call_collector.rs` and `cycle_detector.rs`
+
+The call collector walks every function and adds a call edge for each call to a function that is not a
+local; the cycle detector builds the graph from it, reports cycles and calls to functions that do not
+exist. Both now read the arena (`analyze_function_doc`, `validate_function_calls_doc`,
+`get_execution_order_doc`) and keep their owned entry points as wrappers that copy into a scratch arena.
+The `@QUICKFUNCS` analyzer is their only caller.
+
 ### `tests/data_analyzer_document.rs`
 
 **What it does:** Pins the diagnostics, the two indexes and the symbol table entries of the `@DATA`
@@ -680,6 +722,27 @@ ask whether a file is accepted.
 
 **Tests:** `cargo test -p dixscript --test data_analyzer_document`. 11 tests, all passing on Rust
 1.75. Eighteen deliberate bugs were injected to check them (see the last Fixes entry).
+
+### `tests/quickfuncs_analyzer_document.rs`
+
+**What it does:** Pins the diagnostics, the qualified identifier resolutions and the registered
+functions of the `@QUICKFUNCS` analyzer, and checks that it gives the same ones when it reads a
+`Document` as when it reads the owned tree.
+
+**Decisions:**
+- **Fifty-nine parsed sources, three strategies,** covering 79 of the 83 codes together with the
+  hand-built sections. The three largest sources are built by code instead of written out.
+- **Nine sections are built by hand,** for the checks the parser prevents: invalid names, operators and
+  types, `ObjectCreation` statements (the parser never produces them), imported namespaces and enums
+  from a pre-populated symbol table, and an expression deeper than the depth budget. `HAND_RECORDING`
+  holds the recorded output of each under three strategies (27 blocks), and every one runs through
+  `analyze` and through `analyze_doc`.
+- **The two hash-order effects are normalized** in the same way as in the harness that made the
+  recording, so the test is not flaky. It passed eight runs in a row.
+- Two tests build a document and an owned tree that disagree on purpose, and others show that the
+  resolutions and the registered functions come from the section that was read.
+
+**Tests:** `cargo test -p dixscript --test quickfuncs_analyzer_document`. 13 tests, all passing on Rust 1.75.
 
 ### `tests/security_analyzer_document.rs`
 
@@ -1344,3 +1407,23 @@ requires the larger to take less than 7 times as long.
 - **Not run:** CI on stable Rust and the bench workflow, because GitHub's API rate-limits the sandbox.
   The language server could not be type-checked either, because Cargo 1.75 cannot build its
   dependencies. No existing signature changed.
+
+### Fixes and Problems: the `@QUICKFUNCS` analyzer reads the Document
+
+- **The change was checked with the same before and after harness as the other analyzers,** extended
+  with 59 `@QUICKFUNCS` sources and a mode that analyzes nine hand-built sections. The harness now also
+  prints the qualified identifier resolutions. It runs 84 corpus files and 197 crafted sources (10,903
+  lines) and the hand-built mode (265 lines). The output of the original code is the same on three
+  runs, and the changed tree gives byte-for-byte the same output through the owned entry point and
+  through the `Document` one, for both modes. The two binaries were checked to be different programs.
+- **The baseline was not deterministic at first,** for two reasons that belong to the original
+  analyzer: some suggestions list names in hash order, and the cycle detector starts a reported cycle
+  from a different function on each run. Both are normalized in the harness and in the tests. They
+  were found by running the baseline twice and then three times, not by reading the code.
+- **Coverage:** 79 of 83 codes are reached. Three cannot be (see the analyzer section). The first set of
+  sources reached 49, and the rest came from sources written to the code's conditions and from
+  hand-built input for the checks the parser prevents.
+- **Not done in this drop:** deliberate bugs were not injected to check the new tests, so their
+  sensitivity is unproven, unlike the other analyzers. The enhancer (`quickfuncs_ast_enhancer.rs`,
+  `qualified_identifier_resolver.rs`, `general_ast_enhancer.rs`) still reads and rewrites the owned
+  tree, and the owned `TypeInferenceVisitor` has not become a wrapper yet.

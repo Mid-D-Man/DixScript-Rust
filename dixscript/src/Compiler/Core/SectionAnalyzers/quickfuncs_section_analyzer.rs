@@ -1,9 +1,25 @@
-
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/SectionAnalyzers/quickfuncs_section_analyzer.rs"
+// ============================================================================
 //! QuickFunctions Section Analyzer — semantic validation for @QUICKFUNCS.
 //!
 //! Validates function signatures, parameters, return types, local variable
 //! declarations, all expression forms, control flow, and circular call cycles.
+//!
+//! The checks run over the arena form of the section:
+//! [`analyze_doc`](QuickFuncsSectionAnalyzer::analyze_doc) reads a [`DocQuickFuncs`] and the
+//! [`Arena`] its statements, expressions and values live in, and is what
+//! `GeneralSemanticAnalyzer` calls when it has a `Document`.
+//! [`analyze`](QuickFuncsSectionAnalyzer::analyze) keeps the owned-type signature for callers
+//! that only have a `DixScript`: it copies the section into a scratch arena and runs the same
+//! checks, so the two entry points cannot disagree. Types are inferred with the arena entry
+//! points of `TypeInferenceVisitor`.
 
+use crate::Compiler::AST::arena::{
+    Arena, CaseId, CaseList, DocQuickFuncParam, DocQuickFuncs, DocQuickFunction, ExprId, ExprList,
+    ExprNode, StmtId, StmtList, StmtNode, ValueId, ValueList, ValueNode,
+};
 use crate::Compiler::AST::*;
 use crate::Compiler::AST::Visitors::TypeInferenceVisitor;
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
@@ -143,9 +159,78 @@ pub fn new_with_error_manager(
 
     // ==================== ENTRY POINT ====================
 
+    /// Analyzes a `@QUICKFUNCS` section held as the owned type.
+    ///
+    /// This is the entry point for callers that only have a `DixScript`. It copies the section
+    /// into a scratch arena and calls [`analyze_doc`](Self::analyze_doc), so the diagnostics, the
+    /// qualified identifier resolutions and the registered functions are the ones `analyze_doc`
+    /// gives for the same section.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the section needs more nodes or text than an arena can address (more than
+    /// `u32::MAX` of either).
     pub fn analyze(
         &mut self,
         section: &QuickFuncsSection,
+        symbol_table: &mut SymbolTable,
+    ) -> SectionAnalysisResult {
+        let mut arena = Arena::new();
+        let doc_section = DocQuickFuncs::from_owned(&mut arena, section);
+        self.analyze_doc(&doc_section, &arena, symbol_table)
+    }
+
+    /// Analyzes the `@QUICKFUNCS` section of a `Document`.
+    ///
+    /// `section` and `arena` must come from the same `Document` (its `quick_functions` field and
+    /// its `arena` field): the section holds ids into the arena and has no meaning without it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Compiler::AST::arena::{Arena, DocQuickFuncs};
+    /// use dixscript::Compiler::AST::{
+    ///     DataType, Expression, Position, QuickFuncStatement, QuickFuncsSection, QuickFunction, Value,
+    /// };
+    /// use dixscript::Compiler::Core::Config::OperationalSettings;
+    /// use dixscript::Compiler::Core::SectionAnalyzers::QuickFuncsSectionAnalyzer;
+    /// use dixscript::Compiler::Utilities::SymbolTable;
+    ///
+    /// let pos = Position::new(1, 1);
+    /// // `~f<int> => global() { return "text" }`: the returned value is not an integer.
+    /// let function = QuickFunction::new(
+    ///     "f".to_string(),
+    ///     Some(DataType::Int),
+    ///     Some(vec!["global".to_string()]),
+    ///     vec![],
+    ///     vec![QuickFuncStatement::Return {
+    ///         value: Expression::Value {
+    ///             value: Value::String { value: "text".to_string(), position: pos },
+    ///             position: pos,
+    ///         },
+    ///         position: pos,
+    ///     }],
+    ///     pos,
+    /// );
+    /// let owned = QuickFuncsSection::new(vec![function], pos);
+    ///
+    /// let mut arena = Arena::new();
+    /// let section = DocQuickFuncs::from_owned(&mut arena, &owned);
+    ///
+    /// let settings = OperationalSettings::default();
+    /// let mut table = SymbolTable::new();
+    /// let mut analyzer = QuickFuncsSectionAnalyzer::new(&settings);
+    /// let result = analyzer.analyze_doc(&section, &arena, &mut table);
+    ///
+    /// assert!(!result.is_success);
+    /// assert_eq!(result.errors[0].error_id, "QFUNC015");
+    /// // The function is registered whether or not its body checks out.
+    /// assert!(table.functions.contains_key("f"));
+    /// ```
+    pub fn analyze_doc(
+        &mut self,
+        section: &DocQuickFuncs,
+        arena: &Arena,
         symbol_table: &mut SymbolTable,
     ) -> SectionAnalysisResult {
         let mut result = SectionAnalysisResult::new("QUICKFUNCS");
@@ -192,7 +277,7 @@ pub fn new_with_error_manager(
         if self.debug_config.is_enabled {
             self.error_manager.log_debug("Phase 2: pre-registering functions in symbol table");
         }
-        self.populate_symbol_table(section, symbol_table, &duplicate_functions, &mut result);
+        self.populate_symbol_table(arena, section, symbol_table, &duplicate_functions, &mut result);
 
         if !result.errors.is_empty() && self.should_halt(&result) {
             return result;
@@ -216,7 +301,7 @@ pub fn new_with_error_manager(
                 }
                 continue;
             }
-            self.validate_quick_function(func, symbol_table, &mut result, &mut reusable_scope);
+            self.validate_quick_function(arena, func, symbol_table, &mut result, &mut reusable_scope);
             if self.should_halt(&result) {
                 return result;
             }
@@ -232,7 +317,7 @@ pub fn new_with_error_manager(
             self.operational_settings,   self.error_manager.clone(),
 
         );
-        if !cycle_validator.validate_function_calls(section) {
+        if !cycle_validator.validate_function_calls_doc(section, arena) {
             result.is_success = false;
         }
 
@@ -257,8 +342,8 @@ pub fn new_with_error_manager(
     // ==================== FUNCTION VALIDATION ====================
 
     fn validate_quick_function(
-        &self,
-        func: &QuickFunction,
+        &self, arena: &Arena,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         result: &mut SectionAnalysisResult,
         reusable_scope: &mut LocalScopeTracker,
@@ -306,18 +391,18 @@ pub fn new_with_error_manager(
         self.validate_return_type(func, result);
         if self.should_halt(result) { return; }
 
-        self.validate_parameters(func, symbol_table, result);
+        self.validate_parameters(arena, func, symbol_table, result);
         if self.should_halt(result) { return; }
 
         self.validate_scopes(func, result);
         if self.should_halt(result) { return; }
 
-        self.validate_function_body(func, symbol_table, result, reusable_scope);
+        self.validate_function_body(arena, func, symbol_table, result, reusable_scope);
     }
 
     fn validate_return_type(
         &self,
-        func: &QuickFunction,
+        func: &DocQuickFunction,
         result: &mut SectionAnalysisResult,
     ) {
         if let Some(rt) = func.return_type {
@@ -335,8 +420,8 @@ pub fn new_with_error_manager(
     }
 
     fn validate_parameters(
-        &self,
-        func: &QuickFunction,
+        &self, arena: &Arena,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         result: &mut SectionAnalysisResult,
     ) {
@@ -458,7 +543,7 @@ pub fn new_with_error_manager(
             }
 
             if param.data_type.is_some() && param.default_value.is_some() {
-                self.validate_default_value_type_strict(param, &func.name, symbol_table, result);
+                self.validate_default_value_type_strict(arena, param, &func.name, symbol_table, result);
             }
 
             if param.default_value.is_some() {
@@ -483,19 +568,19 @@ pub fn new_with_error_manager(
     // ── validate_default_value_type_strict ────────────────────────────────────────
 
 fn validate_default_value_type_strict(
-    &self,
-    param:        &QuickFuncParam,
+    &self, arena: &Arena,
+    param:        &DocQuickFuncParam,
     func_name:    &str,
     symbol_table: &SymbolTable,
     result:       &mut SectionAnalysisResult,
 ) {
     let (default_value, expected_type) = match (&param.default_value, param.data_type) {
-        (Some(v), Some(t)) => (v, t),
+        (Some(v), Some(t)) => (*v, t),
         _ => return,
     };
 
     let visitor  = TypeInferenceVisitor::new(symbol_table, None);
-    let inferred = visitor.infer_type_from_expression(default_value);
+    let inferred = visitor.infer_type_from_expression_id(arena, default_value);
 
     match inferred {
         Some(actual) if !Self::are_types_compatible_strict(actual, expected_type) => {
@@ -530,7 +615,7 @@ fn validate_default_value_type_strict(
 
     fn validate_scopes(
         &self,
-        func: &QuickFunction,
+        func: &DocQuickFunction,
         result: &mut SectionAnalysisResult,
     ) {
         let scope_list = match &func.scope_list {
@@ -569,8 +654,8 @@ fn validate_default_value_type_strict(
     }
 
     fn validate_function_body(
-        &self,
-        func: &QuickFunction,
+        &self, arena: &Arena,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         result: &mut SectionAnalysisResult,
         scope_tracker: &mut LocalScopeTracker,
@@ -614,8 +699,8 @@ fn validate_default_value_type_strict(
         let mut return_path = ReturnPathAnalyzer::new(func.return_type.unwrap());
         let max_depth = Self::calculate_max_depth(body_length);
 
-        for statement in &func.body {
-            self.validate_statement(
+        for &statement in arena.stmt_list(func.body) {
+            self.validate_statement(arena, 
                 statement,
                 func,
                 symbol_table,
@@ -643,13 +728,13 @@ fn validate_default_value_type_strict(
             );
         }
 
-        self.check_for_unused_variables(func, scope_tracker, result);
+        self.check_for_unused_variables(arena, func, scope_tracker, result);
     }
 
     fn validate_statement(
-        &self,
-        statement: &QuickFuncStatement,
-        func: &QuickFunction,
+        &self, arena: &Arena,
+        statement: StmtId,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         local_scope: &mut LocalScopeTracker,
         result: &mut SectionAnalysisResult,
@@ -667,7 +752,7 @@ fn validate_default_value_type_strict(
                     max_depth, func.name
                 ),
                 "Simplify deeply nested code structures.",
-                statement.position(),
+                arena.stmt(statement).position(),
             );
             return;
         }
@@ -682,21 +767,21 @@ fn validate_default_value_type_strict(
                     func.name, MAX_NESTING_DEPTH
                 ),
                 "Extract nested code into separate functions.",
-                statement.position(),
+                arena.stmt(statement).position(),
             );
             return;
         }
 
-        match statement {
-            QuickFuncStatement::Return { value, .. } => {
-                self.validate_return_statement(value, func, symbol_table, local_scope, result);
+        match arena.stmt(statement) {
+            StmtNode::Return { value, .. } => {
+                self.validate_return_statement(arena, *value, func, symbol_table, local_scope, result);
                 return_path.add_return();
             }
-            QuickFuncStatement::If { condition, then_branch, else_branch, .. } => {
-                self.validate_if_statement(
-                    condition,
-                    then_branch,
-                    else_branch.as_ref(),
+            StmtNode::If { condition, then_branch, else_branch, .. } => {
+                self.validate_if_statement(arena, 
+                    *condition,
+                    *then_branch,
+                    *else_branch,
                     func,
                     symbol_table,
                     local_scope,
@@ -706,11 +791,11 @@ fn validate_default_value_type_strict(
                     return_path,
                 );
             }
-            QuickFuncStatement::Switch { expression, cases, default_case, .. } => {
-                self.validate_switch_statement(
-                    expression,
-                    cases,
-                    default_case.as_ref(),
+            StmtNode::Switch { expression, cases, default_case, .. } => {
+                self.validate_switch_statement(arena, 
+                    *expression,
+                    *cases,
+                    *default_case,
                     func,
                     symbol_table,
                     local_scope,
@@ -720,31 +805,31 @@ fn validate_default_value_type_strict(
                     return_path,
                 );
             }
-            QuickFuncStatement::Assignment { variable, value, .. } => {
-                self.validate_assignment_statement(
-                    variable, value, func, symbol_table, local_scope, result,
+            StmtNode::Assignment { variable, value, .. } => {
+                self.validate_assignment_statement(arena, 
+                    arena.text(*variable), *value, func, symbol_table, local_scope, result,
                 );
             }
-            QuickFuncStatement::ArithmeticAssignment { variable, operator, value, .. } => {
-                self.validate_arithmetic_assignment_statement(
-                    variable, operator, value, func, symbol_table, local_scope, result,
+            StmtNode::ArithmeticAssignment { variable, operator, value, .. } => {
+                self.validate_arithmetic_assignment_statement(arena, 
+                    arena.text(*variable), arena.text(*operator), *value, func, symbol_table, local_scope, result,
                 );
             }
-            QuickFuncStatement::ObjectCreation { variable, object, .. } => {
-                self.validate_object_creation_statement(
-                    variable, object, func, symbol_table, local_scope, result,
+            StmtNode::ObjectCreation { variable, object, .. } => {
+                self.validate_object_creation_statement(arena, 
+                    arena.text(*variable), *object, func, symbol_table, local_scope, result,
                 );
             }
-            QuickFuncStatement::Log { value, .. } => {
-                self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
+            StmtNode::Log { value, .. } => {
+                self.validate_expression(arena, *value, func, symbol_table, local_scope, result, max_depth);
             }
-            QuickFuncStatement::ExpressionStatement { expression, .. } => {
-                self.validate_expression(
-                    expression, func, symbol_table, local_scope, result, max_depth,
+            StmtNode::ExpressionStatement { expression, .. } => {
+                self.validate_expression(arena, 
+                    *expression, func, symbol_table, local_scope, result, max_depth,
                 );
             }
-            QuickFuncStatement::VariableDeclaration { .. } => {
-                self.validate_variable_declaration_statement(
+            StmtNode::VariableDeclaration { .. } => {
+                self.validate_variable_declaration_statement(arena, 
                     statement, func, symbol_table, local_scope, result,
                 );
             }
@@ -762,15 +847,15 @@ fn validate_default_value_type_strict(
 // the user with noise.
 
 fn validate_return_statement(
-    &self,
-    value:        &Expression,
-    func:         &QuickFunction,
+    &self, arena: &Arena,
+    value:        ExprId,
+    func:         &DocQuickFunction,
     symbol_table: &SymbolTable,
     local_scope:  &LocalScopeTracker,
     result:       &mut SectionAnalysisResult,
 ) {
     let max_depth = Self::calculate_max_depth(100);
-    self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
+    self.validate_expression(arena, value, func, symbol_table, local_scope, result, max_depth);
 
     let local_variable_types = local_scope.get_all_variable_types();
     let element_type_hints   = local_scope.get_all_element_type_hints();
@@ -779,7 +864,7 @@ fn validate_return_statement(
         Some(local_variable_types),
         Some(element_type_hints),
     );
-    let return_value_type = visitor.infer_type_from_expression(value);
+    let return_value_type = visitor.infer_type_from_expression_id(arena, value);
     let expected = func.return_type.unwrap();
 
     match return_value_type {
@@ -799,7 +884,7 @@ fn validate_return_statement(
                     "Change the return value to match {:?} or update the function return type",
                     expected
                 ),
-                value.position(),
+                arena.expr(value).position(),
             );
         }
 
@@ -830,23 +915,23 @@ fn validate_return_statement(
 
 
 fn validate_variable_declaration_statement(
-    &self,
-    statement:    &QuickFuncStatement,
-    func:         &QuickFunction,
+    &self, arena: &Arena,
+    statement:    StmtId,
+    func:         &DocQuickFunction,
     symbol_table: &SymbolTable,
     local_scope:  &mut LocalScopeTracker,
     result:       &mut SectionAnalysisResult,
 ) {
     let (declaration_type, is_mutable, variable_name, data_type, value, position) =
-        match statement {
-            QuickFuncStatement::VariableDeclaration {
+        match arena.stmt(statement) {
+            StmtNode::VariableDeclaration {
                 declaration_type,
                 is_mutable,
                 variable_name,
                 data_type,
                 value,
                 position,
-            } => (declaration_type, is_mutable, variable_name, data_type, value, position),
+            } => (declaration_type, is_mutable, arena.text(*variable_name), data_type, *value, position),
             _ => return,
         };
 
@@ -899,7 +984,7 @@ fn validate_variable_declaration_statement(
     }
 
     let max_depth = Self::calculate_max_depth(100);
-    self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
+    self.validate_expression(arena, value, func, symbol_table, local_scope, result, max_depth);
 
     let local_variable_types = local_scope.get_all_variable_types();
     let element_type_hints   = local_scope.get_all_element_type_hints();
@@ -908,7 +993,7 @@ fn validate_variable_declaration_statement(
         Some(local_variable_types),
         Some(element_type_hints),
     );
-    let inferred_type = visitor.infer_type_from_expression(value);
+    let inferred_type = visitor.infer_type_from_expression_id(arena, value);
 
     // Type-compatibility check (only when both declared and inferred are known and not Any)
     if let (Some(&declared), Some(inferred)) = (data_type.as_ref(), inferred_type) {
@@ -942,13 +1027,13 @@ fn validate_variable_declaration_statement(
         }
         Some(DataType::Array) | Some(DataType::Tuple) => {
             // Untyped collection: infer from the assigned value
-            visitor.infer_element_type_from_expression(value)
+            visitor.infer_element_type_from_expression_id(arena, value)
         }
         _ => None,
     };
 
     local_scope.add_variable_with_element_type(
-        variable_name.clone(),
+        variable_name.to_string(),
         effective_type,
         is_const,
         element_type,
@@ -968,11 +1053,11 @@ fn validate_variable_declaration_statement(
     // ==================== CONTROL FLOW VALIDATION ====================
 
     fn validate_if_statement(
-    &self,
-    condition:    &Expression,
-    then_branch:  &[QuickFuncStatement],
-    else_branch:  Option<&Vec<QuickFuncStatement>>,
-    func:         &QuickFunction,
+    &self, arena: &Arena,
+    condition:    ExprId,
+    then_branch:  StmtList,
+    else_branch:  Option<StmtList>,
+    func:         &DocQuickFunction,
     symbol_table: &SymbolTable,
     local_scope:  &mut LocalScopeTracker,
     result:       &mut SectionAnalysisResult,
@@ -980,7 +1065,7 @@ fn validate_variable_declaration_statement(
     max_depth:    usize,
     return_path:  &mut ReturnPathAnalyzer,
 ) {
-    self.validate_expression(condition, func, symbol_table, local_scope, result, max_depth);
+    self.validate_expression(arena, condition, func, symbol_table, local_scope, result, max_depth);
 
     let local_variable_types = local_scope.get_all_variable_types();
     let element_type_hints   = local_scope.get_all_element_type_hints();
@@ -990,7 +1075,7 @@ fn validate_variable_declaration_statement(
         Some(element_type_hints),
     );
 
-    if let Some(cond_type) = visitor.infer_type_from_expression(condition) {
+    if let Some(cond_type) = visitor.infer_type_from_expression_id(arena, condition) {
         // Any is permissive — skip the bool check entirely
         if cond_type != DataType::Bool && cond_type != DataType::Any {
             self.add_error(
@@ -1002,7 +1087,7 @@ fn validate_variable_declaration_statement(
                     cond_type
                 ),
                 "Use comparison operators (==, !=, >, <, etc.) to create boolean conditions.",
-                condition.position(),
+                arena.expr(condition).position(),
             );
         }
     }
@@ -1010,16 +1095,16 @@ fn validate_variable_declaration_statement(
     let mut then_returns = ReturnPathAnalyzer::new(func.return_type.unwrap());
     let mut else_returns = ReturnPathAnalyzer::new(func.return_type.unwrap());
 
-    for stmt in then_branch {
-        self.validate_statement(
+    for &stmt in arena.stmt_list(then_branch) {
+        self.validate_statement(arena, 
             stmt, func, symbol_table, local_scope, result,
             nesting_depth + 1, max_depth, &mut then_returns,
         );
     }
 
     if let Some(else_stmts) = else_branch {
-        for stmt in else_stmts {
-            self.validate_statement(
+        for &stmt in arena.stmt_list(else_stmts) {
+            self.validate_statement(arena, 
                 stmt, func, symbol_table, local_scope, result,
                 nesting_depth + 1, max_depth, &mut else_returns,
             );
@@ -1031,11 +1116,11 @@ fn validate_variable_declaration_statement(
 }
 
     fn validate_switch_statement(
-        &self,
-        expression: &Expression,
-        cases: &[SwitchCase],
-        default_case: Option<&SwitchCase>,
-        func: &QuickFunction,
+        &self, arena: &Arena,
+        expression: ExprId,
+        cases: CaseList,
+        default_case: Option<CaseId>,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         local_scope: &mut LocalScopeTracker,
         result: &mut SectionAnalysisResult,
@@ -1043,13 +1128,13 @@ fn validate_variable_declaration_statement(
         max_depth: usize,
         return_path: &mut ReturnPathAnalyzer,
     ) {
-        self.validate_expression(expression, func, symbol_table, local_scope, result, max_depth);
+        self.validate_expression(arena, expression, func, symbol_table, local_scope, result, max_depth);
 
         let has_default = default_case.is_some();
-        let all_cases_return = cases.iter().all(|case| {
+        let all_cases_return = arena.case_list(cases).iter().all(|case| {
             let mut case_analyzer = ReturnPathAnalyzer::new(func.return_type.unwrap());
-            for stmt in &case.statements {
-                self.validate_statement(
+            for &stmt in arena.stmt_list(case.statements) {
+                self.validate_statement(arena, 
                     stmt, func, symbol_table, local_scope, result,
                     nesting_depth + 1, max_depth, &mut case_analyzer,
                 );
@@ -1059,8 +1144,8 @@ fn validate_variable_declaration_statement(
 
         let default_returns = if let Some(default) = default_case {
             let mut analyzer = ReturnPathAnalyzer::new(func.return_type.unwrap());
-            for stmt in &default.statements {
-                self.validate_statement(
+            for &stmt in arena.stmt_list(arena.case(default).statements) {
+                self.validate_statement(arena, 
                     stmt, func, symbol_table, local_scope, result,
                     nesting_depth + 1, max_depth, &mut analyzer,
                 );
@@ -1078,10 +1163,10 @@ fn validate_variable_declaration_statement(
     // ==================== ASSIGNMENT VALIDATION ====================
 
     fn validate_assignment_statement(
-    &self,
+    &self, arena: &Arena,
     variable:     &str,
-    value:        &Expression,
-    func:         &QuickFunction,
+    value:        ExprId,
+    func:         &DocQuickFunction,
     symbol_table: &SymbolTable,
     local_scope:  &mut LocalScopeTracker,
     result:       &mut SectionAnalysisResult,
@@ -1091,7 +1176,7 @@ fn validate_variable_declaration_statement(
             result, "QFUNC017", "INVALID_VARIABLE_NAME",
             &format!("Invalid variable name '{}' in function '{}'", variable, func.name),
             "Variable names must start with a letter and contain only alphanumeric characters and underscores.",
-            value.position(),
+            arena.expr(value).position(),
         );
         return;
     }
@@ -1107,7 +1192,7 @@ fn validate_variable_declaration_statement(
                 "Declare it first: let {} = ...; or const {} = ...;",
                 variable, variable
             ),
-            value.position(),
+            arena.expr(value).position(),
         );
         return;
     }
@@ -1117,13 +1202,13 @@ fn validate_variable_declaration_statement(
             result, "QFUNC018", "CONST_REASSIGNMENT",
             &format!("Cannot reassign const variable '{}' in function '{}'", variable, func.name),
             "Use 'let mut' instead of 'const' or 'let' to allow mutation.",
-            value.position(),
+            arena.expr(value).position(),
         );
         return;
     }
 
     let max_depth = Self::calculate_max_depth(100);
-    self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
+    self.validate_expression(arena, value, func, symbol_table, local_scope, result, max_depth);
 
     let local_variable_types = local_scope.get_all_variable_types();
     let element_type_hints   = local_scope.get_all_element_type_hints();
@@ -1134,7 +1219,7 @@ fn validate_variable_declaration_statement(
     );
 
     let existing_type = local_scope.get_variable_type(variable);
-    let new_type      = visitor.infer_type_from_expression(value);
+    let new_type      = visitor.infer_type_from_expression_id(arena, value);
 
     match (existing_type, new_type) {
         (Some(existing), Some(new_t))
@@ -1148,7 +1233,7 @@ fn validate_variable_declaration_statement(
                     new_t, variable, existing
                 ),
                 "Variable types cannot change once assigned (unless type is 'any').",
-                value.position(),
+                arena.expr(value).position(),
             );
         }
         (None, Some(new_t)) if new_t != DataType::Any => {
@@ -1165,7 +1250,7 @@ fn validate_variable_declaration_statement(
                 let new_elem = match new_t {
                     DataType::TypedArray(elem) => Some(elem.to_data_type()),
                     DataType::TypedTuple(arr)  => arr[0].map(|e| e.to_data_type()),
-                    _ => visitor.infer_element_type_from_expression(value),
+                    _ => visitor.infer_element_type_from_expression_id(arena, value),
                 };
                 local_scope.update_variable_element_type(variable, new_elem);
             }
@@ -1181,11 +1266,11 @@ fn validate_variable_declaration_statement(
 }
 
     fn validate_arithmetic_assignment_statement(
-    &self,
+    &self, arena: &Arena,
     variable:     &str,
     operator:     &str,
-    value:        &Expression,
-    func:         &QuickFunction,
+    value:        ExprId,
+    func:         &DocQuickFunction,
     symbol_table: &SymbolTable,
     local_scope:  &LocalScopeTracker,
     result:       &mut SectionAnalysisResult,
@@ -1200,7 +1285,7 @@ fn validate_variable_declaration_statement(
                 variable, func.name
             ),
             "Declare the variable before using arithmetic assignment.",
-            value.position(),
+            arena.expr(value).position(),
         );
         return;
     }
@@ -1212,7 +1297,7 @@ fn validate_variable_declaration_statement(
             "CONST_REASSIGNMENT",
             &format!("Cannot modify const variable '{}' with '{}'", variable, operator),
             "Remove 'const' to make the variable mutable.",
-            value.position(),
+            arena.expr(value).position(),
         );
         return;
     }
@@ -1224,13 +1309,13 @@ fn validate_variable_declaration_statement(
             "INVALID_ARITHMETIC_ASSIGN_OP",
             &format!("Invalid arithmetic assignment operator '{}'", operator),
             "Valid operators: +=, -=, *=, /=, %=, **=, &=, |=, ^=, <<=, >>=",
-            value.position(),
+            arena.expr(value).position(),
         );
         return;
     }
 
     let max_depth = Self::calculate_max_depth(100);
-    self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
+    self.validate_expression(arena, value, func, symbol_table, local_scope, result, max_depth);
 
     // Use element hints so element-returning method results resolve correctly
     let local_variable_types = local_scope.get_all_variable_types();
@@ -1243,22 +1328,22 @@ fn validate_variable_declaration_statement(
 
     if let (Some(var_t), Some(val_t)) = (
         local_scope.get_variable_type(variable),
-        visitor.infer_type_from_expression(value),
+        visitor.infer_type_from_expression_id(arena, value),
     ) {
         // Skip operand checks when either side is Any (type deferred / unknown)
         if var_t != DataType::Any && val_t != DataType::Any {
             self.validate_arithmetic_operation(
-                operator, var_t, val_t, &func.name, result, value.position(),
+                operator, var_t, val_t, &func.name, result, arena.expr(value).position(),
             );
         }
     }
 }
 
     fn validate_object_creation_statement(
-        &self,
+        &self, arena: &Arena,
         variable: &str,
-        object: &Value,
-        func: &QuickFunction,
+        object: ValueId,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         local_scope: &mut LocalScopeTracker,
         result: &mut SectionAnalysisResult,
@@ -1270,7 +1355,7 @@ fn validate_variable_declaration_statement(
                 "INVALID_VARIABLE_NAME",
                 &format!("Invalid variable name '{}' in function '{}'", variable, func.name),
                 "Variable names must start with a letter and contain only alphanumeric characters and underscores.",
-                object.position(),
+                arena.value(object).position(),
             );
             return;
         }
@@ -1282,13 +1367,13 @@ fn validate_variable_declaration_statement(
                 "CONST_REASSIGNMENT",
                 &format!("Cannot reassign const variable '{}' in function '{}'", variable, func.name),
                 "Remove 'const' to allow reassignment.",
-                object.position(),
+                arena.value(object).position(),
             );
             return;
         }
 
-        self.validate_object_literal_keys(object, &func.name, result);
-        self.validate_value(object, func, symbol_table, local_scope, result);
+        self.validate_object_literal_keys(arena, object, &func.name, result);
+        self.validate_value(arena, object, func, symbol_table, local_scope, result);
 
         if !local_scope.has_variable(variable) {
             local_scope.add_variable(variable.to_string(), Some(DataType::Object), false);
@@ -1296,13 +1381,13 @@ fn validate_variable_declaration_statement(
     }
 
     fn check_for_unused_variables(
-        &self,
-        func: &QuickFunction,
+        &self, arena: &Arena,
+        func: &DocQuickFunction,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
     ) {
         let mut collector = VariableReferenceCollector::new(&func.parameters);
-        let referenced = collector.collect_from_function(func);
+        let referenced = collector.collect_from_function(arena, func);
 
         for var_name in local_scope.get_declared_variable_names() {
             if !referenced.contains(var_name) {
@@ -1331,9 +1416,9 @@ fn validate_variable_declaration_statement(
 // ==================== EXPRESSION VALIDATION ====================
 
     fn validate_expression(
-        &self,
-        expr: &Expression,
-        func: &QuickFunction,
+        &self, arena: &Arena,
+        expr: ExprId,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
@@ -1346,102 +1431,103 @@ fn validate_variable_declaration_statement(
                 "EXPRESSION_DEPTH_EXCEEDED",
                 &format!("Maximum expression depth exceeded in function '{}'", func.name),
                 "Simplify deeply nested expressions.",
-                expr.position(),
+                arena.expr(expr).position(),
             );
             return;
         }
 
-        match expr {
-            Expression::Identifier { name, .. } => {
-                self.validate_identifier(name, &func.name, local_scope, symbol_table, result, expr.position());
+        match arena.expr(expr) {
+            ExprNode::Identifier { name, .. } => {
+                self.validate_identifier(arena.text(*name), &func.name, local_scope, symbol_table, result, arena.expr(expr).position());
             }
             // position is now captured explicitly so it can be passed to validate_qualified_identifier
-            Expression::QualifiedIdentifier { parts, arguments, position } => {
-                self.validate_qualified_identifier(
-                    parts, arguments.as_ref(), func, symbol_table, local_scope, result, max_depth, *position,
+            ExprNode::QualifiedIdentifier { parts, arguments, position } => {
+                let parts: Vec<&str> = arena.str_list(*parts).iter().map(|s| arena.text(*s)).collect();
+                self.validate_qualified_identifier(arena, 
+                    &parts, *arguments, func, symbol_table, local_scope, result, max_depth, *position,
                 );
             }
-            Expression::QuickFuncCall { name, arguments, .. } => {
-                self.validate_quick_func_call(
-                    name, arguments, func, symbol_table, local_scope, result, max_depth,
+            ExprNode::QuickFuncCall { name, arguments, .. } => {
+                self.validate_quick_func_call(arena, 
+                    arena.text(*name), *arguments, func, symbol_table, local_scope, result, max_depth,
                 );
             }
-            Expression::ImportedFunctionCall {
+            ExprNode::ImportedFunctionCall {
                 namespace_name, function_name, arguments, ..
             } => {
-                self.validate_imported_function_call(
-                    namespace_name, function_name, arguments,
+                self.validate_imported_function_call(arena, 
+                    arena.text(*namespace_name), arena.text(*function_name), *arguments,
                     func, symbol_table, local_scope, result, max_depth,
                 );
             }
-            Expression::InstanceMethodCall { instance, method_name, arguments, .. } => {
-                self.validate_instance_method_call(
-                    instance, method_name, arguments,
+            ExprNode::InstanceMethodCall { instance, method_name, arguments, .. } => {
+                self.validate_instance_method_call(arena, 
+                    *instance, arena.text(*method_name), *arguments,
                     func, symbol_table, local_scope, result, max_depth,
                 );
             }
-            Expression::StaticMethodCall { object_name, method_name, arguments, .. } => {
-                self.validate_static_method_call(
-                    object_name, method_name, arguments,
+            ExprNode::StaticMethodCall { object_name, method_name, arguments, .. } => {
+                self.validate_static_method_call(arena, 
+                    arena.text(*object_name), arena.text(*method_name), *arguments,
                     func, symbol_table, local_scope, result, max_depth,
                 );
             }
-            Expression::EnumAccess { namespace_name, enum_name, value, position } => {
+            ExprNode::EnumAccess { namespace_name, enum_name, value, position } => {
                 self.validate_enum_access(
-                    namespace_name.as_deref(), enum_name, value, &func.name, symbol_table, result, *position,
+                    namespace_name.map(|n| arena.text(n)), arena.text(*enum_name), arena.text(*value), &func.name, symbol_table, result, *position,
                 );
             }
-            Expression::ArithmeticOp { left, right, operator, .. } => {
-                self.validate_arithmetic_op_expression(
-                    left, right, operator, func, symbol_table, local_scope, result, max_depth,
+            ExprNode::ArithmeticOp { left, right, operator, .. } => {
+                self.validate_arithmetic_op_expression(arena, 
+                    *left, *right, arena.text(*operator), func, symbol_table, local_scope, result, max_depth,
                 );
             }
-            Expression::BitwiseOp { left, right, operator, .. } => {
-                self.validate_bitwise_op_expression(
-                    left, right, operator, func, symbol_table, local_scope, result, max_depth,
+            ExprNode::BitwiseOp { left, right, operator, .. } => {
+                self.validate_bitwise_op_expression(arena, 
+                    *left, *right, arena.text(*operator), func, symbol_table, local_scope, result, max_depth,
                 );
             }
-            Expression::ComparisonOp { left, right, operator, .. } => {
-                self.validate_comparison_op_expression(
-                    left, right, operator, func, symbol_table, local_scope, result, max_depth,
+            ExprNode::ComparisonOp { left, right, operator, .. } => {
+                self.validate_comparison_op_expression(arena, 
+                    *left, *right, arena.text(*operator), func, symbol_table, local_scope, result, max_depth,
                 );
             }
-            Expression::LogicalOp { left, right, operator, .. } => {
-                self.validate_logical_op_expression(
-                    left, right, operator, func, symbol_table, local_scope, result, max_depth,
+            ExprNode::LogicalOp { left, right, operator, .. } => {
+                self.validate_logical_op_expression(arena, 
+                    *left, *right, arena.text(*operator), func, symbol_table, local_scope, result, max_depth,
                 );
             }
-            Expression::UnaryOp { operand, operator, .. } => {
-                self.validate_unary_op_expression(
-                    operand, operator, func, symbol_table, local_scope, result, max_depth,
+            ExprNode::UnaryOp { operand, operator, .. } => {
+                self.validate_unary_op_expression(arena, 
+                    *operand, arena.text(*operator), func, symbol_table, local_scope, result, max_depth,
                 );
             }
-            Expression::Conditional { condition, true_value, false_value, .. } => {
-                self.validate_conditional_expression(
-                    condition, true_value, false_value,
+            ExprNode::Conditional { condition, true_value, false_value, .. } => {
+                self.validate_conditional_expression(arena, 
+                    *condition, *true_value, *false_value,
                     func, symbol_table, local_scope, result, max_depth,
                 );
             }
-            Expression::PropertyAccess { object, .. } => {
-                self.validate_expression(
-                    object, func, symbol_table, local_scope, result, max_depth - 1,
+            ExprNode::PropertyAccess { object, .. } => {
+                self.validate_expression(arena, 
+                    *object, func, symbol_table, local_scope, result, max_depth - 1,
                 );
             }
-            Expression::IndexAccess { object, index, .. } => {
-                self.validate_expression(object, func, symbol_table, local_scope, result, max_depth - 1);
-                self.validate_expression(index, func, symbol_table, local_scope, result, max_depth - 1);
+            ExprNode::IndexAccess { object, index, .. } => {
+                self.validate_expression(arena, *object, func, symbol_table, local_scope, result, max_depth - 1);
+                self.validate_expression(arena, *index, func, symbol_table, local_scope, result, max_depth - 1);
             }
-            Expression::Value { value, .. } => {
-                self.validate_value(value, func, symbol_table, local_scope, result);
+            ExprNode::Value { value, .. } => {
+                self.validate_value(arena, *value, func, symbol_table, local_scope, result);
             }
-            Expression::Parenthesized { expression, .. } => {
-                self.validate_expression(
-                    expression, func, symbol_table, local_scope, result, max_depth - 1,
+            ExprNode::Parenthesized { expression, .. } => {
+                self.validate_expression(arena, 
+                    *expression, func, symbol_table, local_scope, result, max_depth - 1,
                 );
             }
-            Expression::TypeCast { expression, .. } => {
-                self.validate_expression(
-                    expression, func, symbol_table, local_scope, result, max_depth - 1,
+            ExprNode::TypeCast { expression, .. } => {
+                self.validate_expression(arena, 
+                    *expression, func, symbol_table, local_scope, result, max_depth - 1,
                 );
             }
             _ => {}
@@ -1482,10 +1568,10 @@ fn validate_variable_declaration_statement(
     // position parameter added — required so the QualifiedIdentifierKey built here
     // matches the key the resolver builds from the same expression node.
     fn validate_qualified_identifier(
-        &self,
-        parts: &[String],
-        arguments: Option<&Vec<Expression>>,
-        func: &QuickFunction,
+        &self, arena: &Arena,
+        parts: &[&str],
+        arguments: Option<ExprList>,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
@@ -1496,8 +1582,8 @@ fn validate_variable_declaration_statement(
             return;
         }
 
-        let first = &parts[0];
-        let second = &parts[1];
+        let first = parts[0];
+        let second = parts[1];
         let is_call = arguments.is_some();
 
         // Helper closure: builds the key and inserts a resolution into the map.
@@ -1507,13 +1593,13 @@ fn validate_variable_declaration_statement(
                       context: Option<String>| {
             let key = QualifiedIdentifierKey {
                 position,
-                parts: parts.to_vec(),
+                parts: parts.iter().map(|s| s.to_string()).collect::<Vec<String>>(),
                 is_call,
             };
             let resolution = QualifiedIdentifierResolution::new(
                 resolved_type,
                 context,
-                parts.to_vec(),
+                parts.iter().map(|s| s.to_string()).collect::<Vec<String>>(),
                 is_call,
                 position,
             );
@@ -1523,8 +1609,8 @@ fn validate_variable_declaration_statement(
         // Local variable or parameter — property access or instance method call.
         if local_scope.has_variable(first) || local_scope.has_parameter(first) {
             if let Some(args) = arguments {
-                for arg in args {
-                    self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
+                for &arg in arena.expr_list(args) {
+                    self.validate_expression(arena, arg, func, symbol_table, local_scope, result, max_depth - 1);
                 }
             }
             insert(result, QualifiedIdentifierType::ObjectPropertyAccess, Some("local".to_string()));
@@ -1546,13 +1632,13 @@ fn validate_variable_declaration_statement(
                     );
                 }
             }
-            insert(result, QualifiedIdentifierType::LocalEnumAccess, Some(first.clone()));
+            insert(result, QualifiedIdentifierType::LocalEnumAccess, Some(first.to_string()));
             return;
         }
 
         // Namespace access (imported file).
         if symbol_table.is_imported_namespace(first) {
-            self.validate_namespace_access(
+            self.validate_namespace_access(arena, 
                 parts, arguments, func, symbol_table, local_scope, result, max_depth,
             );
 
@@ -1565,24 +1651,24 @@ fn validate_variable_declaration_statement(
                 QualifiedIdentifierType::ImportedFunctionCall
             };
 
-            insert(result, resolved_type, Some(first.clone()));
+            insert(result, resolved_type, Some(first.to_string()));
             return;
         }
 
         // Builtin static object access: Math.sqrt(), DateTime.now(), etc.
         if has_static_object(first) {
-            self.validate_static_object_access(
+            self.validate_static_object_access(arena, 
                 parts, arguments, func, symbol_table, local_scope, result, max_depth,
             );
-            insert(result, QualifiedIdentifierType::StaticObjectAccess, Some(first.clone()));
+            insert(result, QualifiedIdentifierType::StaticObjectAccess, Some(first.to_string()));
             return;
         }
 
         // DATA section variable — property access is valid at runtime.
         if symbol_table.has_data_variable(first) {
             if let Some(args) = arguments {
-                for arg in args {
-                    self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
+                for &arg in arena.expr_list(args) {
+                    self.validate_expression(arena, arg, func, symbol_table, local_scope, result, max_depth - 1);
                 }
             }
             insert(result, QualifiedIdentifierType::ObjectPropertyAccess, Some("data".to_string()));
@@ -1602,8 +1688,8 @@ fn validate_variable_declaration_statement(
         );
 
         if let Some(args) = arguments {
-            for arg in args {
-                self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
+            for &arg in arena.expr_list(args) {
+                self.validate_expression(arena, arg, func, symbol_table, local_scope, result, max_depth - 1);
             }
         }
 
@@ -1611,17 +1697,17 @@ fn validate_variable_declaration_statement(
     }
 
     fn validate_namespace_access(
-        &self,
-        parts: &[String],
-        arguments: Option<&Vec<Expression>>,
-        func: &QuickFunction,
+        &self, arena: &Arena,
+        parts: &[&str],
+        arguments: Option<ExprList>,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
         max_depth: usize,
     ) {
-        let ns = &parts[0];
-        let member = &parts[1];
+        let ns = parts[0];
+        let member = parts[1];
 
         if parts.len() == 2 {
             if let Some(args) = arguments {
@@ -1655,8 +1741,8 @@ fn validate_variable_declaration_statement(
                         }
                     }
                 }
-                for arg in args {
-                    self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
+                for &arg in arena.expr_list(args) {
+                    self.validate_expression(arena, arg, func, symbol_table, local_scope, result, max_depth - 1);
                 }
             } else {
                 // Namespaced enum reference.
@@ -1673,8 +1759,8 @@ fn validate_variable_declaration_statement(
             }
         } else if parts.len() == 3 {
             // Imported enum access: ns.Enum.Value
-            let enum_name = &parts[1];
-            let enum_value = &parts[2];
+            let enum_name = parts[1];
+            let enum_value = parts[2];
 
             match symbol_table.get_namespaced_enum(ns, enum_name) {
                 None => {
@@ -1704,17 +1790,17 @@ fn validate_variable_declaration_statement(
     }
 
     fn validate_static_object_access(
-        &self,
-        parts: &[String],
-        arguments: Option<&Vec<Expression>>,
-        func: &QuickFunction,
+        &self, arena: &Arena,
+        parts: &[&str],
+        arguments: Option<ExprList>,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
         max_depth: usize,
     ) {
-        let object_name = &parts[0];
-        let method_name = &parts[1];
+        let object_name = parts[0];
+        let method_name = parts[1];
 
         if let Some(args) = arguments {
             if !has_static_method(object_name, method_name) {
@@ -1727,8 +1813,8 @@ fn validate_variable_declaration_statement(
                     Position::UNKNOWN,
                 );
             }
-            for arg in args {
-                self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
+            for &arg in arena.expr_list(args) {
+                self.validate_expression(arena, arg, func, symbol_table, local_scope, result, max_depth - 1);
             }
         }
     }
@@ -1736,11 +1822,11 @@ fn validate_variable_declaration_statement(
     // ==================== OPERATOR EXPRESSION VALIDATORS ====================
 
 fn validate_arithmetic_op_expression(
-    &self,
-    left:         &Expression,
-    right:        &Expression,
+    &self, arena: &Arena,
+    left:         ExprId,
+    right:        ExprId,
     operator:     &str,
-    func:         &QuickFunction,
+    func:         &DocQuickFunction,
     symbol_table: &SymbolTable,
     local_scope:  &LocalScopeTracker,
     result:       &mut SectionAnalysisResult,
@@ -1756,13 +1842,13 @@ fn validate_arithmetic_op_expression(
                 operator, func.name
             ),
             "Valid operators: +, -, *, /, %, **, %%, %&, &%",
-            left.position(),
+            arena.expr(left).position(),
         );
         return;
     }
 
-    self.validate_expression(left,  func, symbol_table, local_scope, result, max_depth - 1);
-    self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(arena, left,  func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(arena, right, func, symbol_table, local_scope, result, max_depth - 1);
 
     let local_variable_types = local_scope.get_all_variable_types();
     let element_type_hints   = local_scope.get_all_element_type_hints();
@@ -1772,8 +1858,8 @@ fn validate_arithmetic_op_expression(
         Some(element_type_hints),
     );
 
-    let lt = visitor.infer_type_from_expression(left);
-    let rt = visitor.infer_type_from_expression(right);
+    let lt = visitor.infer_type_from_expression_id(arena, left);
+    let rt = visitor.infer_type_from_expression_id(arena, right);
 
     if let (Some(l), Some(r)) = (lt, rt) {
         // String concatenation path
@@ -1793,7 +1879,7 @@ fn validate_arithmetic_op_expression(
                                 other, func.name
                             ),
                             "Use only string + string, or convert to string first.",
-                            left.position(),
+                            arena.expr(left).position(),
                         );
                     }
                     return;
@@ -1813,7 +1899,7 @@ fn validate_arithmetic_op_expression(
                     operator, l, func.name
                 ),
                 "Use int, float, or double.",
-                left.position(),
+                arena.expr(left).position(),
             );
         }
         if r != DataType::Any && !is_numeric_type(r) {
@@ -1826,18 +1912,18 @@ fn validate_arithmetic_op_expression(
                     operator, r, func.name
                 ),
                 "Use int, float, or double.",
-                right.position(),
+                arena.expr(right).position(),
             );
         }
     }
 }
 
     fn validate_bitwise_op_expression(
-    &self,
-    left:         &Expression,
-    right:        &Expression,
+    &self, arena: &Arena,
+    left:         ExprId,
+    right:        ExprId,
     operator:     &str,
-    func:         &QuickFunction,
+    func:         &DocQuickFunction,
     symbol_table: &SymbolTable,
     local_scope:  &LocalScopeTracker,
     result:       &mut SectionAnalysisResult,
@@ -1853,13 +1939,13 @@ fn validate_arithmetic_op_expression(
                 operator, func.name
             ),
             "Valid operators: &, |, ^, <<, >>",
-            left.position(),
+            arena.expr(left).position(),
         );
         return;
     }
 
-    self.validate_expression(left,  func, symbol_table, local_scope, result, max_depth - 1);
-    self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(arena, left,  func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(arena, right, func, symbol_table, local_scope, result, max_depth - 1);
 
     let local_variable_types = local_scope.get_all_variable_types();
     let element_type_hints   = local_scope.get_all_element_type_hints();
@@ -1873,7 +1959,7 @@ fn validate_arithmetic_op_expression(
         ("Left",  left,  "QFUNC030"),
         ("Right", right, "QFUNC031"),
     ] {
-        if let Some(t) = visitor.infer_type_from_expression(expr) {
+        if let Some(t) = visitor.infer_type_from_expression_id(arena, expr) {
             // FIX: was `t != DataType::Int`, rejecting valid `long` operands.
             // Skip the check for Any — type is unknown/deferred.
             if !is_bitwise_operand_type(t) && t != DataType::Any {
@@ -1886,7 +1972,7 @@ fn validate_arithmetic_op_expression(
                         side, operator, t, func.name
                     ),
                     "Convert to int/long or use arithmetic operators instead.",
-                    expr.position(),
+                    arena.expr(expr).position(),
                 );
             }
         }
@@ -1897,11 +1983,11 @@ fn validate_arithmetic_op_expression(
     // ── Operator expression validators ─────────────────────────────────────────
 
 fn validate_comparison_op_expression(
-    &self,
-    left:         &Expression,
-    right:        &Expression,
+    &self, arena: &Arena,
+    left:         ExprId,
+    right:        ExprId,
     operator:     &str,
-    func:         &QuickFunction,
+    func:         &DocQuickFunction,
     symbol_table: &SymbolTable,
     local_scope:  &LocalScopeTracker,
     result:       &mut SectionAnalysisResult,
@@ -1914,13 +2000,13 @@ fn validate_comparison_op_expression(
             "INVALID_COMPARISON_OPERATOR",
             &format!("Invalid comparison operator '{}' in function '{}'", operator, func.name),
             "Valid operators: ==, !=, >, <, >=, <=",
-            left.position(),
+            arena.expr(left).position(),
         );
         return;
     }
 
-    self.validate_expression(left,  func, symbol_table, local_scope, result, max_depth - 1);
-    self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(arena, left,  func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(arena, right, func, symbol_table, local_scope, result, max_depth - 1);
 
     // Use full element-hint context so element-returning methods resolve correctly
     let local_variable_types = local_scope.get_all_variable_types();
@@ -1931,8 +2017,8 @@ fn validate_comparison_op_expression(
         Some(element_type_hints),
     );
 
-    let lt = visitor.infer_type_from_expression(left);
-    let rt = visitor.infer_type_from_expression(right);
+    let lt = visitor.infer_type_from_expression_id(arena, left);
+    let rt = visitor.infer_type_from_expression_id(arena, right);
 
     if let (Some(l), Some(r)) = (lt, rt) {
         // Any on either side — permissive, skip further checks
@@ -1948,7 +2034,7 @@ fn validate_comparison_op_expression(
                         l, r, func.name
                     ),
                     "QUICKFUNCS",
-                    left.position(),
+                    arena.expr(left).position(),
                 );
             }
             return;
@@ -1965,18 +2051,18 @@ fn validate_comparison_op_expression(
                     operator, l, r, func.name
                 ),
                 "Use numeric types (int, float, double) for relational comparisons.",
-                left.position(),
+                arena.expr(left).position(),
             );
         }
     }
 }
 
     fn validate_logical_op_expression(
-    &self,
-    left:         &Expression,
-    right:        &Expression,
+    &self, arena: &Arena,
+    left:         ExprId,
+    right:        ExprId,
     operator:     &str,
-    func:         &QuickFunction,
+    func:         &DocQuickFunction,
     symbol_table: &SymbolTable,
     local_scope:  &LocalScopeTracker,
     result:       &mut SectionAnalysisResult,
@@ -1992,13 +2078,13 @@ fn validate_comparison_op_expression(
                 operator, func.name
             ),
             "Valid operators: &&, ||, and, or",
-            left.position(),
+            arena.expr(left).position(),
         );
         return;
     }
 
-    self.validate_expression(left,  func, symbol_table, local_scope, result, max_depth - 1);
-    self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(arena, left,  func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(arena, right, func, symbol_table, local_scope, result, max_depth - 1);
 
     let local_variable_types = local_scope.get_all_variable_types();
     let element_type_hints   = local_scope.get_all_element_type_hints();
@@ -2012,7 +2098,7 @@ fn validate_comparison_op_expression(
         ("QFUNC035", left,  "Left"),
         ("QFUNC036", right, "Right"),
     ] {
-        if let Some(t) = visitor.infer_type_from_expression(expr) {
+        if let Some(t) = visitor.infer_type_from_expression_id(arena, expr) {
             // Any and Bool are both acceptable — skip the error
             if t != DataType::Bool && t != DataType::Any {
                 self.add_error(
@@ -2024,7 +2110,7 @@ fn validate_comparison_op_expression(
                         side, operator, t, func.name
                     ),
                     "Use comparison operators to create boolean values.",
-                    expr.position(),
+                    arena.expr(expr).position(),
                 );
             }
         }
@@ -2032,10 +2118,10 @@ fn validate_comparison_op_expression(
 }
 
 fn validate_unary_op_expression(
-    &self,
-    operand:      &Expression,
+    &self, arena: &Arena,
+    operand:      ExprId,
     operator:     &str,
-    func:         &QuickFunction,
+    func:         &DocQuickFunction,
     symbol_table: &SymbolTable,
     local_scope:  &LocalScopeTracker,
     result:       &mut SectionAnalysisResult,
@@ -2051,12 +2137,12 @@ fn validate_unary_op_expression(
                 operator, func.name
             ),
             "Valid operators: !, not, -, +, ~?",
-            operand.position(),
+            arena.expr(operand).position(),
         );
         return;
     }
 
-    self.validate_expression(operand, func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(arena, operand, func, symbol_table, local_scope, result, max_depth - 1);
 
     let local_variable_types = local_scope.get_all_variable_types();
     let element_type_hints   = local_scope.get_all_element_type_hints();
@@ -2066,7 +2152,7 @@ fn validate_unary_op_expression(
         Some(element_type_hints),
     );
 
-    if let Some(ot) = visitor.infer_type_from_expression(operand) {
+    if let Some(ot) = visitor.infer_type_from_expression_id(arena, operand) {
         if ot == DataType::Any { return; } // skip type checks for Any
 
         match operator {
@@ -2080,7 +2166,7 @@ fn validate_unary_op_expression(
                         ot, func.name
                     ),
                     "Use a comparison to create a boolean value.",
-                    operand.position(),
+                    arena.expr(operand).position(),
                 );
             }
             // FIX: was `ot != DataType::Int`, rejecting valid `long` operands.
@@ -2094,7 +2180,7 @@ fn validate_unary_op_expression(
                         ot, func.name
                     ),
                     "Convert to int or long before using bitwise NOT.",
-                    operand.position(),
+                    arena.expr(operand).position(),
                 );
             }
             "-" | "+" if !is_numeric_type(ot) => {
@@ -2107,7 +2193,7 @@ fn validate_unary_op_expression(
                         operator, ot, func.name
                     ),
                     "Use int, float, or double.",
-                    operand.position(),
+                    arena.expr(operand).position(),
                 );
             }
             _ => {}
@@ -2183,17 +2269,17 @@ fn validate_arithmetic_operation(
 // produce false positives.
 
 fn validate_conditional_expression(
-    &self,
-    condition:    &Expression,
-    true_value:   &Expression,
-    false_value:  &Expression,
-    func:         &QuickFunction,
+    &self, arena: &Arena,
+    condition:    ExprId,
+    true_value:   ExprId,
+    false_value:  ExprId,
+    func:         &DocQuickFunction,
     symbol_table: &SymbolTable,
     local_scope:  &LocalScopeTracker,
     result:       &mut SectionAnalysisResult,
     max_depth:    usize,
 ) {
-    self.validate_expression(
+    self.validate_expression(arena, 
         condition, func, symbol_table, local_scope, result, max_depth - 1,
     );
 
@@ -2205,7 +2291,7 @@ fn validate_conditional_expression(
         Some(element_type_hints),
     );
 
-    if let Some(ct) = visitor.infer_type_from_expression(condition) {
+    if let Some(ct) = visitor.infer_type_from_expression_id(arena, condition) {
         if ct != DataType::Bool && ct != DataType::Any {
             self.add_error(
                 result,
@@ -2213,20 +2299,20 @@ fn validate_conditional_expression(
                 "NON_BOOL_TERNARY_CONDITION",
                 &format!("Ternary condition must be bool, got {:?} in '{}'", ct, func.name),
                 "Use comparison operators to create a boolean condition.",
-                condition.position(),
+                arena.expr(condition).position(),
             );
         }
     }
 
-    self.validate_expression(
+    self.validate_expression(arena, 
         true_value, func, symbol_table, local_scope, result, max_depth - 1,
     );
-    self.validate_expression(
+    self.validate_expression(arena, 
         false_value, func, symbol_table, local_scope, result, max_depth - 1,
     );
 
-    let tt = visitor.infer_type_from_expression(true_value);
-    let ft = visitor.infer_type_from_expression(false_value);
+    let tt = visitor.infer_type_from_expression_id(arena, true_value);
+    let ft = visitor.infer_type_from_expression_id(arena, false_value);
 
     if let (Some(t), Some(f)) = (tt, ft) {
         // Only warn when BOTH sides are known simple primitives that are clearly
@@ -2263,7 +2349,7 @@ fn validate_conditional_expression(
                     t, f, func.name
                 ),
                 "QUICKFUNCS",
-                condition.position(),
+                arena.expr(condition).position(),
             );
         }
     }
@@ -2271,18 +2357,18 @@ fn validate_conditional_expression(
     // ==================== CALL VALIDATORS ====================
 
     fn validate_quick_func_call(
-        &self,
+        &self, arena: &Arena,
         name: &str,
-        arguments: &[Expression],
-        func: &QuickFunction,
+        arguments: ExprList,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
         max_depth: usize,
     ) {
         if local_scope.has_variable(name) {
-            for arg in arguments {
-                self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
+            for &arg in arena.expr_list(arguments) {
+                self.validate_expression(arena, arg, func, symbol_table, local_scope, result, max_depth - 1);
             }
             return;
         }
@@ -2312,25 +2398,25 @@ fn validate_conditional_expression(
             }
         }
 
-        for arg in arguments {
-            self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
+        for &arg in arena.expr_list(arguments) {
+            self.validate_expression(arena, arg, func, symbol_table, local_scope, result, max_depth - 1);
         }
     }
 
     fn validate_imported_function_call(
-        &self,
+        &self, arena: &Arena,
         namespace_name: &str,
         function_name: &str,
-        arguments: &[Expression],
-        func: &QuickFunction,
+        arguments: ExprList,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
         max_depth: usize,
     ) {
         if local_scope.has_variable(namespace_name) {
-            for arg in arguments {
-                self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
+            for &arg in arena.expr_list(arguments) {
+                self.validate_expression(arena, arg, func, symbol_table, local_scope, result, max_depth - 1);
             }
             return;
         }
@@ -2396,23 +2482,23 @@ fn validate_conditional_expression(
             }
         }
 
-        for arg in arguments {
-            self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
+        for &arg in arena.expr_list(arguments) {
+            self.validate_expression(arena, arg, func, symbol_table, local_scope, result, max_depth - 1);
         }
     }
 
     fn validate_instance_method_call(
-    &self,
-    instance:     &Expression,
+    &self, arena: &Arena,
+    instance:     ExprId,
     method_name:  &str,
-    arguments:    &[Expression],
-    func:         &QuickFunction,
+    arguments:    ExprList,
+    func:         &DocQuickFunction,
     symbol_table: &SymbolTable,
     local_scope:  &LocalScopeTracker,
     result:       &mut SectionAnalysisResult,
     max_depth:    usize,
 ) {
-    let chain_depth = Self::count_method_chain_depth(instance);
+    let chain_depth = Self::count_method_chain_depth(arena, instance);
     if chain_depth > MAX_METHOD_CHAIN_DEPTH {
         self.add_error(
             result,
@@ -2423,12 +2509,12 @@ fn validate_conditional_expression(
                 chain_depth, MAX_METHOD_CHAIN_DEPTH, func.name
             ),
             "Break up the method chain into intermediate variables.",
-            instance.position(),
+            arena.expr(instance).position(),
         );
         return;
     }
 
-    self.validate_expression(instance, func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(arena, instance, func, symbol_table, local_scope, result, max_depth - 1);
 
     // Element hints are essential here: .first()/.last() on a tracked array
     // would otherwise infer as Any and skip method validation entirely.
@@ -2440,7 +2526,7 @@ fn validate_conditional_expression(
         Some(element_type_hints),
     );
 
-    if let Some(inst_type) = visitor.infer_type_from_expression(instance) {
+    if let Some(inst_type) = visitor.infer_type_from_expression_id(arena, instance) {
         // When instance type is Any (runtime-shaped / unknown), skip method
         // existence check to avoid false INSTANCE_METHOD_NOT_FOUND errors.
         if inst_type != DataType::Any {
@@ -2457,24 +2543,24 @@ fn validate_conditional_expression(
                             inst_type, method_name
                         ),
                         &format!("Type '{:?}' has no such method.", inst_type),
-                        instance.position(),
+                        arena.expr(instance).position(),
                     );
                 }
             }
         }
     }
 
-    for arg in arguments {
-        self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
+    for &arg in arena.expr_list(arguments) {
+        self.validate_expression(arena, arg, func, symbol_table, local_scope, result, max_depth - 1);
     }
     }
 
     fn validate_static_method_call(
-        &self,
+        &self, arena: &Arena,
         object_name: &str,
         method_name: &str,
-        arguments: &[Expression],
-        func: &QuickFunction,
+        arguments: ExprList,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
@@ -2496,8 +2582,8 @@ fn validate_conditional_expression(
             );
         }
 
-        for arg in arguments {
-            self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
+        for &arg in arena.expr_list(arguments) {
+            self.validate_expression(arena, arg, func, symbol_table, local_scope, result, max_depth - 1);
         }
     }
 
@@ -2580,72 +2666,73 @@ fn validate_conditional_expression(
     // ==================== VALUE VALIDATION ====================
 
     fn validate_value(
-        &self,
-        value: &Value,
-        func: &QuickFunction,
+        &self, arena: &Arena,
+        value: ValueId,
+        func: &DocQuickFunction,
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
     ) {
-        match value {
-            Value::Array { values, .. } => {
+        match arena.value(value) {
+            ValueNode::Array { values, .. } => {
                 if values.len() > MAX_ARRAY_ELEMENTS {
                     self.add_error(
                         result, "QFUNC057", "ARRAY_TOO_LARGE",
                         &format!("Array has {} elements, exceeds limit of {}", values.len(), MAX_ARRAY_ELEMENTS),
                         &format!("Reduce array size to {} or fewer elements", MAX_ARRAY_ELEMENTS),
-                        value.position(),
+                        arena.value(value).position(),
                     );
                 }
-                self.validate_array_homogeneity(values, &func.name, local_scope, symbol_table, result, value.position());
-                for item in values {
-                    self.validate_value(item, func, symbol_table, local_scope, result);
+                self.validate_array_homogeneity(arena, *values, &func.name, local_scope, symbol_table, result, arena.value(value).position());
+                for &item in arena.value_list(*values) {
+                    self.validate_value(arena, item, func, symbol_table, local_scope, result);
                 }
             }
-            Value::Object { properties, .. } => {
-                self.validate_object_literal_keys(value, &func.name, result);
+            ValueNode::Object { properties, .. } => {
+                self.validate_object_literal_keys(arena, value, &func.name, result);
+                let properties = arena.prop_list(*properties);
                 if properties.len() > MAX_OBJECT_PROPERTIES {
                     self.add_error(
                         result, "QFUNC058", "OBJECT_TOO_LARGE",
                         &format!("Object has {} properties, exceeds limit of {}", properties.len(), MAX_OBJECT_PROPERTIES),
                         &format!("Reduce to {} or fewer properties", MAX_OBJECT_PROPERTIES),
-                        value.position(),
+                        arena.value(value).position(),
                     );
                 }
                 for prop in properties {
-                    self.validate_value(&prop.value, func, symbol_table, local_scope, result);
+                    self.validate_value(arena, prop.value, func, symbol_table, local_scope, result);
                 }
             }
-            Value::PrefixedConstructor { prefix, arguments, .. } => {
-                if prefix.eq_ignore_ascii_case("t") && arguments.len() > MAX_TUPLE_ARGUMENTS {
+            ValueNode::PrefixedConstructor { prefix, arguments, .. } => {
+                if arena.text(*prefix).eq_ignore_ascii_case("t") && arguments.len() > MAX_TUPLE_ARGUMENTS {
                     self.add_error(
                         result, "QFUNC059", "TUPLE_TOO_LARGE",
                         &format!("Tuple has {} arguments, exceeds limit of {}", arguments.len(), MAX_TUPLE_ARGUMENTS),
                         &format!("Reduce tuple size to {} or fewer arguments", MAX_TUPLE_ARGUMENTS),
-                        value.position(),
+                        arena.value(value).position(),
                     );
                 }
-                for arg in arguments {
-                    self.validate_value(arg, func, symbol_table, local_scope, result);
+                for &arg in arena.value_list(*arguments) {
+                    self.validate_value(arena, arg, func, symbol_table, local_scope, result);
                 }
             }
-            Value::InterpolatedString { expressions, .. } => {
+            ValueNode::InterpolatedString { expressions, .. } => {
                 let max_depth = Self::calculate_max_depth(100);
-                for expr in expressions {
-                    self.validate_expression(expr, func, symbol_table, local_scope, result, max_depth);
+                for &expr in arena.expr_list(*expressions) {
+                    self.validate_expression(arena, expr, func, symbol_table, local_scope, result, max_depth);
                 }
             }
-            Value::Expression { expr, .. } => {
+            ValueNode::Expression { expr, .. } => {
                 let max_depth = Self::calculate_max_depth(100);
-                self.validate_expression(expr, func, symbol_table, local_scope, result, max_depth);
+                self.validate_expression(arena, *expr, func, symbol_table, local_scope, result, max_depth);
             }
             _ => {}
         }
     }
 
     fn validate_array_homogeneity(
-    &self,
-    values:          &[Value],
+    &self, arena: &Arena,
+    values:          ValueList,
     function_name:   &str,
     local_scope:     &LocalScopeTracker,
     symbol_table:    &SymbolTable,
@@ -2664,7 +2751,8 @@ fn validate_conditional_expression(
         Some(element_type_hints),
     );
 
-    let first_type = match visitor.infer_type_from_value(&values[0]) {
+    let ids = arena.value_list(values);
+    let first_type = match visitor.infer_type_from_value_id(arena, ids[0]) {
         Some(t) => t,
         None    => return, // Can't determine first type — skip homogeneity check
     };
@@ -2674,8 +2762,8 @@ fn validate_conditional_expression(
         return;
     }
 
-    for (i, element) in values.iter().enumerate().skip(1) {
-        match visitor.infer_type_from_value(element) {
+    for (i, &element) in ids.iter().enumerate().skip(1) {
+        match visitor.infer_type_from_value_id(arena, element) {
             Some(et) if et == DataType::Any => {
                 // Element type is Any (deferred) — treat as compatible, skip
             }
@@ -2722,13 +2810,13 @@ fn validate_conditional_expression(
 }
 
     fn validate_object_literal_keys(
-        &self,
-        object: &Value,
+        &self, arena: &Arena,
+        object: ValueId,
         function_name: &str,
         result: &mut SectionAnalysisResult,
     ) {
-        let properties = match object {
-            Value::Object { properties, .. } => properties,
+        let properties = match arena.value(object) {
+            ValueNode::Object { properties, .. } => arena.prop_list(*properties),
             _ => return,
         };
 
@@ -2736,11 +2824,12 @@ fn validate_conditional_expression(
             FxHashSet::with_capacity_and_hasher(properties.len(), Default::default());
 
         for prop in properties {
-            if !seen.insert(prop.key.as_str()) {
+            let key = arena.text(prop.key);
+            if !seen.insert(key) {
                 self.add_error(
                     result, "QFUNC060", "DUPLICATE_OBJECT_KEY",
-                    &format!("Duplicate object key '{}' in function '{}'", prop.key, function_name),
-                    &format!("Each key must be unique. Remove or rename duplicate key '{}'.", prop.key),
+                    &format!("Duplicate object key '{}' in function '{}'", key, function_name),
+                    &format!("Each key must be unique. Remove or rename duplicate key '{}'.", key),
                     prop.position,
                 );
             }
@@ -2841,18 +2930,18 @@ fn convert_data_type_to_dix_type(data_type: DataType) -> Option<DixType> {
     }
 }
 
-    fn count_method_chain_depth(expr: &Expression) -> usize {
+    fn count_method_chain_depth(arena: &Arena, expr: ExprId) -> usize {
         let mut depth = 0;
         let mut current = expr;
         loop {
-            match current {
-                Expression::InstanceMethodCall { instance, .. } => {
+            match arena.expr(current) {
+                ExprNode::InstanceMethodCall { instance, .. } => {
                     depth += 1;
-                    current = instance;
+                    current = *instance;
                 }
-                Expression::PropertyAccess { object, .. } => {
+                ExprNode::PropertyAccess { object, .. } => {
                     depth += 1;
-                    current = object;
+                    current = *object;
                 }
                 _ => break,
             }
@@ -2863,8 +2952,8 @@ fn convert_data_type_to_dix_type(data_type: DataType) -> Option<DixType> {
     // ==================== SYMBOL TABLE POPULATION ====================
 
     fn populate_symbol_table(
-        &self,
-        section: &QuickFuncsSection,
+        &self, arena: &Arena,
+        section: &DocQuickFuncs,
         symbol_table: &mut SymbolTable,
         duplicate_functions: &FxHashSet<&str>,
         _result: &mut SectionAnalysisResult,
@@ -2876,6 +2965,8 @@ fn convert_data_type_to_dix_type(data_type: DataType) -> Option<DixType> {
                 continue;
             }
 
+            // The symbol table keeps a default value as the owned type, so each one is copied
+            // out of the arena here.
             let parameters: Vec<ParameterInfo> = func
                 .parameters
                 .iter()
@@ -2884,7 +2975,7 @@ fn convert_data_type_to_dix_type(data_type: DataType) -> Option<DixType> {
                     name: p.name.clone(),
                     param_type: p.data_type,
                     has_default_value: p.default_value.is_some(),
-                    default_value: p.default_value.clone(),
+                    default_value: p.default_value.map(|e| arena.export_expr(e)),
                 })
                 .collect();
 
@@ -3007,7 +3098,7 @@ impl LocalScopeTracker {
 /// TypedArray/TypedTuple annotations are used to populate element_type
 /// so downstream method calls like .first() / .last() resolve correctly
 /// even for parameters declared as <array<int>>.
-fn reset_with_params(&mut self, func_parameters: &[QuickFuncParam]) {
+fn reset_with_params(&mut self, func_parameters: &[DocQuickFuncParam]) {
     self.variables.clear();
     self.parameters.clear();
 
@@ -3180,7 +3271,7 @@ struct VariableReferenceCollector {
 }
 
 impl VariableReferenceCollector {
-    fn new(func_parameters: &[QuickFuncParam]) -> Self {
+    fn new(func_parameters: &[DocQuickFuncParam]) -> Self {
         let parameters: FxHashSet<String> =
             func_parameters.iter().map(|p| p.name.clone()).collect();
         VariableReferenceCollector {
@@ -3189,111 +3280,111 @@ impl VariableReferenceCollector {
         }
     }
 
-    fn collect_from_function(&mut self, func: &QuickFunction) -> &FxHashSet<String> {
-        for stmt in &func.body {
-            self.collect_from_statement(stmt);
+    fn collect_from_function(&mut self, arena: &Arena, func: &DocQuickFunction) -> &FxHashSet<String> {
+        for &stmt in arena.stmt_list(func.body) {
+            self.collect_from_statement(arena, stmt);
         }
         &self.referenced
     }
 
-    fn collect_from_statement(&mut self, stmt: &QuickFuncStatement) {
-        match stmt {
-            QuickFuncStatement::Return { value, .. } => self.collect_expr(value),
-            QuickFuncStatement::Assignment { value, .. } => self.collect_expr(value),
-            QuickFuncStatement::ArithmeticAssignment { variable, value, .. } => {
-                self.add_ref(variable);
-                self.collect_expr(value);
+    fn collect_from_statement(&mut self, arena: &Arena, stmt: StmtId) {
+        match arena.stmt(stmt) {
+            StmtNode::Return { value, .. } => self.collect_expr(arena, *value),
+            StmtNode::Assignment { value, .. } => self.collect_expr(arena, *value),
+            StmtNode::ArithmeticAssignment { variable, value, .. } => {
+                self.add_ref(arena.text(*variable));
+                self.collect_expr(arena, *value);
             }
-            QuickFuncStatement::VariableDeclaration { value, .. } => self.collect_expr(value),
-            QuickFuncStatement::ObjectCreation { object, .. } => self.collect_value(object),
-            QuickFuncStatement::If { condition, then_branch, else_branch, .. } => {
-                self.collect_expr(condition);
-                for s in then_branch { self.collect_from_statement(s); }
+            StmtNode::VariableDeclaration { value, .. } => self.collect_expr(arena, *value),
+            StmtNode::ObjectCreation { object, .. } => self.collect_value(arena, *object),
+            StmtNode::If { condition, then_branch, else_branch, .. } => {
+                self.collect_expr(arena, *condition);
+                for &s in arena.stmt_list(*then_branch) { self.collect_from_statement(arena, s); }
                 if let Some(els) = else_branch {
-                    for s in els { self.collect_from_statement(s); }
+                    for &s in arena.stmt_list(*els) { self.collect_from_statement(arena, s); }
                 }
             }
-            QuickFuncStatement::Switch { expression, cases, default_case, .. } => {
-                self.collect_expr(expression);
-                for case in cases {
-                    for s in &case.statements { self.collect_from_statement(s); }
+            StmtNode::Switch { expression, cases, default_case, .. } => {
+                self.collect_expr(arena, *expression);
+                for case in arena.case_list(*cases) {
+                    for &s in arena.stmt_list(case.statements) { self.collect_from_statement(arena, s); }
                 }
                 if let Some(def) = default_case {
-                    for s in &def.statements { self.collect_from_statement(s); }
+                    for &s in arena.stmt_list(arena.case(*def).statements) { self.collect_from_statement(arena, s); }
                 }
             }
-            QuickFuncStatement::Log { value, .. } => self.collect_expr(value),
-            QuickFuncStatement::ExpressionStatement { expression, .. } => self.collect_expr(expression),
+            StmtNode::Log { value, .. } => self.collect_expr(arena, *value),
+            StmtNode::ExpressionStatement { expression, .. } => self.collect_expr(arena, *expression),
         }
     }
 
-    fn collect_expr(&mut self, expr: &Expression) {
-        match expr {
-            Expression::Identifier { name, .. } => self.add_ref(name),
-            Expression::QualifiedIdentifier { parts, arguments, .. } => {
-                if let Some(first) = parts.first() { self.add_ref(first); }
+    fn collect_expr(&mut self, arena: &Arena, expr: ExprId) {
+        match arena.expr(expr) {
+            ExprNode::Identifier { name, .. } => self.add_ref(arena.text(*name)),
+            ExprNode::QualifiedIdentifier { parts, arguments, .. } => {
+                if let Some(first) = arena.str_list(*parts).first() { self.add_ref(arena.text(*first)); }
                 if let Some(args) = arguments {
-                    for a in args { self.collect_expr(a); }
+                    for &a in arena.expr_list(*args) { self.collect_expr(arena, a); }
                 }
             }
-            Expression::ArithmeticOp { left, right, .. }
-            | Expression::ComparisonOp { left, right, .. }
-            | Expression::LogicalOp { left, right, .. }
-            | Expression::BitwiseOp { left, right, .. } => {
-                self.collect_expr(left);
-                self.collect_expr(right);
+            ExprNode::ArithmeticOp { left, right, .. }
+            | ExprNode::ComparisonOp { left, right, .. }
+            | ExprNode::LogicalOp { left, right, .. }
+            | ExprNode::BitwiseOp { left, right, .. } => {
+                self.collect_expr(arena, *left);
+                self.collect_expr(arena, *right);
             }
-            Expression::UnaryOp { operand, .. } => self.collect_expr(operand),
-            Expression::Conditional { condition, true_value, false_value, .. } => {
-                self.collect_expr(condition);
-                self.collect_expr(true_value);
-                self.collect_expr(false_value);
+            ExprNode::UnaryOp { operand, .. } => self.collect_expr(arena, *operand),
+            ExprNode::Conditional { condition, true_value, false_value, .. } => {
+                self.collect_expr(arena, *condition);
+                self.collect_expr(arena, *true_value);
+                self.collect_expr(arena, *false_value);
             }
-            Expression::Parenthesized { expression, .. } => self.collect_expr(expression),
-            Expression::PropertyAccess { object, .. } => self.collect_expr(object),
-            Expression::IndexAccess { object, index, .. } => {
-                self.collect_expr(object);
-                self.collect_expr(index);
+            ExprNode::Parenthesized { expression, .. } => self.collect_expr(arena, *expression),
+            ExprNode::PropertyAccess { object, .. } => self.collect_expr(arena, *object),
+            ExprNode::IndexAccess { object, index, .. } => {
+                self.collect_expr(arena, *object);
+                self.collect_expr(arena, *index);
             }
-            Expression::QuickFuncCall { arguments, .. }
-            | Expression::ImportedFunctionCall { arguments, .. }
-            | Expression::StaticMethodCall { arguments, .. } => {
-                for a in arguments { self.collect_expr(a); }
+            ExprNode::QuickFuncCall { arguments, .. }
+            | ExprNode::ImportedFunctionCall { arguments, .. }
+            | ExprNode::StaticMethodCall { arguments, .. } => {
+                for &a in arena.expr_list(*arguments) { self.collect_expr(arena, a); }
             }
-            Expression::InstanceMethodCall { instance, arguments, .. } => {
-                self.collect_expr(instance);
-                for a in arguments { self.collect_expr(a); }
+            ExprNode::InstanceMethodCall { instance, arguments, .. } => {
+                self.collect_expr(arena, *instance);
+                for &a in arena.expr_list(*arguments) { self.collect_expr(arena, a); }
             }
-            Expression::Value { value, .. } => self.collect_value(value),
-            Expression::TypeCast { expression, .. } => self.collect_expr(expression),
+            ExprNode::Value { value, .. } => self.collect_value(arena, *value),
+            ExprNode::TypeCast { expression, .. } => self.collect_expr(arena, *expression),
             _ => {}
         }
     }
 
-    fn collect_value(&mut self, value: &Value) {
-        match value {
-            Value::Array { values, .. } | Value::NestedArray { values, .. } => {
-                for v in values { self.collect_value(v); }
+    fn collect_value(&mut self, arena: &Arena, value: ValueId) {
+        match arena.value(value) {
+            ValueNode::Array { values, .. } | ValueNode::NestedArray { values, .. } => {
+                for &v in arena.value_list(*values) { self.collect_value(arena, v); }
             }
-            Value::Object { properties, .. } => {
-                for p in properties { self.collect_value(&p.value); }
+            ValueNode::Object { properties, .. } => {
+                for p in arena.prop_list(*properties) { self.collect_value(arena, p.value); }
             }
-            Value::PrefixedConstructor { arguments, .. } => {
-                for a in arguments { self.collect_value(a); }
+            ValueNode::PrefixedConstructor { arguments, .. } => {
+                for &a in arena.value_list(*arguments) { self.collect_value(arena, a); }
             }
-            Value::InterpolatedString { expressions, .. } => {
-                for e in expressions { self.collect_expr(e); }
+            ValueNode::InterpolatedString { expressions, .. } => {
+                for &e in arena.expr_list(*expressions) { self.collect_expr(arena, e); }
             }
-            Value::QuickFuncCall { arguments, .. } => {
-                for a in arguments { self.collect_expr(a); }
+            ValueNode::QuickFuncCall { arguments, .. } => {
+                for &a in arena.expr_list(*arguments) { self.collect_expr(arena, a); }
             }
-            Value::Expression { expr, .. } => self.collect_expr(expr),
-            Value::Lambda { body, .. } => self.collect_expr(body),
-            Value::Range { start, end, .. } => {
-                self.collect_value(start);
-                self.collect_value(end);
+            ValueNode::Expression { expr, .. } => self.collect_expr(arena, *expr),
+            ValueNode::Lambda { body, .. } => self.collect_expr(arena, *body),
+            ValueNode::Range { start, end, .. } => {
+                self.collect_value(arena, *start);
+                self.collect_value(arena, *end);
             }
-            Value::Identifier { value, .. } => self.add_ref(value),
+            ValueNode::Identifier { value, .. } => self.add_ref(arena.text(*value)),
             _ => {}
         }
     }

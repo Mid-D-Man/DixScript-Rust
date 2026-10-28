@@ -53,6 +53,11 @@ Breaking release.
   every node. `GeneralSemanticAnalyzer::with_document` now covers `@DATA` as well, and
   `DataSectionAnalyzer::analyze` keeps its signature. Diagnostics, indexes and symbol table entries
   are unchanged.
+- **`QuickFuncsSectionAnalyzer::analyze_doc`**, which checks `@QUICKFUNCS` through an `Arena`, and the
+  arena entry points of the call collector and the cycle detector (`FunctionCallCollector::analyze_function_doc`,
+  `CycleDetectionValidator::validate_function_calls_doc` and `get_execution_order_doc`).
+  `GeneralSemanticAnalyzer::with_document` now covers `@QUICKFUNCS` as well, and the owned entry points
+  keep their signatures. Diagnostics, qualified identifier resolutions and registered functions are unchanged.
 
 ### Removed
 

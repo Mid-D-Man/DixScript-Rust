@@ -420,11 +420,19 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         true
     }
 
+    /// Checks `@QUICKFUNCS`, including the call graph, and records the qualified identifier
+    /// resolutions the enhancer reads.
+    ///
+    /// Reads the `Document` when the caller attached one, and the owned tree otherwise.
     fn analyze_phase5_functions(&mut self) -> bool {
-        let quickfuncs = match &self.ast.quick_functions {
-            Some(s) => s,
-            None    => return true,
+        let document = self.document;
+        let has_quickfuncs = match document {
+            Some(doc) => doc.quick_functions.is_some(),
+            None      => self.ast.quick_functions.is_some(),
         };
+        if !has_quickfuncs {
+            return true;
+        }
 
         if !self.has_quickfuncs_enabled {
             self.analysis_result.errors.push(SemanticErrorInfo {
@@ -444,7 +452,15 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             self.operational_settings,
             em,
         );
-        let result = analyzer.analyze(quickfuncs, &mut self.symbol_table);
+        let result = match document {
+            Some(Document { quick_functions: Some(quickfuncs), arena, .. }) => {
+                analyzer.analyze_doc(quickfuncs, arena, &mut self.symbol_table)
+            }
+            _ => match &self.ast.quick_functions {
+                Some(quickfuncs) => analyzer.analyze(quickfuncs, &mut self.symbol_table),
+                None => return true,
+            },
+        };
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(

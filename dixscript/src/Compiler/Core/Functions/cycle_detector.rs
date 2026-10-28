@@ -1,4 +1,5 @@
 use super::{CallGraph, FunctionCallCollector};
+use crate::Compiler::AST::arena::{Arena, DocQuickFuncs};
 use crate::Compiler::AST::{QuickFuncsSection, Position};
 use crate::Compiler::Core::OperationalSettings;
 use crate::ErrorManager::{ErrorManager, SemanticErrorType};
@@ -35,11 +36,29 @@ impl<'a> CycleDetectionValidator<'a> {
 
     /// Main entry point: Validate function calls in a QuickFuncs section
     /// Returns true if validation passed (no cycles), false otherwise
+    ///
+    /// This copies the section into a scratch arena and calls
+    /// [`validate_function_calls_doc`](Self::validate_function_calls_doc), so the answer and the
+    /// reported errors are the ones that method gives for the same section.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the section needs more nodes or text than an arena can address (more than
+    /// `u32::MAX` of either).
     pub fn validate_function_calls(&self, section: &QuickFuncsSection) -> bool {
+        let mut arena = Arena::new();
+        let doc = DocQuickFuncs::from_owned(&mut arena, section);
+        self.validate_function_calls_doc(&doc, &arena)
+    }
+
+    /// The same check for the `@QUICKFUNCS` section of a `Document`.
+    ///
+    /// `section` and `arena` must come from the same `Document`.
+    pub fn validate_function_calls_doc(&self, section: &DocQuickFuncs, arena: &Arena) -> bool {
         self.log_debug("Building function call graph...");
         
         // Step 1: Build call graph
-        let call_graph = self.build_call_graph(section);
+        let call_graph = self.build_call_graph(section, arena);
         
         // Log debug info if enabled
         if self.operational_settings.debug_mode >= crate::Compiler::AST::DebugMode::Regular {
@@ -90,13 +109,13 @@ impl<'a> CycleDetectionValidator<'a> {
     }
     
     /// Build the call graph by scanning all function bodies
-    fn build_call_graph(&self, section: &QuickFuncsSection) -> CallGraph {
+    fn build_call_graph(&self, section: &DocQuickFuncs, arena: &Arena) -> CallGraph {
         let mut call_graph = CallGraph::new();
         let mut collector = FunctionCallCollector::new(&mut call_graph);
         
         // Analyze each function
         for func in &section.functions {
-            collector.analyze_function(func);
+            collector.analyze_function_doc(arena, func);
         }
         
         call_graph
@@ -219,7 +238,7 @@ impl<'a> CycleDetectionValidator<'a> {
     /// Returns true if all calls are valid, false otherwise
     fn validate_all_calls_are_defined(
         &self,
-        section: &QuickFuncsSection,
+        section: &DocQuickFuncs,
         call_graph: &CallGraph,
     ) -> bool {
         // Build set of all defined functions
@@ -273,8 +292,25 @@ impl<'a> CycleDetectionValidator<'a> {
     
     /// Optional: Get execution order for acyclic graphs (useful for debugging)
     /// Returns None if graph has cycles
+    ///
+    /// This copies the section into a scratch arena and calls
+    /// [`get_execution_order_doc`](Self::get_execution_order_doc).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the section needs more nodes or text than an arena can address (more than
+    /// `u32::MAX` of either).
     pub fn get_execution_order(&self, section: &QuickFuncsSection) -> Option<Vec<String>> {
-        let call_graph = self.build_call_graph(section);
+        let mut arena = Arena::new();
+        let doc = DocQuickFuncs::from_owned(&mut arena, section);
+        self.get_execution_order_doc(&doc, &arena)
+    }
+
+    /// The same for the `@QUICKFUNCS` section of a `Document`.
+    ///
+    /// `section` and `arena` must come from the same `Document`.
+    pub fn get_execution_order_doc(&self, section: &DocQuickFuncs, arena: &Arena) -> Option<Vec<String>> {
+        let call_graph = self.build_call_graph(section, arena);
         call_graph.get_topological_sort()
     }
     

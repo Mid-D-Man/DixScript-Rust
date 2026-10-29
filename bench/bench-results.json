@@ -1,75 +1,415 @@
 {
-  "build": "40",
+  "build": "42",
   "branch": "master",
-  "commit": "cc1fa990",
+  "commit": "98a5b10a",
   "date": "",
   "summary": {
-    "total": 6,
+    "total": 40,
     "suites": 1
   },
   "suites": [
     {
-      "name": "raw_section_benchmark",
+      "name": "format_comparison_benchmark",
       "benchmarks": [
         {
-          "suite": "raw_section_benchmark",
-          "group": "raw_section_lexer_scan/payload_bytes",
-          "name": "256",
-          "full_name": "raw_section_benchmark/raw_section_lexer_scan/payload_bytes/256",
-          "lower_ns": 1387.3,
-          "mean_ns": 1388.5,
-          "upper_ns": 1390.1,
-          "std_ns": 0.7
+          "suite": "format_comparison_benchmark",
+          "group": "format/tokenize/mdix_tokenize",
+          "name": "small",
+          "full_name": "format_comparison_benchmark/format/tokenize/mdix_tokenize/small",
+          "lower_ns": 5156.4,
+          "mean_ns": 5181.4,
+          "upper_ns": 5210.8,
+          "std_ns": 13.6
         },
         {
-          "suite": "raw_section_benchmark",
-          "group": "raw_section_lexer_scan/payload_bytes",
-          "name": "4096",
-          "full_name": "raw_section_benchmark/raw_section_lexer_scan/payload_bytes/4096",
-          "lower_ns": 1475.5,
-          "mean_ns": 1476.1,
-          "upper_ns": 1476.6,
-          "std_ns": 0.27
+          "suite": "format_comparison_benchmark",
+          "group": "format/tokenize/mdix_tokenize",
+          "name": "medium",
+          "full_name": "format_comparison_benchmark/format/tokenize/mdix_tokenize/medium",
+          "lower_ns": 55992.0,
+          "mean_ns": 56184.0,
+          "upper_ns": 56403.0,
+          "std_ns": 102.75
         },
         {
-          "suite": "raw_section_benchmark",
-          "group": "raw_section_lexer_scan/payload_bytes",
-          "name": "65536",
-          "full_name": "raw_section_benchmark/raw_section_lexer_scan/payload_bytes/65536",
-          "lower_ns": 3813.6,
-          "mean_ns": 3830.1,
-          "upper_ns": 3861.5,
-          "std_ns": 11.98
+          "suite": "format_comparison_benchmark",
+          "group": "format/tokenize/mdix_tokenize",
+          "name": "large",
+          "full_name": "format_comparison_benchmark/format/tokenize/mdix_tokenize/large",
+          "lower_ns": 81622.0,
+          "mean_ns": 82292.0,
+          "upper_ns": 83202.0,
+          "std_ns": 395.0
         },
         {
-          "suite": "raw_section_benchmark",
-          "group": "raw_section_full_pipeline/blocks",
-          "name": "5",
-          "full_name": "raw_section_benchmark/raw_section_full_pipeline/blocks/5",
-          "lower_ns": 24325.0,
-          "mean_ns": 24364.0,
-          "upper_ns": 24394.0,
-          "std_ns": 17.25
+          "suite": "format_comparison_benchmark",
+          "group": "format/parse",
+          "name": "mdix_small_full_parse",
+          "full_name": "format_comparison_benchmark/format/parse/mdix_small_full_parse",
+          "lower_ns": 20829.0,
+          "mean_ns": 20947.0,
+          "upper_ns": 21144.0,
+          "std_ns": 78.75
         },
         {
-          "suite": "raw_section_benchmark",
-          "group": "raw_section_full_pipeline/blocks",
-          "name": "15",
-          "full_name": "raw_section_benchmark/raw_section_full_pipeline/blocks/15",
-          "lower_ns": 63453.0,
-          "mean_ns": 64519.0,
-          "upper_ns": 66948.0,
-          "std_ns": 873.75
+          "suite": "format_comparison_benchmark",
+          "group": "format/parse",
+          "name": "json_small_parse",
+          "full_name": "format_comparison_benchmark/format/parse/json_small_parse",
+          "lower_ns": 2306.3,
+          "mean_ns": 2325.7,
+          "upper_ns": 2353.8,
+          "std_ns": 11.88
         },
         {
-          "suite": "raw_section_benchmark",
-          "group": "raw_section_full_pipeline/blocks",
-          "name": "40",
-          "full_name": "raw_section_benchmark/raw_section_full_pipeline/blocks/40",
-          "lower_ns": 171270.0,
-          "mean_ns": 172070.0,
-          "upper_ns": 173000.0,
-          "std_ns": 432.5
+          "suite": "format_comparison_benchmark",
+          "group": "format/parse",
+          "name": "toml_small_parse",
+          "full_name": "format_comparison_benchmark/format/parse/toml_small_parse",
+          "lower_ns": 17335.0,
+          "mean_ns": 17399.0,
+          "upper_ns": 17469.0,
+          "std_ns": 33.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/parse",
+          "name": "mdix_medium_full_parse",
+          "full_name": "format_comparison_benchmark/format/parse/mdix_medium_full_parse",
+          "lower_ns": 239860.0,
+          "mean_ns": 241550.0,
+          "upper_ns": 243620.0,
+          "std_ns": 940.0
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/parse",
+          "name": "json_medium_parse",
+          "full_name": "format_comparison_benchmark/format/parse/json_medium_parse",
+          "lower_ns": 28893.0,
+          "mean_ns": 29041.0,
+          "upper_ns": 29187.0,
+          "std_ns": 73.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/parse",
+          "name": "toml_medium_parse",
+          "full_name": "format_comparison_benchmark/format/parse/toml_medium_parse",
+          "lower_ns": 266450.0,
+          "mean_ns": 268270.0,
+          "upper_ns": 270580.0,
+          "std_ns": 1032.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/parse",
+          "name": "mdix_large_full_parse",
+          "full_name": "format_comparison_benchmark/format/parse/mdix_large_full_parse",
+          "lower_ns": 343640.0,
+          "mean_ns": 345470.0,
+          "upper_ns": 347440.0,
+          "std_ns": 950.0
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/parse",
+          "name": "json_large_parse",
+          "full_name": "format_comparison_benchmark/format/parse/json_large_parse",
+          "lower_ns": 42947.0,
+          "mean_ns": 43195.0,
+          "upper_ns": 43495.0,
+          "std_ns": 137.0
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/full_pipeline/mdix_compile_from_source",
+          "name": "small",
+          "full_name": "format_comparison_benchmark/format/full_pipeline/mdix_compile_from_source/small",
+          "lower_ns": 58136.0,
+          "mean_ns": 58996.0,
+          "upper_ns": 59794.0,
+          "std_ns": 414.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/full_pipeline/mdix_parse_and_analyze",
+          "name": "small",
+          "full_name": "format_comparison_benchmark/format/full_pipeline/mdix_parse_and_analyze/small",
+          "lower_ns": 47557.0,
+          "mean_ns": 48296.0,
+          "upper_ns": 49091.0,
+          "std_ns": 383.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/full_pipeline/json_parse_expanded",
+          "name": "small",
+          "full_name": "format_comparison_benchmark/format/full_pipeline/json_parse_expanded/small",
+          "lower_ns": 2338.1,
+          "mean_ns": 2350.7,
+          "upper_ns": 2366.4,
+          "std_ns": 7.08
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/full_pipeline/mdix_compile_from_source",
+          "name": "medium",
+          "full_name": "format_comparison_benchmark/format/full_pipeline/mdix_compile_from_source/medium",
+          "lower_ns": 404490.0,
+          "mean_ns": 408190.0,
+          "upper_ns": 411880.0,
+          "std_ns": 1847.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/full_pipeline/mdix_parse_and_analyze",
+          "name": "medium",
+          "full_name": "format_comparison_benchmark/format/full_pipeline/mdix_parse_and_analyze/medium",
+          "lower_ns": 331910.0,
+          "mean_ns": 335130.0,
+          "upper_ns": 338800.0,
+          "std_ns": 1722.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/full_pipeline/json_parse_expanded",
+          "name": "medium",
+          "full_name": "format_comparison_benchmark/format/full_pipeline/json_parse_expanded/medium",
+          "lower_ns": 31185.0,
+          "mean_ns": 31500.0,
+          "upper_ns": 31835.0,
+          "std_ns": 162.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/full_pipeline/mdix_compile_from_source",
+          "name": "large",
+          "full_name": "format_comparison_benchmark/format/full_pipeline/mdix_compile_from_source/large",
+          "lower_ns": 619400.0,
+          "mean_ns": 626270.0,
+          "upper_ns": 633280.0,
+          "std_ns": 3470.0
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/full_pipeline/mdix_parse_and_analyze",
+          "name": "large",
+          "full_name": "format_comparison_benchmark/format/full_pipeline/mdix_parse_and_analyze/large",
+          "lower_ns": 521510.0,
+          "mean_ns": 526490.0,
+          "upper_ns": 532930.0,
+          "std_ns": 2855.0
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/full_pipeline/json_parse_expanded",
+          "name": "large",
+          "full_name": "format_comparison_benchmark/format/full_pipeline/json_parse_expanded/large",
+          "lower_ns": 47107.0,
+          "mean_ns": 47436.0,
+          "upper_ns": 47786.0,
+          "std_ns": 169.75
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage1_tokenize",
+          "name": "small",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage1_tokenize/small",
+          "lower_ns": 5914.3,
+          "mean_ns": 5942.2,
+          "upper_ns": 5984.7,
+          "std_ns": 17.6
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage2_tokenize_split",
+          "name": "small",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage2_tokenize_split/small",
+          "lower_ns": 11845.0,
+          "mean_ns": 11964.0,
+          "upper_ns": 12107.0,
+          "std_ns": 65.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage3_full_parse",
+          "name": "small",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage3_full_parse/small",
+          "lower_ns": 22989.0,
+          "mean_ns": 23096.0,
+          "upper_ns": 23229.0,
+          "std_ns": 60.0
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage4_parse_semantic",
+          "name": "small",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage4_parse_semantic/small",
+          "lower_ns": 52745.0,
+          "mean_ns": 53462.0,
+          "upper_ns": 54494.0,
+          "std_ns": 437.25
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage5_full_pipeline",
+          "name": "small",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage5_full_pipeline/small",
+          "lower_ns": 63059.0,
+          "mean_ns": 63787.0,
+          "upper_ns": 64402.0,
+          "std_ns": 335.75
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage1_tokenize",
+          "name": "medium",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage1_tokenize/medium",
+          "lower_ns": 62450.0,
+          "mean_ns": 62885.0,
+          "upper_ns": 63484.0,
+          "std_ns": 258.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage2_tokenize_split",
+          "name": "medium",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage2_tokenize_split/medium",
+          "lower_ns": 101790.0,
+          "mean_ns": 103020.0,
+          "upper_ns": 104470.0,
+          "std_ns": 670.0
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage3_full_parse",
+          "name": "medium",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage3_full_parse/medium",
+          "lower_ns": 262740.0,
+          "mean_ns": 264500.0,
+          "upper_ns": 266710.0,
+          "std_ns": 992.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage4_parse_semantic",
+          "name": "medium",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage4_parse_semantic/medium",
+          "lower_ns": 337580.0,
+          "mean_ns": 339850.0,
+          "upper_ns": 342760.0,
+          "std_ns": 1295.0
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage5_full_pipeline",
+          "name": "medium",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage5_full_pipeline/medium",
+          "lower_ns": 416600.0,
+          "mean_ns": 420390.0,
+          "upper_ns": 425110.0,
+          "std_ns": 2127.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage1_tokenize",
+          "name": "large",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage1_tokenize/large",
+          "lower_ns": 91941.0,
+          "mean_ns": 93028.0,
+          "upper_ns": 94331.0,
+          "std_ns": 597.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage2_tokenize_split",
+          "name": "large",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage2_tokenize_split/large",
+          "lower_ns": 145200.0,
+          "mean_ns": 146190.0,
+          "upper_ns": 147520.0,
+          "std_ns": 580.0
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage3_full_parse",
+          "name": "large",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage3_full_parse/large",
+          "lower_ns": 363860.0,
+          "mean_ns": 365580.0,
+          "upper_ns": 367120.0,
+          "std_ns": 815.0
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage4_parse_semantic",
+          "name": "large",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage4_parse_semantic/large",
+          "lower_ns": 505480.0,
+          "mean_ns": 511520.0,
+          "upper_ns": 519030.0,
+          "std_ns": 3387.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/pipeline_stages/stage5_full_pipeline",
+          "name": "large",
+          "full_name": "format_comparison_benchmark/format/pipeline_stages/stage5_full_pipeline/large",
+          "lower_ns": 633380.0,
+          "mean_ns": 640400.0,
+          "upper_ns": 648370.0,
+          "std_ns": 3747.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/hot_path_throughput/mdix_hot_tokenize",
+          "name": "small",
+          "full_name": "format_comparison_benchmark/format/hot_path_throughput/mdix_hot_tokenize/small",
+          "lower_ns": 5893.4,
+          "mean_ns": 5925.4,
+          "upper_ns": 5962.8,
+          "std_ns": 17.35
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/hot_path_throughput/json_hot_parse",
+          "name": "small",
+          "full_name": "format_comparison_benchmark/format/hot_path_throughput/json_hot_parse/small",
+          "lower_ns": 2351.7,
+          "mean_ns": 2363.2,
+          "upper_ns": 2379.7,
+          "std_ns": 7.0
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/hot_path_throughput/mdix_hot_tokenize",
+          "name": "medium",
+          "full_name": "format_comparison_benchmark/format/hot_path_throughput/mdix_hot_tokenize/medium",
+          "lower_ns": 63224.0,
+          "mean_ns": 63715.0,
+          "upper_ns": 64354.0,
+          "std_ns": 282.5
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/hot_path_throughput/json_hot_parse",
+          "name": "medium",
+          "full_name": "format_comparison_benchmark/format/hot_path_throughput/json_hot_parse/medium",
+          "lower_ns": 31715.0,
+          "mean_ns": 31941.0,
+          "upper_ns": 32210.0,
+          "std_ns": 123.75
+        },
+        {
+          "suite": "format_comparison_benchmark",
+          "group": "format/scaled/mdix_parse",
+          "name": "10",
+          "full_name": "format_comparison_benchmark/format/scaled/mdix_parse/10",
+          "lower_ns": 25730.0,
+          "mean_ns": 25976.0,
+          "upper_ns": 26314.0,
+          "std_ns": 146.0
         }
       ]
     }

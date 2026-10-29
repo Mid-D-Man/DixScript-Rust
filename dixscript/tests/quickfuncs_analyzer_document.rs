@@ -7,7 +7,7 @@
 //! `GeneralSemanticAnalyzer` can be given the arena form of a file with `with_document`, and the
 //! `@QUICKFUNCS` analyzer then reads the `Document` where it used to read the owned tree. It must
 //! report exactly what it reported before, record the same qualified identifier resolutions (the
-//! enhancer's input) and register the same functions. The tests check four things:
+//! enhancer's input) and register the same functions. The tests check five things:
 //!
 //! * the two paths give identical diagnostics, positions, resolutions and registered functions
 //!   for every source under all three error strategies;
@@ -16,7 +16,13 @@
 //! * the checks the parser prevents (invalid names, operators and types, object creation
 //!   statements, imported namespaces and enums, deep expressions) give the recorded output through
 //!   both entry points, `analyze` and `analyze_doc`, on sections built by hand (`HAND_RECORDING`);
-//! * the analyzer really reads the `Document` when it has one and the owned tree when it does not.
+//! * the analyzer really reads the `Document` when it has one and the owned tree when it does not;
+//! * the things the recording does not reach, found by putting deliberate bugs into the analyzer, the
+//!   call collector, the cycle detector and the orchestrator: the exact edge of each size limit and of
+//!   the expression depth budget, a call in every kind of construct reaching the call graph, a
+//!   variable used in every kind of construct not being reported as unused, the error manager's records
+//!   for undefined callees and cycles, the owned entry points of the call graph tools, and two
+//!   branches of the orchestrator (the last group of tests in this file).
 //!
 //! Two things in the analyzer's output depend on hash order and are normalized here, as they are
 //! in the harness that made the recording: the lists in "Valid values", "Available functions" and
@@ -2589,4 +2595,446 @@ fn resolutions_come_from_the_section_that_was_read() {
     assert!(!resolution_lines(&with_doc).is_empty());
     let (without, _) = analyze(&empty, &parsed.settings, None);
     assert!(resolution_lines(&without).is_empty());
+}
+
+// ==================== boundaries, constructs and phases the recording does not reach ====================
+//
+// The recording pins what the analyzer reported for the sources it holds. Deliberate bugs put
+// into the analyzer, the call collector, the cycle detector and the orchestrator showed what it
+// does not pin: the exact edge of each limit, the call graph and the unused variable check in
+// each kind of construct, the error manager's records for undefined callees, the owned entry
+// points of the call graph tools, and two branches of the orchestrator. The tests below pin them.
+//
+// Three groups of changes cannot be seen from outside and are left alone on purpose:
+// the `.min(500)` cap of the depth budget (a body is limited to 1000 statements, so the budget
+// never gets above 200), the statement nesting check against the depth budget (the nesting cap
+// of 50 always stops first, which is also why `QFUNC073` is unreachable), and the `is_success`
+// flag set after the cycle check (it is overwritten by the error count one line later).
+
+use dixscript::Compiler::Core::Functions::{CallGraph, CycleDetectionValidator, FunctionCallCollector};
+
+/// A `@QUICKFUNCS` section followed by a one line `@DATA` section.
+fn quick(body: &str) -> String {
+    format!("@QUICKFUNCS(\n{body}\n)\n@DATA(\n  x = 1\n)\n")
+}
+
+/// One `~name<int> => global(params)` function: `inner`, then `return 1`.
+fn quick_fn(name: &str, params: &str, inner: &str) -> String {
+    format!("  ~{name}<int> => global({params}) {{\n{inner}\n    return 1\n  }}")
+}
+
+/// A function the others can call.
+const CALLEE: &str = "  ~g<int> => global(n<int>) {\n    return n\n  }\n";
+
+/// The `@QUICKFUNCS` lines and the error manager's records (`line:column:message`, sorted) of one
+/// source under `continue`, read through the document.
+fn run_continue(source: &str) -> (Vec<String>, Vec<String>) {
+    let parsed = parse(source, ErrorHandlingStrategy::Continue).expect("parses");
+    let em = ErrorManager::new_isolated_silent();
+    let analyzer = GeneralSemanticAnalyzer::new_with_error_manager(&parsed.ast, &parsed.settings, em.clone());
+    let result = analyzer.with_document(&parsed.document).analyze();
+    let mut records: Vec<String> =
+        em.get_semantic_errors().iter().map(|e| format!("{}:{}:{}", e.line, e.column, e.message)).collect();
+    records.sort();
+    (section_lines(&result, "QUICKFUNCS"), records)
+}
+
+/// Error codes and warning messages of a hand-built section, through the owned entry point.
+fn hand_run(funcs: &[QuickFunction]) -> (Vec<String>, Vec<String>) {
+    let em = ErrorManager::new_isolated_silent();
+    let mut settings = OperationalSettings::default();
+    settings.error_handling_strategy = ErrorHandlingStrategy::Continue;
+    em.update_settings(settings.clone());
+    let section = QuickFuncsSection::new(funcs.to_vec(), qp(1, 1));
+    let mut table = hand_table();
+    let mut analyzer = QuickFuncsSectionAnalyzer::new_with_error_manager(&settings, em);
+    let r = analyzer.analyze(&section, &mut table);
+    (r.errors.iter().map(|e| e.error_id.clone()).collect(), r.warnings.iter().map(|w| w.message.clone()).collect())
+}
+
+fn hand_has(funcs: &[QuickFunction], code: &str) -> bool {
+    hand_run(funcs).0.iter().any(|c| c == code)
+}
+
+// ---- limits ----
+
+#[test]
+fn each_size_limit_accepts_its_maximum_and_refuses_one_more() {
+    let params = |n: usize| (0..n).map(|i| format!("p{i}<int>")).collect::<Vec<_>>().join(", ");
+    let body = |logs: usize| format!("  ~f<int> => global() {{\n{}    return 1\n  }}", "    log: \"x\"\n".repeat(logs));
+    let array = |n: usize| {
+        quick(&quick_fn("f", "", &format!("    let a = [{}]\n    log: a", (0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(", "))))
+    };
+    let object = |n: usize| {
+        quick(&quick_fn("f", "", &format!("    let a = {{{}}}\n    log: a", (0..n).map(|i| format!("k{i} = {i}")).collect::<Vec<_>>().join(", "))))
+    };
+    // A method chain of n calls has a depth of n - 2: the first call is a qualified identifier.
+    let chain = |n: usize| quick(&quick_fn("f", "", &format!("    let s = \"abc\"\n    let t = s{}\n    log: t", ".upper()".repeat(n))));
+    let tuple = |n: usize| {
+        quick(&quick_fn("f", "", &format!("    let t = t:({})\n    log: t", (0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(", "))))
+    };
+
+    // (code, source at the limit, source one past it)
+    let cases: Vec<(&str, String, String)> = vec![
+        ("QFUNC004", quick(&quick_fn("f", &params(100), "")), quick(&quick_fn("f", &params(101), ""))),
+        // The return statement counts as one of the 1000.
+        ("QFUNC012", quick(&body(999)), quick(&body(1000))),
+        ("QFUNC057", array(10_000), array(10_001)),
+        ("QFUNC058", object(1_000), object(1_001)),
+        ("QFUNC066", chain(12), chain(13)),
+        ("QFUNC059", tuple(6), tuple(7)),
+    ];
+    for (code, at_limit, past) in cases {
+        assert_eq!(count(&run_continue(&at_limit).0, code), 0, "{code} at the limit");
+        assert_eq!(count(&run_continue(&past).0, code), 1, "{code} one past the limit");
+    }
+}
+
+#[test]
+fn property_accesses_count_toward_the_method_chain_limit() {
+    // The parser never builds a property access in front of a method call, so the section is built
+    // by hand: `s.p.p. ... .upper()` with n property accesses and one call.
+    let call_on = |props: usize| {
+        let mut chain = eid("s");
+        for _ in 0..props {
+            chain = Expression::PropertyAccess { object: bx(chain), property: "p".to_string(), position: qp(12, 3) };
+        }
+        vec![good("f", vec![
+            sdecl("s", estr("abc")),
+            sexpr(Expression::InstanceMethodCall { instance: bx(chain), method_name: "upper".to_string(), arguments: vec![], position: qp(12, 4) }),
+            sret(eint(1)),
+        ])]
+    };
+    // The call itself is not counted, only what it is called on.
+    assert!(!hand_has(&call_on(10), "QFUNC066"), "ten links are allowed");
+    assert!(hand_has(&call_on(11), "QFUNC066"), "eleven links are refused");
+}
+
+/// The smallest nesting at which `QFUNC074` appears.
+fn first_failing_depth(build: impl Fn(usize) -> Vec<QuickFunction>) -> usize {
+    (1..=300).find(|&k| hand_has(&build(k), "QFUNC074")).expect("a nesting below 300 is refused")
+}
+
+#[test]
+fn the_expression_depth_budget_follows_the_length_of_the_body() {
+    // Declarations, returns and assignments use the budget of a 100 statement body: 100 + 100 / 10.
+    assert_eq!(first_failing_depth(|k| vec![good("f", vec![sdecl("a", deep_paren(k)), sret(eint(1))])]), 110);
+    assert_eq!(first_failing_depth(|k| vec![good("f", vec![sret(deep_paren(k))])]), 110);
+    // A log uses the budget of its own body: 100 + length / 10.
+    assert_eq!(first_failing_depth(|k| vec![good("f", vec![slog(deep_paren(k)), sret(eint(1))])]), 100);
+    let long_body = |k: usize| {
+        let mut body: Vec<QuickFuncStatement> = (0..198).map(|_| slog(eint(0))).collect();
+        body.push(slog(deep_paren(k)));
+        body.push(sret(eint(1)));
+        vec![good("f", body)]
+    };
+    assert_eq!(first_failing_depth(long_body), 120);
+}
+
+// ---- the call graph ----
+
+/// Undefined callees in each construct: the source line and the function it calls.
+const CALL_SITES: &[(&str, &str)] = &[
+    ("    let r = [z1()]", "z1"),
+    ("    let r = {k = z2()}", "z2"),
+    ("    let r = t:(z3(), 1)", "z3"),
+    ("    let r = $\"{z4()}\"", "z4"),
+    ("    let r = true ? 1 : z5()", "z5"),
+    ("    let r = true ? z5b() : 1", "z5b"),
+    ("    let r = z5c() ? 1 : 2", "z5c"),
+    ("    let xs = [1]\n    let r = xs[z6()]", "z6"),
+    ("    let r = z7().upper()", "z7"),
+    ("    let r = Math.abs(z8())", "z8"),
+    ("    let r = !z10()", "z10"),
+    ("    let r = foo.bar(z11())", "z11"),
+    ("    chk: z12() {\n      -> 1 { log: 0 }\n      -> miss { log: 0 }\n    }", "z12"),
+    ("    chk: 1 {\n      -> 1 { log: 0 }\n      -> miss { log: z13() }\n    }", "z13"),
+    ("    chk: 1 {\n      -> 1 { log: z14() }\n      -> miss { log: 0 }\n    }", "z14"),
+    ("    if: z15() == 1 { log: 0 }", "z15"),
+    ("    if: true { log: z16() }", "z16"),
+    ("    if: true { log: 0 } else { log: z17() }", "z17"),
+    ("    let mut s = 0\n    s += z18()", "z18"),
+    ("    let f = (n) => z19()", "z19"),
+    ("    let r = z20() as float", "z20"),
+    ("    let r = 1..z21()", "z21"),
+    ("    z22()", "z22"),
+    ("    log: z23()", "z23"),
+    ("    let r = z24()", "z24"),
+    ("    let r = (z25())", "z25"),
+    ("    let r = g(z26())", "z26"),
+];
+
+#[test]
+fn a_call_in_any_construct_is_a_call_in_the_graph() {
+    for (snippet, callee) in CALL_SITES {
+        let (_, records) = run_continue(&quick(&format!("{CALLEE}{}", quick_fn("a", "", snippet))));
+        let expected = format!("Function 'a' calls undefined function '{callee}'");
+        let hits: Vec<&String> = records.iter().filter(|r| r.ends_with(&expected)).collect();
+        assert_eq!(hits.len(), 1, "{snippet:?}: {records:?}");
+        // The call site's position is recorded with it.
+        let mut parts = hits[0].splitn(3, ':');
+        let line: i32 = parts.next().and_then(|p| p.parse().ok()).expect("a line");
+        let column: i32 = parts.next().and_then(|p| p.parse().ok()).expect("a column");
+        assert!(line > 0 && column > 0, "{snippet:?}: no position in {}", hits[0]);
+    }
+}
+
+#[test]
+fn a_local_name_called_like_a_function_is_not_a_call_in_the_graph() {
+    for (snippet, params, name) in [
+        ("    let f = (loc1) => loc1(1)", "", "loc1"),
+        ("    let loc2 = (n) => n\n    let r = loc2(1)", "", "loc2"),
+        ("    loc3 = (n) => n\n    let r = loc3(1)", "", "loc3"),
+        ("    let loc4 = (n) => n\n    let r = [loc4(1)]", "", "loc4"),
+        ("    let r = [(loc5) => loc5(1)]", "", "loc5"),
+        ("    let r = loc6(1)", "loc6<int>", "loc6"),
+    ] {
+        let (_, records) = run_continue(&quick(&format!("{CALLEE}{}", quick_fn("a", params, snippet))));
+        assert!(!records.iter().any(|r| r.contains(&format!("'{name}'"))), "{snippet:?}: {records:?}");
+    }
+}
+
+#[test]
+fn calls_to_defined_functions_are_not_reported_as_undefined() {
+    // `g` is the first function of the section and is called from the second.
+    let own = quick(&format!("{CALLEE}{}", quick_fn("a", "", "    let r = g(1)\n    let s = [g(2)]\n    log: r\n    log: s")));
+    for text in [own, source("qf_valid_basic"), source("qf_no_cycle"), source("qf_defaults_used")] {
+        let (_, records) = run_continue(&text);
+        assert!(!records.iter().any(|r| r.contains("undefined function")), "{records:?}");
+    }
+}
+
+#[test]
+fn a_reported_cycle_carries_the_position_of_a_call_in_it() {
+    let (_, records) = run_continue(&source("qf_cycles"));
+    let cycles: Vec<&String> = records.iter().filter(|r| r.contains("Circular function call detected")).collect();
+    assert_eq!(cycles.len(), 2, "one cycle between a and b, one function calling itself: {records:?}");
+    for record in cycles {
+        let line: i32 = record.split(':').next().and_then(|p| p.parse().ok()).expect("a line");
+        assert!(line > 0, "no position in {record}");
+    }
+}
+
+#[test]
+fn the_owned_entry_points_of_the_call_graph_tools_agree_with_the_arena_ones() {
+    let em = ErrorManager::new_isolated_silent();
+    let settings = OperationalSettings::default();
+    let validator = CycleDetectionValidator::new_with_error_manager(&settings, em);
+
+    let cyclic = parse(&quick("  ~a<int> => global() {\n    return b()\n  }\n  ~b<int> => global() {\n    return a()\n  }"), ErrorHandlingStrategy::Continue).expect("parses");
+    let owned = cyclic.ast.quick_functions.as_ref().expect("section");
+    let arena_section = cyclic.document.quick_functions.as_ref().expect("section");
+    assert!(!validator.validate_function_calls(owned));
+    assert!(!validator.validate_function_calls_doc(arena_section, &cyclic.document.arena));
+    assert_eq!(validator.get_execution_order(owned), None);
+    assert_eq!(validator.get_execution_order_doc(arena_section, &cyclic.document.arena), None);
+
+    let chain = parse(&quick("  ~a<int> => global() {\n    return b()\n  }\n  ~b<int> => global() {\n    return c()\n  }\n  ~c<int> => global() {\n    return 1\n  }"), ErrorHandlingStrategy::Continue).expect("parses");
+    let owned = chain.ast.quick_functions.as_ref().expect("section");
+    let arena_section = chain.document.quick_functions.as_ref().expect("section");
+    assert!(validator.validate_function_calls(owned));
+    assert!(validator.validate_function_calls_doc(arena_section, &chain.document.arena));
+    let order = validator.get_execution_order(owned).expect("an order");
+    assert_eq!(order.len(), 3);
+    assert_eq!(Some(order.clone()), validator.get_execution_order_doc(arena_section, &chain.document.arena));
+    // Callers come before the functions they call.
+    assert_eq!(order, vec!["a", "b", "c"]);
+}
+
+#[test]
+fn the_call_collector_reads_an_owned_function_like_an_arena_one() {
+    let chain = parse(&quick("  ~a<int> => global() {\n    return b()\n  }\n  ~b<int> => global() {\n    return c()\n  }\n  ~c<int> => global() {\n    return 1\n  }"), ErrorHandlingStrategy::Continue).expect("parses");
+    let owned = chain.ast.quick_functions.as_ref().expect("section");
+    let mut graph = CallGraph::new();
+    {
+        let mut collector = FunctionCallCollector::new(&mut graph);
+        for function in &owned.functions {
+            collector.analyze_function(function);
+        }
+    }
+    assert_eq!(graph.get_callees("a"), vec!["b"]);
+    assert_eq!(graph.get_callees("b"), vec!["c"]);
+    assert!(graph.get_callees("c").is_empty());
+}
+
+fn evalue(value: Value) -> Expression {
+    Expression::Value { value, position: qp(9, 2) }
+}
+
+fn call_value(name: &str) -> Value {
+    Value::QuickFuncCall { function_name: name.to_string(), arguments: vec![], position: qp(9, 1) }
+}
+
+fn ecall(name: &str) -> Expression {
+    Expression::QuickFuncCall { name: name.to_string(), arguments: vec![], position: qp(9, 3) }
+}
+
+#[test]
+fn calls_the_parser_cannot_write_reach_the_call_graph() {
+    // Hand-built statements: an object creation (its value holds a call, its variable is a local
+    // name), a call written as a value (defined, then local), and calls inside a cast, a static
+    // method call, a built-in function target and the end of a range.
+    let funcs = vec![good("a", vec![
+        QuickFuncStatement::ObjectCreation {
+            variable: "loc7".to_string(),
+            object: Value::Object {
+                properties: vec![ObjectProperty { key: "k".to_string(), value: call_value("z27"), position: qp(9, 4) }],
+                position: qp(9, 0),
+            },
+            position: qp(9, 5),
+        },
+        sexpr(ecall("loc7")),
+        sdecl("loc8", estr("x")),
+        sexpr(evalue(call_value("loc8"))),
+        sexpr(evalue(call_value("z28"))),
+        sdecl("r", Expression::TypeCast { expression: bx(ecall("z29")), target_type: DataType::Float, position: qp(9, 6) }),
+        sdecl("m", Expression::StaticMethodCall { object_name: "Math".to_string(), method_name: "abs".to_string(), arguments: vec![ecall("z30")], position: qp(9, 7) }),
+        sdecl("b", Expression::BuiltinFunction { target: bx(ecall("z31")), method: "len".to_string(), arguments: None, position: qp(9, 8) }),
+        sexpr(evalue(Value::Range { start: Box::new(Value::Integer { value: 1, position: qp(9, 9) }), end: Box::new(call_value("z32")), position: qp(9, 10) })),
+        sret(eint(1)),
+    ])];
+    let settings = OperationalSettings::default();
+    let section = QuickFuncsSection::new(funcs, qp(1, 1));
+    let mut arena = Arena::new();
+    let doc = DocQuickFuncs::from_owned(&mut arena, &section);
+    for through_arena in [false, true] {
+        let em = ErrorManager::new_isolated_silent();
+        let validator = CycleDetectionValidator::new_with_error_manager(&settings, em.clone());
+        let ok = if through_arena { validator.validate_function_calls_doc(&doc, &arena) } else { validator.validate_function_calls(&section) };
+        assert!(!ok);
+        let mut undefined: Vec<String> = em
+            .get_semantic_errors()
+            .iter()
+            .filter_map(|e| e.message.strip_prefix("Function 'a' calls undefined function '").map(|m| m.trim_end_matches('\'').to_string()))
+            .collect();
+        undefined.sort();
+        assert_eq!(undefined, vec!["z27", "z28", "z29", "z30", "z31", "z32"], "through the arena: {through_arena}");
+    }
+}
+
+// ---- the unused variable check ----
+
+/// Source lines that use the variable `v` and nothing else uses it.
+const USES_OF_V: &[&str] = &[
+    "    let mut s = 0\n    s += v",
+    "    let mut s = 0\n    s = v",
+    "    let a = [v]",
+    "    let o = {k = v}",
+    "    let a = g(v)",
+    "    g(v)",
+    "    chk: 1 {\n      -> 1 { log: v }\n      -> miss { log: 0 }\n    }",
+    "    chk: 1 {\n      -> 1 { log: 0 }\n      -> miss { log: v }\n    }",
+    "    chk: v {\n      -> 1 { log: 0 }\n      -> miss { log: 0 }\n    }",
+    "    let a = true ? v : 0",
+    "    let a = true ? 0 : v",
+    "    let a = (v == 1) ? 2 : 3",
+    "    let a = t:(v, 1)",
+    "    if: v == 1 { log: 0 }",
+    "    if: true { log: v }",
+    "    if: true { log: 0 } else { log: v }",
+    "    let xs = [1, 2]\n    let a = xs[v]",
+    "    let a = \"abc\".foo(v)",
+    "    let a = (v).upper()",
+    "    let a = $\"x {v}\"",
+    "    let f = (n) => n + v",
+    "    let a = (v)",
+    "    let a = (v).length",
+    "    let a = foo.bar(v)",
+    "    let a = v.length",
+    "    let a = !v",
+    "    let a = v + 1",
+    "    let a = v == 1",
+    "    let f = (n) => n\n    let a = f(v)",
+    "    let a = Math.abs(v)",
+    "    let a = v",
+    "    log: v",
+];
+
+#[test]
+fn a_variable_used_in_any_construct_is_not_reported_as_unused() {
+    for use_of_v in USES_OF_V {
+        let (lines, _) = run_continue(&quick(&format!("{CALLEE}{}", quick_fn("f", "", &format!("    let v = 1\n{use_of_v}")))));
+        assert!(!lines.iter().any(|l| l.contains("Variable 'v' declared")), "{use_of_v:?}: {lines:?}");
+    }
+    // The same source without a use of `v` is reported, so the check does run on these functions.
+    let (lines, _) = run_continue(&quick(&format!("{CALLEE}{}", quick_fn("f", "", "    let v = 1\n    let a = 5"))));
+    assert_eq!(lines.iter().filter(|l| l.contains("Variable 'v' declared")).count(), 1, "{lines:?}");
+}
+
+#[test]
+fn a_variable_used_only_in_a_node_the_parser_cannot_write_is_not_reported_as_unused() {
+    let unused = |uses: Vec<QuickFuncStatement>| {
+        let mut body = vec![sdecl("v", eint(1))];
+        body.extend(uses);
+        body.push(sret(eint(1)));
+        hand_run(&[good("f", body)]).1.iter().any(|w| w.contains("Variable 'v' declared"))
+    };
+    assert!(unused(vec![]), "control: a variable nobody uses is reported");
+    assert!(!unused(vec![sdecl("r", Expression::TypeCast { expression: bx(eid("v")), target_type: DataType::Float, position: qp(9, 6) })]));
+    assert!(!unused(vec![QuickFuncStatement::ObjectCreation {
+        variable: "o".to_string(),
+        object: Value::Object { properties: vec![ObjectProperty { key: "k".to_string(), value: Value::Identifier { value: "v".to_string(), position: qp(9, 1) }, position: qp(9, 2) }], position: qp(9, 0) },
+        position: qp(9, 3),
+    }]));
+    assert!(!unused(vec![sexpr(evalue(Value::Expression { expr: Box::new(eid("v")), position: qp(9, 1) }))]));
+}
+
+// ---- parameters, scopes and duplicates ----
+
+#[test]
+fn typed_collection_parameters_give_their_element_type_to_first() {
+    // `xs.first()` is a string, so returning it from a function declared `<int>` is refused, a
+    // method a string does not have is refused, and adding an integer to it is refused.
+    for params in ["xs<array<string>>", "xs<tuple<string,int>>"] {
+        let (lines, _) = run_continue(&quick(&format!("  ~f<int> => global({params}) {{\n    let a = xs.first()\n    return a\n  }}")));
+        assert_eq!(count(&lines, "QFUNC015"), 1, "{params}: {lines:?}");
+        let (lines, _) = run_continue(&quick(&format!("  ~f<int> => global({params}) {{\n    log: xs.first().nomethod()\n    return 1\n  }}")));
+        assert_eq!(count(&lines, "QFUNC047"), 1, "{params}: {lines:?}");
+        let (lines, _) = run_continue(&quick(&format!("  ~f<int> => global({params}) {{\n    let c = xs.first() + 1\n    log: c\n    return 1\n  }}")));
+        assert_eq!(count(&lines, "QFUNC026"), 1, "{params}: {lines:?}");
+    }
+}
+
+#[test]
+fn a_parameter_cannot_be_assigned() {
+    let (lines, _) = run_continue(&quick("  ~f<int> => global(a<int>) {\n    a = 2\n    return a\n  }"));
+    assert_eq!(count(&lines, "QFUNC018"), 1, "{lines:?}");
+}
+
+#[test]
+fn the_parameters_of_one_function_are_not_in_scope_in_the_next() {
+    let (lines, _) = run_continue(&quick("  ~f1<int> => global(p<int>) {\n    return p\n  }\n  ~f2<int> => global() {\n    log: p\n    return 1\n  }"));
+    assert!(lines.iter().any(|l| l.contains("Identifier 'p' not found") && l.contains("'f2'")), "{lines:?}");
+    assert!(!lines.iter().any(|l| l.contains("'f1'")), "{lines:?}");
+}
+
+#[test]
+fn a_function_defined_twice_is_reported_and_neither_body_is_checked() {
+    let (lines, _) = run_continue(&quick("  ~f<int> => global() {\n    return 1\n  }\n  ~f<int> => global() {\n    return \"s\"\n  }"));
+    assert_eq!(count(&lines, "QFUNC001"), 1, "{lines:?}");
+    assert_eq!(count(&lines, "QFUNC015"), 0, "{lines:?}");
+}
+
+// ---- the orchestrator ----
+
+#[test]
+fn an_error_in_quickfuncs_stops_the_later_phases_only_under_halt() {
+    let text = "@QUICKFUNCS(\n  ~f<int> => global() {\n    return \"s\"\n  }\n)\n@DATA(\n  a<int> = \"s\"\n)\n";
+    for (strategy_name, data_error_expected) in [("halt", false), ("continue", true)] {
+        let parsed = parse(text, strategy(strategy_name)).expect("parses");
+        let (result, _) = analyze(&parsed.ast, &parsed.settings, Some(&parsed.document));
+        assert!(result.errors.iter().any(|e| e.error_id == "QFUNC015"), "{strategy_name}");
+        assert_eq!(result.errors.iter().any(|e| e.section_name == "DATA"), data_error_expected, "{strategy_name}");
+    }
+}
+
+#[test]
+fn quickfuncs_are_refused_when_their_feature_is_not_enabled() {
+    let mut parsed = parse(&source("qf_valid_basic"), ErrorHandlingStrategy::Continue).expect("parses");
+    parsed.settings.enabled_features = vec!["data".to_string()];
+    for document in [Some(&parsed.document), None] {
+        let (result, _) = analyze(&parsed.ast, &parsed.settings, document);
+        assert!(result.errors.iter().any(|e| e.error_id == "SEM_FEATURE"), "{:?}", result.errors);
+        assert!(!result.section_results.contains_key("QUICKFUNCS"));
+    }
 }

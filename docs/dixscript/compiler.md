@@ -741,8 +741,17 @@ functions of the `@QUICKFUNCS` analyzer, and checks that it gives the same ones 
   recording, so the test is not flaky. It passed eight runs in a row.
 - Two tests build a document and an owned tree that disagree on purpose, and others show that the
   resolutions and the registered functions come from the section that was read.
+- **Eighteen tests were added after the bug injection** (see the last Fixes entry), because the first
+  13 left most injected bugs unnoticed. They pin the edge of each size limit (the largest accepted
+  size and one more), the expression depth budget (the smallest nesting that is refused, 110 for a
+  declaration or return, 100 for a log in a short body, 120 in a body of 200 statements), a call in each
+  of 27 kinds of construct reaching the call graph, local names that must not become calls, a
+  variable used in each of 32 kinds of construct not being reported as unused, the error manager's
+  records for undefined callees and cycles with their positions, the owned entry points of
+  `CycleDetectionValidator` and `FunctionCallCollector`, a hand-built section for the calls the parser
+  cannot write, and the halt and feature branches of the orchestrator.
 
-**Tests:** `cargo test -p dixscript --test quickfuncs_analyzer_document`. 13 tests, all passing on Rust 1.75.
+**Tests:** `cargo test -p dixscript --test quickfuncs_analyzer_document`. 31 tests, all passing on Rust 1.75.
 
 ### `tests/security_analyzer_document.rs`
 
@@ -1423,7 +1432,39 @@ requires the larger to take less than 7 times as long.
 - **Coverage:** 79 of 83 codes are reached. Three cannot be (see the analyzer section). The first set of
   sources reached 49, and the rest came from sources written to the code's conditions and from
   hand-built input for the checks the parser prevents.
-- **Not done in this drop:** deliberate bugs were not injected to check the new tests, so their
-  sensitivity is unproven, unlike the other analyzers. The enhancer (`quickfuncs_ast_enhancer.rs`,
+- **The sensitivity of the tests was checked afterwards, and the first 13 tests were not sensitive
+  enough.** 122 bugs were injected behind an environment variable into `quickfuncs_section_analyzer.rs`,
+  `call_collector.rs`, `cycle_detector.rs` and `general_semantics_analyzer.rs` (one build, each bug run
+  alone, a control run that passed, the mutated files confirmed to differ from the clean ones and
+  restored and compared byte for byte afterwards). They moved each limit by one in both directions,
+  changed the depth budget, skipped each kind of node in the call collector and in the unused variable
+  collector, dropped each local scope rule, emptied each owned wrapper, ignored the document in the
+  orchestrator and forced two of its branches. 85 of the 122 survived the first 13 tests. A second
+  sweep suppressed each of the 83 codes one at a time: 80 were noticed and the three that were not
+  are the three that cannot be reached.
+- **The 85 survivors showed what the recording did not pin:** only the first size past each limit
+  was tested, never the largest accepted size; the call graph's undefined callee records (written to
+  the error manager, not to the result) were compared only for cycles; no source used a variable
+  only inside a ternary, a switch, an index or a lambda; the owned wrappers of the call graph tools
+  were never called; and the expression depth budget was tested at 100 and 130 levels, which are
+  both far from its edge. Eighteen tests close these. With them, 114 of the 122 bugs are noticed.
+- **The eight that remain cannot change an output, or no input was found that does.** The `.min(500)`
+  cap of the depth budget (a body is limited to 1000 statements, so the budget stays at 200 or below),
+  the statement nesting check against the depth budget (the cap of 50 stops first) and the
+  `is_success` flag set after the cycle check (overwritten by the error count one line later) are
+  equivalent, five bugs in all. Treating a parameter name as a reference in the unused variable
+  collector is equivalent, because a variable with a parameter's name is refused with `QFUNC069`
+  before it is registered. Leaving the element type of a typed array or tuple parameter out of the
+  scope tracker changes nothing that was found: the type inference visitor finds the element type
+  from the parameter's own type when no hint is given. This last one is not proven equivalent.
+- **Found while writing the tests, not changed:** the method chain depth counts the calls and
+  property accesses below the last call, so a chain of 12 calls has a depth of 10 and 13 is the first
+  to be refused; `QFUNC074` cannot be reached from text because a parenthesized expression is
+  parsed to its content, so the depth tests use hand-built sections; and a cycle sets the flag in
+  the result for a moment but is reported only to the error manager, so a source with only a cycle
+  gives a successful analysis result.
+- **Not done in this drop:** the new tests were written against the code as it is now, with each
+  assertion checked on the clean build and on the mutated one; they were not run through the
+  original code from before the move. The enhancer (`quickfuncs_ast_enhancer.rs`,
   `qualified_identifier_resolver.rs`, `general_ast_enhancer.rs`) still reads and rewrites the owned
   tree, and the owned `TypeInferenceVisitor` has not become a wrapper yet.

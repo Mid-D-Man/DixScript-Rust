@@ -27,8 +27,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - MDIX Studio Explorer: dates (`2026-01-15`), timestamps (`2025-01-15T10:30:00.250+05:30`), regex
   values (`r:("...")`) and `raw` backtick strings can be edited the same way. A timestamp keeps its
   zone and fraction digits, a date or timestamp is refused unless it is a real one, a regex is
-  typed as the pattern and escaped for you, and a raw string cannot hold a backtick. Blobs
-  (`b:("...")`) stay read-only for now. (`Editor/Popups/MdixTemporalText.cs`.)
+  typed as the pattern and escaped for you, and a raw string cannot hold a backtick.
+  (`Editor/Popups/MdixTemporalText.cs`.)
 - MDIX Studio Explorer: popup editors. Click a date or timestamp to pick it from a month grid (with
   time boxes and a None / UTC / Offset zone for a timestamp, a text box for the whole value, and a
   Today / Now button). Click a raw string, or text longer than 100 characters or with line breaks,
@@ -43,6 +43,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   still compiles the edit with the real engine first. The last test text is kept for the next
   regex popup. (`Editor/Popups/MdixRegexEditor.cs`, `Editor/Popups/MdixRegexTest.cs`,
   `MdixLspClient.RequestTestRegexAsync`.)
+- MDIX Studio Explorer: click a blob (`b:("...")`) to see what it is and work with it. A PNG or JPEG
+  is shown as an image, a WAV or Ogg Vorbis can be played (Unity's own decoder and editor preview
+  player, through a temporary file outside the project that is deleted again), text is shown as
+  text, and anything else shows its first bytes as a hex dump. **Replace from file** and **Clear**
+  stage a change that **Apply** writes (a file over 1 MB is refused, since it goes into the text as
+  base64), **Save as** writes the data to a file, and **Open** opens a temporary copy in the default
+  app. Needs the built-in modules `unitywebrequestaudio` and `imageconversion` (both on by default).
+  (`Editor/Popups/MdixBlobEditor.cs`, `MdixAudioPreview.cs`, `MdixBlobTemp.cs`.)
 - MDIX Studio Explorer: blob and regex values show `blob  4.2 KB  PNG` and `r:(pattern)` instead
   of `?`. The type is read from the first bytes only, so a large blob costs nothing to show.
   (`Editor/Popups/MdixBlobInfo.cs`.)

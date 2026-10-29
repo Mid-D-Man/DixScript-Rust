@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Text;
 
 namespace MidManStudio.Mdix.Unity.Editor
 {
@@ -17,6 +18,22 @@ namespace MidManStudio.Mdix.Unity.Editor
     {
         /// <summary>How many leading bytes are enough to tell the type.</summary>
         public const int SniffBytes = 512;
+
+        /// <summary>A blob bigger than this is not decoded for a preview (the data is still there to save).</summary>
+        public const int MaxPreviewBytes = 8 * 1024 * 1024;
+
+        /// <summary>
+        /// The biggest file that can be put into a blob. It is written into the .mdix text as base64 (a third larger),
+        /// and the editor tab shows that text, so a big file would make the text unwieldy.
+        /// </summary>
+        public const int MaxReplaceBytes = 1024 * 1024;
+
+        /// <summary>How much of a blob is read for a text preview, and how many characters of it are shown.</summary>
+        public const int TextPreviewBytes = 8192;
+        public const int TextPreviewChars = 4000;
+
+        /// <summary>How many bytes a hex dump shows.</summary>
+        public const int HexDumpBytes = 256;
 
         private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
@@ -120,6 +137,179 @@ namespace MidManStudio.Mdix.Unity.Editor
                 case MdixBlobKind.Text: return "text";
                 default:                return "binary";
             }
+        }
+
+        // ── What a type means ─────────────────────────────────────────────────
+
+        /// <summary>For example "PNG image".</summary>
+        public static string LongLabel(MdixBlobKind kind)
+        {
+            switch (kind)
+            {
+                case MdixBlobKind.Png:  return "PNG image";
+                case MdixBlobKind.Jpeg: return "JPEG image";
+                case MdixBlobKind.Gif:  return "GIF image";
+                case MdixBlobKind.Bmp:  return "BMP image";
+                case MdixBlobKind.Webp: return "WebP image";
+                case MdixBlobKind.Wav:  return "WAV audio";
+                case MdixBlobKind.Flac: return "FLAC audio";
+                case MdixBlobKind.Ogg:  return "Ogg audio";
+                case MdixBlobKind.Mp3:  return "MP3 audio";
+                case MdixBlobKind.WebM: return "WebM video";
+                case MdixBlobKind.Mp4:  return "MP4 video";
+                case MdixBlobKind.M4a:  return "M4A audio";
+                case MdixBlobKind.Pdf:  return "PDF document";
+                case MdixBlobKind.Text: return "Text";
+                default:                return "Binary data";
+            }
+        }
+
+        /// <summary>The file extension for a type, with the dot (".bin" when unknown).</summary>
+        public static string Extension(MdixBlobKind kind)
+        {
+            switch (kind)
+            {
+                case MdixBlobKind.Png:  return ".png";
+                case MdixBlobKind.Jpeg: return ".jpg";
+                case MdixBlobKind.Gif:  return ".gif";
+                case MdixBlobKind.Bmp:  return ".bmp";
+                case MdixBlobKind.Webp: return ".webp";
+                case MdixBlobKind.Wav:  return ".wav";
+                case MdixBlobKind.Flac: return ".flac";
+                case MdixBlobKind.Ogg:  return ".ogg";
+                case MdixBlobKind.Mp3:  return ".mp3";
+                case MdixBlobKind.WebM: return ".webm";
+                case MdixBlobKind.Mp4:  return ".mp4";
+                case MdixBlobKind.M4a:  return ".m4a";
+                case MdixBlobKind.Pdf:  return ".pdf";
+                case MdixBlobKind.Text: return ".txt";
+                default:                return ".bin";
+            }
+        }
+
+        /// <summary>Unity 2022.3 reads only PNG and JPEG into a texture (Texture2D.LoadImage).</summary>
+        public static bool CanPreviewImage(MdixBlobKind kind) { return kind == MdixBlobKind.Png || kind == MdixBlobKind.Jpeg; }
+
+        /// <summary>Unity's own decoders cover WAV and Ogg Vorbis for the editor's preview player.</summary>
+        public static bool CanPlay(MdixBlobKind kind) { return kind == MdixBlobKind.Wav || kind == MdixBlobKind.Ogg; }
+
+        /// <summary>The whole data, or false when the base64 is not valid.</summary>
+        public static bool TryDecode(string base64, out byte[] bytes)
+        {
+            try
+            {
+                bytes = Convert.FromBase64String(base64 ?? string.Empty);
+                return true;
+            }
+            catch (FormatException)
+            {
+                bytes = null;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// A file name for "Save as": the last part of the value's path, made safe, plus the type's extension.
+        /// <c>items[2].icon</c> gives <c>icon.png</c> for a PNG; nothing usable gives <c>blob</c>.
+        /// </summary>
+        public static string SuggestedFileName(string path, MdixBlobKind kind)
+        {
+            var name = path ?? string.Empty;
+
+            while (name.EndsWith("]", StringComparison.Ordinal))      // drop trailing [n]
+            {
+                var open = name.LastIndexOf('[');
+                if (open < 0) break;
+                name = name.Substring(0, open);
+            }
+
+            var dot = name.LastIndexOf('.');
+            if (dot >= 0) name = name.Substring(dot + 1);
+
+            var sb = new StringBuilder(name.Length);
+            foreach (var c in name)
+                sb.Append((char.IsLetterOrDigit(c) && c < 128) || c == '-' || c == '_' ? c : '_');
+
+            var safe = sb.ToString().Trim('_');
+            if (safe.Length == 0) safe = "blob";
+            return safe + Extension(kind);
+        }
+
+        /// <summary>The size an image is shown at: scaled down to fit the box, never up, keeping its shape.</summary>
+        public static void FitSize(int width, int height, int maxWidth, int maxHeight, out int fitWidth, out int fitHeight)
+        {
+            if (width <= 0 || height <= 0)
+            {
+                fitWidth = maxWidth; fitHeight = maxHeight;
+                return;
+            }
+
+            var scale = Math.Min(1.0, Math.Min((double)maxWidth / width, (double)maxHeight / height));
+            fitWidth  = Math.Max(1, (int)Math.Round(width * scale));
+            fitHeight = Math.Max(1, (int)Math.Round(height * scale));
+        }
+
+        // ── Previews ──────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// A hex dump of the first bytes, 16 to a line: offset, hex in two groups of eight, and the printable
+        /// characters. <paramref name="totalLength"/> is the whole blob's size, for the "more bytes" line.
+        /// </summary>
+        public static string HexDump(byte[] head, long totalLength)
+        {
+            if (head == null || head.Length == 0) return string.Empty;
+
+            var shown = Math.Min(head.Length, HexDumpBytes);
+            var sb    = new StringBuilder(shown * 4 + 64);
+
+            for (int line = 0; line < shown; line += 16)
+            {
+                sb.Append(line.ToString("X8", Inv)).Append("  ");
+
+                for (int i = 0; i < 16; i++)
+                {
+                    if (line + i < shown) sb.Append(head[line + i].ToString("X2", Inv));
+                    else                  sb.Append("  ");
+                    sb.Append(' ');
+                    if (i == 7) sb.Append(' ');
+                }
+
+                sb.Append(" |");
+                for (int i = 0; i < 16 && line + i < shown; i++)
+                {
+                    var b = head[line + i];
+                    sb.Append(b >= 0x20 && b <= 0x7E ? (char)b : '.');
+                }
+                sb.Append('|').Append('\n');
+            }
+
+            if (totalLength > shown) sb.Append("… ").Append((totalLength - shown).ToString(Inv)).Append(" more bytes");
+            return sb.ToString().TrimEnd('\n');
+        }
+
+        /// <summary>
+        /// The start of a text blob as text: UTF-8, line endings as \n, other control characters shown as a dot, cut after
+        /// <see cref="TextPreviewChars"/> characters. <paramref name="truncated"/> says when there is more than is shown.
+        /// </summary>
+        public static string TextPreview(byte[] head, long totalLength, out bool truncated)
+        {
+            truncated = false;
+            if (head == null || head.Length == 0) return string.Empty;
+
+            var used = Math.Min(head.Length, TextPreviewBytes);
+            var text = Encoding.UTF8.GetString(head, 0, used).Replace("\r\n", "\n").Replace('\r', '\n');
+
+            if (text.Length > TextPreviewChars)
+            {
+                text = text.Substring(0, TextPreviewChars);
+                truncated = true;
+            }
+            if (totalLength > used) truncated = true;
+
+            var sb = new StringBuilder(text.Length);
+            foreach (var c in text)
+                sb.Append(c < 0x20 && c != '\n' && c != '\t' ? '.' : c);
+            return sb.ToString();
         }
 
         // ── Text for the Explorer ─────────────────────────────────────────────

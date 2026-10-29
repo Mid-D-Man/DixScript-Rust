@@ -7,7 +7,8 @@ namespace MidManStudio.Mdix.Unity.Editor
 {
     /// <summary>
     /// Popup editors for Explorer values that a one-line field does not suit: dates and timestamps (a month
-    /// grid and time boxes), regexes (live matching) and long or raw text (a text area).
+    /// grid and time boxes), regexes (live matching), blobs (preview, playback, replace) and long or raw text
+    /// (a text area).
     ///
     /// A popup changes the value through the same path as the inline field, <see cref="ApplyExplorerEdit"/>:
     /// the new literal is compiled first and refused unless the value reads back as entered. A refusal is
@@ -31,6 +32,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 case MdixLiteralKind.Date:
                 case MdixLiteralKind.Timestamp:
                 case MdixLiteralKind.Regex:
+                case MdixLiteralKind.Blob:
                 case MdixLiteralKind.RawString:
                     return true;
 
@@ -61,6 +63,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             Action onClosed = null;
             string title;
             var enterApplies = true;
+            var startDisabled = false;
 
             if (kind == MdixLiteralKind.Date || kind == MdixLiteralKind.Timestamp)
             {
@@ -101,6 +104,23 @@ namespace MidManStudio.Mdix.Unity.Editor
                     return ApplyExplorerEdit(path, editor.Pattern, oldLiteral, () => popup.Close());
                 };
             }
+            else if (kind == MdixLiteralKind.Blob)
+            {
+                var editor = new MdixBlobEditor(path, initial);
+
+                // Replace and Clear only change what the popup holds; Apply writes it, so it starts disabled.
+                editor.Changed += () =>
+                {
+                    if (popup != null) popup.SetApplyEnabled(editor.IsChanged);
+                };
+
+                title         = "Edit blob";
+                body          = editor.Root;
+                focus         = null;
+                onClosed      = editor.Close;               // stops playback and frees the preview
+                startDisabled = true;
+                apply         = () => ApplyExplorerEdit(path, editor.Base64, oldLiteral, () => popup.Close());
+            }
             else
             {
                 var area = BuildTextArea(kind, initial, out var hint);
@@ -113,6 +133,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             }
 
             popup = MdixPopup.Open(rootVisualElement, title, path, body, apply, "Apply", focus, enterApplies, onClosed);
+            if (startDisabled) popup.SetApplyEnabled(false);
             _valuePopup = popup;
         }
 

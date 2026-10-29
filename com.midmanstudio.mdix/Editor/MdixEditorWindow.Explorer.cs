@@ -26,8 +26,8 @@ namespace MidManStudio.Mdix.Unity.Editor
     /// here. Enter edits the text in the Editor tab and compiles it, Esc or clicking away cancels. The new text
     /// is compiled first and refused unless the value reads back exactly as entered and the data keeps the same
     /// paths; values computed from the edited one are allowed to change, and the status bar says which. Values
-    /// produced by function calls, enum members, expressions and tuples are not literals and stay read-only, as
-    /// do blobs (long base64). Dates, timestamps, raw strings and long or multi-line text open a popup instead
+    /// produced by function calls, enum members, expressions and tuples are not literals and stay read-only.
+    /// Dates, timestamps, regexes, blobs, raw strings and long or multi-line text open a popup instead
     /// of the one-line field (see MdixEditorWindow.Popups.cs); both go through <see cref="ApplyExplorerEdit"/>.
     /// Nothing is written to disk until Save.
     /// </summary>
@@ -419,9 +419,6 @@ namespace MidManStudio.Mdix.Unity.Editor
             MdixValueSpan span;
             if (_valueSpans == null || !_valueSpans.TryGetValue(path, out span)) return;
 
-            // A blob is a long base64 text: no one-line field suits it, and its viewer is not built yet.
-            if (span.Kind == MdixLiteralKind.Blob) return;
-
             // The span comes from a quick reading of the text; it only counts when the compiled value agrees.
             if (!MdixSourceMap.Matches(db, path, span, _sourceText)) return;
 
@@ -431,7 +428,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             var popup      = UsesValuePopup(kind, initial);
 
             label.tooltip = popup
-                ? "Click to edit."
+                ? (kind == MdixLiteralKind.Blob ? "Click to view, play or replace." : "Click to edit.")
                 : "Click to edit. Enter applies the change to the text, Esc cancels.";
             label.AddToClassList("mdix-kv__value--editable");
 

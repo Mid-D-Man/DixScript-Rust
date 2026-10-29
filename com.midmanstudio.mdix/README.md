@@ -419,7 +419,7 @@ choose **MDIX → Open in MDIX Studio**.
   capped (200 items per array) and says so.
 
   **Editing values in place.** A value written out in the file as a plain number, text, `true` /
-  `false`, colour, date, timestamp, regex or `raw` string is highlighted when you hover it. Click it, type, and press Enter: the change
+  `false`, colour, date, timestamp, regex, blob or `raw` string is highlighted when you hover it. Click it, type, and press Enter: the change
   is made in the text of the Editor tab and compiled, and Esc (or clicking away) cancels. A number
   keeps its type (a `Long` keeps its `L`, a `Float` its `f`, a `Double` stays a double), and text is
   escaped for you. A timestamp keeps its zone and fraction digits, and a regex is edited as the
@@ -434,15 +434,18 @@ choose **MDIX → Open in MDIX Studio**.
   test-text box: as you type, the matches and their groups are listed, checked by the language
   server with the same `regex` engine the compiler uses (so an invalid pattern is explained and
   cannot be applied). Without the server the check falls back to .NET's engine and is marked
-  approximate. A `raw` string, and any text that
+  approximate. A **blob** opens a viewer: a PNG or JPEG is shown, a WAV or Ogg can be played, text is
+  shown as text, and anything else as a hex dump. **Replace from file** (up to 1 MB) and **Clear**
+  stage a change that **Apply** writes; **Save as** writes the data to a file, and **Open** shows a
+  temporary copy in the default app. A `raw` string, and any text that
   is longer than 100 characters or has line breaks, opens a **text area** (Ctrl or Cmd + Enter
   applies). In a popup Enter applies, Esc cancels, and a refused edit is explained in the popup,
   which stays open.
 
   Only plain literals can be edited: a value produced by a function call (the `createEnemy("Goblin",
-  50, ...)` kind), an enum member, an expression, a tuple, `null`, a hex or binary number or a blob
-  stays read-only, because there is no single piece of text behind it that a field can hold. Change
-  those in the Editor tab, where a function argument is the thing to edit.
+  50, ...)` kind), an enum member, an expression, a tuple, `null` or a hex or binary number stays
+  read-only, because there is no single piece of text behind it that a field can hold. Change those
+  in the Editor tab, where a function argument is the thing to edit.
 - **Editor tab** — source text editor with live compile status, syntax highlighting and
   language-server features (diagnostics, completion, hover — see below). **Save** on an
   unsaved scratch document asks where to put it.
@@ -552,7 +555,10 @@ com.midmanstudio.mdix/
 │   │   ├── MdixRegexEditor.cs                ← pattern box, test text, match list
 │   │   ├── MdixRegexTest.cs                  ← runs and reads regex tests (no Unity types)
 │   │   ├── MdixTemporalText.cs               ← reads and writes date and timestamp text
-│   │   └── MdixBlobInfo.cs                   ← names a blob's type from its first bytes
+│   │   ├── MdixBlobEditor.cs                 ← blob viewer: preview, replace, save, open
+│   │   ├── MdixAudioPreview.cs               ← plays a WAV or Ogg blob in the editor
+│   │   ├── MdixBlobTemp.cs                   ← temporary copies outside the project
+│   │   └── MdixBlobInfo.cs                   ← names a blob's type, hex dump, text preview
 │   ├── CreateMdixMenuItems.cs
 │   └── UI/
 │       ├── MdixEditorWindow.uxml

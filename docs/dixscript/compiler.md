@@ -358,8 +358,9 @@ parse, and semantic analysis in sequence.
   literals already failed never reaches it, so nothing is reported twice.
 - Stage 4 calls `GeneralParser::parse_document` and exports the `Document` once, into the owned
   tree that the stages which have not moved still read. Stage 5 gets both, through
-  `with_document`, and the document is dropped straight after it, because nothing later reads the
-  arena. When the last stage that reads the owned tree has moved, the export goes away. Imported
+  `with_document`. Stage 6 gets the document again, `&mut` this time, because the `@QUICKFUNCS`
+  enhancer allocates its output in the document's arena, and the document is dropped straight
+  after stage 6, because nothing later reads the arena. When the last stage that reads the owned tree has moved, the export goes away. Imported
   files are still parsed by the imports resolver with `parse`, so their `@RAW`, `@SECURITY` and
   `@SCHEMA` sections take the owned path. Stage 9 still passes the resolved owned tree to
   `SchemaSectionAnalyzer::validate_resolved`, which copies it into a scratch arena.
@@ -804,6 +805,94 @@ ones when it reads a `Document` as when it reads the owned tree, through all thr
 
 **Tests:** `cargo test -p dixscript --test schema_analyzer_document`. 17 tests, all passing on Rust
 1.75. Twenty-two deliberate bugs were injected to check them (see the last Fixes entry).
+
+### `Compiler/Core/SectionEnhancers/qualified_identifier_resolver.rs`
+
+**What it does:** Replaces the qualified identifiers in function bodies with the node semantic
+analysis found each one to be: a local or imported enum access, a static call or constant, an
+imported function call, an instance method call or a property chain, or a namespace enum reference.
+When no resolution was recorded (the analyzer does not visit lambda bodies) it chooses by shape: a
+two part call on a static object is a static call, any other two part call is an instance method
+call, a longer call is a call of a function with a dotted name, and a name with no arguments is a
+property chain.
+
+**Decisions:**
+- **One implementation, over the arena.** `resolve_statement_list`, `resolve_statement_id` and
+  `resolve_expression_id` read nodes through an `Arena` and allocate the nodes that replace them. The
+  owned `resolve_statement`, `resolve_statements` and `resolve_expression` copy their argument into a
+  scratch arena, call those and copy the result out, so the two cannot disagree.
+- **A node whose children did not change is kept, not rebuilt.** The owned resolver rebuilt every
+  node it walked. Here a node is allocated again only when a child id changed, so a body with nothing
+  to resolve comes back as the same run of statement ids and uses no arena space. A qualified
+  identifier always changes.
+- **What the resolver does not enter is kept as it was.** Casts, built-in and static function calls,
+  plain function calls, nested arrays, ranges and a quick function call written as a value are copied
+  unchanged, so a qualified identifier inside one of them stays unresolved. That is what the owned
+  resolver did and the recorded output depends on it.
+- **A dotted identifier value with exactly one dot becomes an enum value;** one with two or more dots
+  or none stays an identifier.
+
+**Tests:** `tests/quickfuncs_enhancer_document.rs`.
+
+### `Compiler/Core/SectionEnhancers/quickfuncs_ast_enhancer.rs`
+
+**What it does:** Gives every parameter that has a type and no default the synthetic default of its
+type, and runs the resolver over each function body. The resolver is built once per section, and only
+when semantic analysis recorded at least one resolution.
+
+**Decisions:**
+- **`enhance_doc(&DocQuickFuncs, &mut Arena, Option<&SectionAnalysisResult>) -> DocQuickFuncs`
+  holds the work.** The result shares every node that did not change with the input section, and the
+  input section still means what it meant. `enhance(&QuickFuncsSection, ...)` copies into a scratch
+  arena, calls it and copies the result out.
+- **The default of a parameter comes from `TypeSystemManager::synthetic_parameter_default`,** which
+  `apply_defaults_to_parameters` now calls too, so both produce the same value and write the same debug
+  line. The default of a date is today's date and the default of a timestamp is the time of the run, so
+  two runs of the same file differ in those two values.
+
+**Tests:** `tests/quickfuncs_enhancer_document.rs`.
+
+### `Compiler/Core/general_ast_enhancer.rs`
+
+**What it does:** Runs the section enhancers over a copy of the owned tree and counts what they did.
+Only `@QUICKFUNCS` has one.
+
+**Decisions:**
+- **`with_document(&mut Document)` makes the enhancer read the section from the document.** Whether
+  there is a section is decided by the tree that is read, as in the semantic analyzer: with a document
+  the document says, without one the owned tree does. The enhanced section is exported out of the
+  document's arena and set in the copy of the owned tree; the rest of that tree is a clone, as before.
+- **The document is `&mut` because the enhanced nodes are allocated in its arena.** They are added
+  after the existing ones, so the document is still valid and means the same.
+- **Imported files and the language server still call `enhance` without a document,** so they take
+  the owned path through a scratch arena.
+
+**Tests:** `tests/quickfuncs_enhancer_document.rs`.
+
+### `tests/quickfuncs_enhancer_document.rs`
+
+**What it does:** Pins the enhancer's output to what the owned-tree enhancer produced before the
+change, and checks which tree is read.
+
+**Decisions:**
+- **The recording is a fingerprint, not the output.** `RECORDING` and `HAND_RECORDING` hold, for each
+  crafted source and each hand-built case, the number of defaults applied and a 64 bit FNV-1a hash of
+  the enhanced section's debug text, produced by running the original code. A failure prints the
+  section. Quoted dates and timestamps are masked before hashing, because the default of a date or
+  timestamp parameter is the day or time of the run; a separate test checks their shape.
+- **The 25 crafted sources** cover static and instance calls, property chains, local enums, lambdas,
+  values in collections, interpolation, control flow, typed, untyped and defaulted parameters, many
+  functions, a file with no section and a file with an empty one. **The hand-built cases** (ten, in
+  three modes each: the recorded resolutions, an analysis result with none, no analysis result) reach
+  every resolution type, the fallback, a key that does not match, every expression, value and
+  statement form the resolver walks and the ones it does not, and every parameter type.
+- **Which tree is read is tested in both directions,** with a document and an owned tree that
+  disagree on purpose.
+- **Sharing is tested by counting:** a section with nothing to enhance leaves the arena exactly as
+  large as it was, and only the path to a resolved identifier is allocated.
+
+**Tests:** `cargo test -p dixscript --test quickfuncs_enhancer_document`. 15 tests, all passing on
+Rust 1.75.
 
 ## Fixes and Problems
 
@@ -1466,5 +1555,41 @@ requires the larger to take less than 7 times as long.
 - **Not done in this drop:** the new tests were written against the code as it is now, with each
   assertion checked on the clean build and on the mutated one; they were not run through the
   original code from before the move. The enhancer (`quickfuncs_ast_enhancer.rs`,
-  `qualified_identifier_resolver.rs`, `general_ast_enhancer.rs`) still reads and rewrites the owned
-  tree, and the owned `TypeInferenceVisitor` has not become a wrapper yet.
+  `qualified_identifier_resolver.rs`, `general_ast_enhancer.rs`) still read and rewrote the owned
+  tree in that drop (they moved in the next one, below), and the owned `TypeInferenceVisitor` has not
+  become a wrapper yet.
+
+### Fixes and Problems: the `@QUICKFUNCS` enhancer reads the Document
+
+- **What moved.** The enhancer (`quickfuncs_ast_enhancer.rs`), the qualified identifier resolver and
+  `GeneralAstEnhancer` now work through the arena, and the loader keeps the `Document` until after
+  stage 6. This is the first stage that builds new nodes rather than reading them: an arena is
+  append only, so the enhancer allocates the nodes that change and re-points their parents. The
+  enhanced section is still copied out into the owned tree, because the value resolver reads that.
+- **How it was checked against the original.** A throwaway harness ran the original owned enhancer
+  over the 84 corpus files and 59 crafted sources under two error strategies (202 runs, each with and
+  without a semantic result) and over ten hand-built sections in three modes, and printed the debug and
+  display text of the enhanced section, the counts, the section info and the log text. The same
+  harness, run after the change through the owned entry point and through the document, printed the
+  same text byte for byte, three runs of the original agreeing with each other once the one value that
+  depends on the clock (the default of a timestamp parameter) was masked. The two binaries were
+  checked to be different programs.
+- **Bugs were injected afterwards, and the first tests missed some.** 94 bugs were put behind an
+  environment variable into the resolver, the enhancer and `GeneralAstEnhancer` (skipping each child,
+  swapping name parts, flipping the key, breaking each branch of the fallback, forcing allocation,
+  dropping defaults, ignoring the document), each run alone against a control that passed. 87 were
+  noticed by the first 12 tests. The seven that were not showed three gaps: nothing checked that
+  unchanged switch cases, object properties and values are shared, nothing put a qualified identifier
+  among the arguments of a call the resolver rebuilds, and nothing read the section info. Three tests
+  close them, and 93 of the 94 are now noticed. The one left, always building the instance of a
+  two part method call as a property chain, cannot change anything, because a chain of one name is that
+  name.
+- **Found while doing it, not changed.** The default of a date parameter is the date of the run, so a
+  file's enhanced section differs from one day to the next. A qualified identifier inside a cast, a
+  built-in or static function call, a plain function call, a nested array, a range or a quick function
+  call written as a value is not resolved, which the recorded output depends on.
+- **Not done in this drop.** CI on stable Rust has not been run. The owned tree is still cloned and
+  the enhanced section still copied out of the arena, so there is no saving yet; speed and peak
+  memory were not measured. The owned `TypeInferenceVisitor` entry points are not wrappers yet, the
+  orchestrator still reads `@ENUMS`, `@DLM` and `@IMPORTS` through the owned tree, and the language
+  server still calls the owned entry points.

@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/general_ast_enhancer.rs"
+// ============================================================================
 //! Applies compile-time enhancements to a validated AST.
 //!
 //! Must run after semantic analysis: Parse → Semantic Analysis → AST Enhancement → Value Resolution.
@@ -10,7 +14,15 @@
 //!   their own `new()` which acquires the process-wide shared singleton. This
 //!   is the legacy path and produces identical runtime behaviour because the
 //!   CLI's top-level ErrorManager IS the shared singleton.
+//!
+//! ## Reading the arena
+//! [`GeneralAstEnhancer::with_document`] gives the enhancer the [`Document`] the owned tree was
+//! exported from. The `@QUICKFUNCS` section is then read from the document and enhanced in its
+//! arena, and only the enhanced section is copied out into the result's tree. Without a document
+//! the owned section is enhanced through a scratch arena. The sections are decided by the tree
+//! that is read: with a document attached, the document says whether there is a section.
 
+use crate::Compiler::AST::arena::Document;
 use crate::Compiler::AST::DixScript;
 use crate::Compiler::Core::{
     EnhancementResult, OperationalSettings, SemanticAnalysisResult, SectionEnhancementInfo,
@@ -30,6 +42,8 @@ pub struct GeneralAstEnhancer<'a> {
     /// When false (CLI path), sub-enhancers call their own `new()` and use the
     /// process-wide shared singleton independently.
     propagate_error_manager: bool,
+    /// The document the owned tree was exported from, when the caller has one.
+    document:                Option<&'a mut Document>,
 }
 
 impl<'a> GeneralAstEnhancer<'a> {
@@ -49,6 +63,7 @@ impl<'a> GeneralAstEnhancer<'a> {
             enhancement_result:      EnhancementResult::new(),
             stopwatch:               Instant::now(),
             propagate_error_manager: true,
+            document:                None,
         }
     }
 
@@ -57,6 +72,16 @@ impl<'a> GeneralAstEnhancer<'a> {
     pub fn new(operational_settings: &'a OperationalSettings) -> Self {
         Self::new_with_error_manager(operational_settings, ErrorManager::get_shared_instance())
             .with_propagate(false)
+    }
+
+    /// Makes the enhancer read the `@QUICKFUNCS` section from `document` instead of from the
+    /// owned tree passed to [`enhance`](Self::enhance).
+    ///
+    /// The enhanced nodes are allocated in the document's arena after the existing ones, so the
+    /// document stays valid and means the same as before.
+    pub fn with_document(mut self, document: &'a mut Document) -> Self {
+        self.document = Some(document);
+        self
     }
 
     /// Builder-style helper to flip the propagation flag.
@@ -98,15 +123,17 @@ impl<'a> GeneralAstEnhancer<'a> {
         ast:             &mut DixScript,
         semantic_result: Option<&SemanticAnalysisResult>,
     ) {
-        let quickfuncs_section = match ast.quick_functions.as_ref() {
-            Some(s) => s,
-            None => {
-                if self.debug_config.is_enabled {
-                    self.error_manager.log_debug("No QUICKFUNCS section to enhance");
-                }
-                return;
-            }
+        // Whether there is a section is decided by the tree that is read.
+        let present = match self.document.as_deref() {
+            Some(document) => document.quick_functions.is_some(),
+            None           => ast.quick_functions.is_some(),
         };
+        if !present {
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug("No QUICKFUNCS section to enhance");
+            }
+            return;
+        }
 
         let quickfuncs_analysis = semantic_result
             .and_then(|sr| sr.section_results.get("QUICKFUNCS"));
@@ -132,8 +159,24 @@ impl<'a> GeneralAstEnhancer<'a> {
             QuickFunctionsAstEnhancer::new(self.operational_settings)
         };
 
-        let enhanced_section = enhancer.enhance(quickfuncs_section, quickfuncs_analysis);
-        let count            = enhancer.get_enhancement_count();
+        let enhanced_section = match self.document.as_deref_mut() {
+            Some(document) => {
+                let Document { arena, quick_functions, .. } = document;
+                let section = quick_functions
+                    .as_ref()
+                    .expect("presence was read from this document just above");
+                let enhanced = enhancer.enhance_doc(section, arena, quickfuncs_analysis);
+                enhanced.export(arena)
+            }
+            None => {
+                let section = ast
+                    .quick_functions
+                    .as_ref()
+                    .expect("presence was read from this tree just above");
+                enhancer.enhance(section, quickfuncs_analysis)
+            }
+        };
+        let count = enhancer.get_enhancement_count();
 
         self.enhancement_result.total_enhancements += count;
         self.enhancement_result.section_enhancements.insert(

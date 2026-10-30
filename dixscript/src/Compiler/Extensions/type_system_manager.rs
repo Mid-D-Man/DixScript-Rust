@@ -186,6 +186,22 @@ impl TypeSystemManager {
         matches!(data_type, DataType::Int | DataType::Long | DataType::Float | DataType::Double)
     }
 
+    /// The synthetic default of a parameter that has a type annotation and no default of its own.
+    ///
+    /// This is the value [`apply_defaults_to_parameters`](Self::apply_defaults_to_parameters)
+    /// gives such a parameter, and it logs the same debug line. The arena enhancer calls it so that
+    /// both paths produce one default.
+    pub fn synthetic_parameter_default(parameter_name: &str, data_type: DataType) -> Value {
+        let default_value = Self::get_default_value_for_type(data_type);
+
+        ErrorManager::get_shared_instance().log_debug(&format!(
+            "Applied synthetic default for parameter '{}' of type {:?}",
+            parameter_name, data_type
+        ));
+
+        default_value
+    }
+
     /// Apply default values to QuickFunction parameters (returns new vector)
     /// Apply default values to QuickFunction parameters (returns new vector).
     ///
@@ -197,7 +213,6 @@ impl TypeSystemManager {
             return parameters;
         }
 
-        let error_manager = ErrorManager::get_shared_instance();
         let mut result = Vec::with_capacity(parameters.len());
 
         for param in parameters {
@@ -211,16 +226,11 @@ impl TypeSystemManager {
             // net so bind_parameters can report ParameterCountMismatch cleanly.
             if param.default_value.is_none() && param.data_type.is_some() {
                 let data_type = param.data_type.unwrap();
-                let default_value = Self::get_default_value_for_type(data_type);
+                let default_value = Self::synthetic_parameter_default(&param.name, data_type);
                 let default_expression = Expression::Value {
                     value: default_value,
                     position: param.position,
                 };
-
-                error_manager.log_debug(&format!(
-                    "Applied synthetic default for parameter '{}' of type {:?}",
-                    param.name, data_type
-                ));
 
                 result.push(QuickFuncParam {
                     name:          param.name,

@@ -58,6 +58,16 @@ Breaking release.
   `CycleDetectionValidator::validate_function_calls_doc` and `get_execution_order_doc`).
   `GeneralSemanticAnalyzer::with_document` now covers `@QUICKFUNCS` as well, and the owned entry points
   keep their signatures. Diagnostics, qualified identifier resolutions and registered functions are unchanged.
+- **`QuickFunctionsAstEnhancer::enhance_doc`**, which enhances `@QUICKFUNCS` through an `Arena`
+  (parameter defaults and qualified identifier resolution), the arena entry points of the resolver
+  (`QualifiedIdentifierResolver::resolve_statement_list`, `resolve_statement_id` and
+  `resolve_expression_id`), and `GeneralAstEnhancer::with_document`, which makes the enhancer read the
+  `@QUICKFUNCS` section from a `Document` and copy only the enhanced section into the tree it returns.
+  The owned entry points (`QuickFunctionsAstEnhancer::enhance`, `QualifiedIdentifierResolver::resolve_statement`,
+  `resolve_statements` and `resolve_expression`, and `GeneralAstEnhancer::enhance` without a document)
+  keep their signatures and give the same result. `TypeSystemManager::synthetic_parameter_default` is the
+  default `apply_defaults_to_parameters` gives a typed parameter, now shared with the arena enhancer.
+  The loader keeps the `Document` through stage 6 and passes it to the enhancer.
 
 ### Removed
 

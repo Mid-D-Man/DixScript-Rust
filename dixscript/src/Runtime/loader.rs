@@ -739,7 +739,7 @@ impl DixLoader {
         // not moved to the arena still read the owned tree, so it is exported once here,
         // before stage 5. Each stage that moves reads `document` instead; when the last one
         // has moved, this export goes away.
-        let document = parser.parse_document()
+        let mut document = parser.parse_document()
             .map_err(|e| format!("Parse failed: {}", e.message()))?;
         let ast = document.export();
 
@@ -773,10 +773,6 @@ impl DixLoader {
         .with_document(&document);
         let semantic_result   = semantic_analyzer.analyze();
 
-        // Nothing after stage 5 reads the arena yet, so release it before the later stages
-        // build their own trees.
-        drop(document);
-
         if !semantic_result.is_success {
             let msgs: Vec<String> = semantic_result.errors.iter()
                 .map(|e| e.message.clone())
@@ -784,13 +780,20 @@ impl DixLoader {
             return Err(format!("Semantic analysis failed: {:?}", msgs));
         }
 
-        // Stage 6: AST enhancement.
+        // Stage 6: AST enhancement. The `@QUICKFUNCS` enhancer reads the document and writes the
+        // enhanced section into its arena; only that section is copied out into the tree the
+        // later stages read.
         self.error_manager.log_info("Running AST enhancement");
         let enhancer           = GeneralAstEnhancer::new_with_error_manager(
             &operational_settings,
             self.error_manager.clone(),
-        );
+        )
+        .with_document(&mut document);
         let enhancement_result = enhancer.enhance(&ast, Some(&semantic_result));
+
+        // Nothing after stage 6 reads the arena yet, so release it before the later stages
+        // build their own trees.
+        drop(document);
 
         if !enhancement_result.is_success {
             self.error_manager.log_warning(&format!(

@@ -68,6 +68,11 @@ Breaking release.
   keep their signatures and give the same result. `TypeSystemManager::synthetic_parameter_default` is the
   default `apply_defaults_to_parameters` gives a typed parameter, now shared with the arena enhancer.
   The loader keeps the `Document` through stage 6 and passes it to the enhancer.
+- **`TypeInferenceVisitor`'s owned entry points are wrappers.** `infer_type_from_value`,
+  `infer_type_from_expression`, `infer_element_type_from_value` and `infer_element_type_from_expression`
+  keep their signatures and results, and now copy their argument into a scratch arena and call the
+  `_id` entry points. The code that walked the owned tree is gone, and the public items of
+  `type_inference_visitor.rs` have rustdoc with examples.
 
 ### Removed
 

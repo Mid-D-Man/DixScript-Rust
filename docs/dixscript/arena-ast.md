@@ -1056,33 +1056,40 @@ deliberate bugs were injected to check them (see the Fixes entry below).
 
 ### `Compiler/AST/Visitors/type_inference_arena.rs`
 
-**What it does:** Adds four entry points to `TypeInferenceVisitor` for a node in an `Arena`:
-`infer_type_from_value_id`, `infer_type_from_expression_id`, `infer_element_type_from_value_id` and
-`infer_element_type_from_expression_id`. Each gives the answer its owned twin in
-`type_inference_visitor.rs` gives for the same tree.
+**What it does:** Holds the one implementation of type inference over the tree. It adds four entry
+points to `TypeInferenceVisitor` for a node in an `Arena`: `infer_type_from_value_id`,
+`infer_type_from_expression_id`, `infer_element_type_from_value_id` and
+`infer_element_type_from_expression_id`. The four owned entry points in `type_inference_visitor.rs`
+copy their argument into a scratch arena and call these.
 
 **Decisions:**
-- **Only the code that reads the tree is repeated.** Everything that depends on names alone is shared
-  with the owned implementation: the method tables, the identifier lookup, the function return types
-  and the builtin registries. The two differ in how they walk a node, so a divergence can only come
-  from a node shape, and that is what the differential test compares.
-- **Independent of the owned implementation, not a wrapper around it.** A wrapper would copy every
-  subtree before inferring it, at every nesting level of the caller's own recursion.
-- **The owned implementation stays until the `@QUICKFUNCS` analyzer moves,** because that analyzer
-  and the language server call it. Then the owned entry points become wrappers and the duplicated
-  walking code goes.
+- **Only the code that reads the tree is here.** Everything that depends on names alone is in
+  `type_inference_visitor.rs` and shared: the method tables, the identifier lookup, the function
+  return types, the tuple slot of a positional method and the builtin registries.
+- **It started as an independent twin of the owned walker, and the owned walker has now been
+  deleted.** While both existed, a test compared them on every node. That was the reason the owned
+  entry points could not yet be wrappers: the `@QUICKFUNCS` analyzer called them from inside its own
+  recursion, and copying each subtree at every level would have made it slower. The analyzer now calls
+  the arena entry points, so only the language server calls the owned ones, on single expressions.
 - The entry points panic when an id is out of range for the arena, like every other arena accessor.
 
 ### `tests/type_inference_arena.rs`
 
-**What it does:** Compares the owned and the arena implementations on every value and every
-expression node of every file in `mdix_files/` and of four crafted sources, for the type of the node
-and for its element type, under three visitor configurations (no locals, locals of assorted types,
-and locals with element-type hints).
+**What it does:** Takes every value and every expression node of every file in `mdix_files/` and of
+four crafted sources, asks the owned and the arena entry points for the type of the node and for its
+element type, under three visitor configurations (no locals, locals of assorted types, and locals
+with element-type hints), and checks that the two agree and that the answers are the recorded ones.
 
 **Decisions:**
-- **The owned implementation is the oracle.** It is unchanged by the arena work, so a difference is a
-  bug in the port. It is not a recording, so it needs no re-recording.
+- **The oracle became a recording when the owned walker was deleted.** `CORPUS_RECORDING` and
+  `CRAFTED_RECORDING` hold, for each file, the number of answers and a 64 bit FNV-1a hash of all of
+  them, produced by running the original owned implementation (the test then compared the two on every
+  node, so the fingerprint was checked against the arena implementation at the same time). The two
+  entry points are still compared with each other, which now checks that the copy into the scratch
+  arena loses nothing.
+- **A corpus file that is not in the recording is still compared;** a recorded file that has changed
+  fails with a message. `print_recording`, an ignored test, prints both tables again for the current
+  code, to be pasted over them after a corpus file is changed on purpose.
 - **The nodes come from `Arena::value_ids` and `expr_ids`,** which includes orphan nodes. The symbol
   table is the one the semantic analysis of the same file produced, so functions, data variables,
   enums and imported namespaces resolve. The locals are synthesized from every identifier in the
@@ -1091,13 +1098,17 @@ and locals with element-type hints).
 - **The test is not allowed to pass vacuously.** It asserts a minimum number of files and
   comparisons, a mix of typed and untyped results, and that integers, strings, booleans, doubles,
   enums, objects, arrays, typed arrays and typed tuples were all inferred somewhere.
-- **Four tests build nodes by hand** for shapes the corpus does not contain: upper-case constructor
+- **Six tests build nodes by hand** for shapes the corpus does not contain: upper-case constructor
   prefixes, a data variable reached through an object access, index access over every kind of
-  collection, and conditionals and arrays with typeless items.
+  collection, conditionals and arrays with typeless items (with their recorded answers), the six
+  positional methods of a typed tuple, and element hints on a qualified call of a plain array. The last
+  two were added after bug injection (see the Fixes entry); their expected answers were checked against
+  the original owned implementation, swapped back in for the run, before they were kept.
 
-**Tests:** `cargo test -p dixscript --test type_inference_arena`. 6 tests, all passing on Rust 1.75. On
-the corpus it makes 160,545 comparisons (144,574 with a type and 15,971 without) over 84 files, and
-708 more on the crafted sources.
+**Tests:** `cargo test -p dixscript --test type_inference_arena`. 8 tests (and the ignored
+`print_recording`), all passing on Rust 1.75. On the corpus it covers 84 files, 160,545 comparisons
+(144,574 with a type and 15,971 without) under the three configurations, and 708 more on the crafted
+sources.
 
 ## Fixes and Problems
 
@@ -1234,3 +1245,29 @@ the corpus it makes 160,545 comparisons (144,574 with a type and 15,971 without)
   index access over a typed tuple. Hand-built nodes now cover each, and all three are caught.
 - **The language server and the `@QUICKFUNCS` analyzer still use the owned implementation,** so the
   work here changes nothing for them.
+
+### Fixes and Problems: the owned type inference visitor became a wrapper
+
+- **What changed.** The four owned entry points of `TypeInferenceVisitor` now copy their argument into a
+  scratch arena and call the arena ones, and the owned tree-walking code (15 functions, about 750
+  lines of `type_inference_visitor.rs`, and two method tables nothing else used) is deleted. No other
+  file changed. The lib warning count went from 125 to 123, none of them new.
+- **How it was checked against the original.** Before the walker was removed, the differential test was
+  turned into a recorded one and run against the original code, which fixed 84 corpus fingerprints and 4
+  crafted ones and showed they were identical across two runs. After the change the same test passes
+  with the same fingerprints, so the wrapper and the arena implementation give the original's answer on
+  every one of the 160,545 + 708 nodes under three configurations. The 547 unit tests, the doctests
+  (28 now, two of them the new examples) and the analyzer, enhancer and runtime tests pass.
+- **Bug injection found two gaps in the inputs, not in the code.** Eight bugs were put into the
+  wrappers, the shared lookups and the arena implementation behind an environment switch (the type and
+  element wrappers swapped, local types ignored, the `second` tuple slot, the `!` type, the long rule of
+  arithmetic, and element hints ignored at both of their sites). Six were noticed by the six recorded
+  tests. The two that were not were the `second` slot of a typed tuple and the element hint of a plain
+  array called through a qualified name: no corpus file calls either. The old differential test could
+  not have noticed them either, because the owned walker had its own tuple table. Two hand-built tests
+  now cover them, all eight are noticed, and the new expectations were run against the original
+  implementation first.
+- **Not done in this drop.** The language server's cost for the copy is not measured. `AstVisitorBase`
+  is untouched. The orchestrator still reads `@ENUMS`, `@DLM` and `@IMPORTS` through the owned tree, and
+  the value resolver, the runtime and the DLM auditor still read the owned types. CI on stable Rust has
+  not been run.

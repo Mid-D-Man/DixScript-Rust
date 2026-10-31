@@ -5,21 +5,19 @@
 //! Type inference over the arena AST.
 //!
 //! [`TypeInferenceVisitor`] infers the type of a value or an expression from the symbol table
-//! and from the types of the local variables it was given. `type_inference_visitor.rs` does
-//! that for the owned [`Value`](crate::Compiler::AST::Value) and
-//! [`Expression`](crate::Compiler::AST::Expression) types. This file adds the same four
-//! entry points for a node in an [`Arena`], named with an `_id` suffix:
+//! and from the types of the local variables it was given. This file holds the implementation:
+//! it reads the nodes of an [`Arena`] through four entry points, named with an `_id` suffix:
 //!
 //! * [`infer_type_from_value_id`](TypeInferenceVisitor::infer_type_from_value_id)
 //! * [`infer_type_from_expression_id`](TypeInferenceVisitor::infer_type_from_expression_id)
 //! * [`infer_element_type_from_value_id`](TypeInferenceVisitor::infer_element_type_from_value_id)
 //! * [`infer_element_type_from_expression_id`](TypeInferenceVisitor::infer_element_type_from_expression_id)
 //!
-//! Each gives the answer its owned twin gives for the same tree. Only the code that reads the
-//! tree is repeated here. Everything that depends on names alone (the identifier lookup, the
-//! function return types, the method tables and the builtin registries) is shared with the
-//! owned implementation, so the two differ only in how they walk a node. A test compares them on
-//! every node of the corpus.
+//! The owned entry points in `type_inference_visitor.rs` (`infer_type_from_value` and the three
+//! others) copy their argument into a scratch arena and call these, so there is one implementation
+//! of the walk. Everything that depends on names alone (the identifier lookup, the function return
+//! types, the method tables and the builtin registries) is in `type_inference_visitor.rs` and
+//! shared. A recorded test pins the answers to the ones the owned walker gave before it was removed.
 
 use super::type_inference_visitor::{
     TypeInferenceVisitor, ARRAY_ELEMENT_METHODS, ARRAY_PRESERVING_METHODS,

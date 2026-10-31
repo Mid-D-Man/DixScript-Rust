@@ -2,24 +2,30 @@
 // NOTICE: Full documentation, design decisions, and fix history for this file
 // live in docs/dixscript/arena-ast.md, section "tests/type_inference_arena.rs"
 // ============================================================================
-//! Differential test for the arena type inference visitor.
+//! Recorded test for `TypeInferenceVisitor`.
 //!
-//! `TypeInferenceVisitor` has two implementations: the original, which reads the owned
-//! `Value` and `Expression` types, and `type_inference_arena.rs`, which reads the same trees in
-//! an `Arena`. They must agree on every node. The test compiles every file in `mdix_files/` and a
-//! set of crafted sources, takes every value and expression node of each document, and compares
-//! the two implementations on it:
+//! `TypeInferenceVisitor` infers the type of a value or an expression from the symbol table and
+//! from the types of the local variables it was given. Its arena entry points (`infer_type_from_value_id`
+//! and the three others) hold the only implementation; the owned entry points
+//! (`infer_type_from_value` and the three others) copy their argument into a scratch arena and call
+//! them. The test compiles every file in `mdix_files/` and a set of crafted sources, takes every value
+//! and expression node of each document, and checks two things:
 //!
-//! * for the type of the node and for its element type;
-//! * under three visitor configurations: no local variables, local variables of assorted types,
-//!   and local variables with element-type hints, so that the branches that depend on them are
-//!   reached;
-//! * with the symbol table the semantic analysis produced for the file, so that functions, data
-//!   variables, enums and imported namespaces resolve.
+//! * the owned entry point and the arena entry point give the same answer on the node, for its type
+//!   and for its element type (the wrapper loses nothing in the copy);
+//! * the answers are the ones the original owned implementation gave. Each file's answers are folded
+//!   into a fingerprint (`CORPUS_RECORDING` and `CRAFTED_RECORDING`), recorded by running the
+//!   original code before it was removed.
+//!
+//! Both are done under three visitor configurations: no local variables, local variables of assorted
+//! types, and local variables with element-type hints, so that the branches that depend on them are
+//! reached; and with the symbol table the semantic analysis produced for the file, so that functions,
+//! data variables, enums and imported namespaces resolve.
 //!
 //! The nodes come from `Arena::value_ids` and `expr_ids`, so the walk includes nodes a failed
-//! sub-expression left behind and cannot miss a nested one. The owned side is the original code
-//! and is not changed by the arena work, so it is the oracle.
+//! sub-expression left behind and cannot miss a nested one. A corpus file that is not in the
+//! recording is still checked for the first point. A recorded file that has changed fails the second;
+//! `print_recording` (an ignored test) prints the tables again.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -125,6 +131,28 @@ fn hints_for(locals: &HashMap<String, Option<DataType>>) -> HashMap<String, Data
         .collect()
 }
 
+/// A running 64 bit FNV-1a hash of the answers given for a file, with how many nodes it covers.
+struct Fingerprint {
+    hash: u64,
+    nodes: usize,
+}
+
+impl Fingerprint {
+    fn new() -> Self {
+        Fingerprint { hash: 0xcbf2_9ce4_8422_2325, nodes: 0 }
+    }
+
+    fn push(&mut self, text: &str) {
+        for byte in text.bytes() {
+            self.hash ^= u64::from(byte);
+            self.hash = self.hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        self.hash ^= 0xff;
+        self.hash = self.hash.wrapping_mul(0x0000_0100_0000_01b3);
+        self.nodes += 1;
+    }
+}
+
 /// What one comparison run saw, to show the test was not vacuous.
 #[derive(Default)]
 struct Tally {
@@ -134,8 +162,10 @@ struct Tally {
     kinds: BTreeSet<String>,
 }
 
-/// Compares the owned and arena visitors on every node of `document`.
-fn compare(label: &str, document: &Document, table: &SymbolTable, tally: &mut Tally) {
+/// Checks the owned and arena entry points against each other on every node of `document`, and
+/// returns the fingerprint of the answers.
+fn compare(label: &str, document: &Document, table: &SymbolTable, tally: &mut Tally) -> Fingerprint {
+    let mut fingerprint = Fingerprint::new();
     let arena = &document.arena;
     let locals = synthesized_locals(arena);
     let hints = hints_for(&locals);
@@ -157,6 +187,7 @@ fn compare(label: &str, document: &Document, table: &SymbolTable, tally: &mut Ta
             let elem_arena = visitor.infer_element_type_from_value_id(arena, id);
             assert_eq!(elem_owned, elem_arena, "{label} [{config_name}]: element type of value {id:?}: {owned:?}");
 
+            fingerprint.push(&format!("{config_name}/v{}:{by_arena:?}:{elem_arena:?}", fingerprint.nodes));
             tally.nodes += 1;
             match by_arena {
                 Some(t) => {
@@ -179,6 +210,7 @@ fn compare(label: &str, document: &Document, table: &SymbolTable, tally: &mut Ta
             let elem_arena = visitor.infer_element_type_from_expression_id(arena, id);
             assert_eq!(elem_owned, elem_arena, "{label} [{config_name}]: element type of expression {id:?}: {owned:?}");
 
+            fingerprint.push(&format!("{config_name}/e{}:{by_arena:?}:{elem_arena:?}", fingerprint.nodes));
             tally.nodes += 1;
             match by_arena {
                 Some(t) => {
@@ -192,6 +224,7 @@ fn compare(label: &str, document: &Document, table: &SymbolTable, tally: &mut Ta
             }
         }
     }
+    fingerprint
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -207,27 +240,144 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-#[test]
-fn the_two_implementations_agree_on_every_node_of_the_corpus() {
+/// (path under `mdix_files`, nodes covered, fingerprint of the answers), recorded from the original
+/// owned implementation.
+const CORPUS_RECORDING: &[(&str, usize, u64)] = &[
+    ("ComparisonFiles/MDIX/AdvancedTest.mdix", 3963, 0x6b422650d0c285ce),
+    ("ComparisonFiles/MDIX/BasicTest.mdix", 51, 0x71efa83c5d2e091e),
+    ("ComparisonFiles/MDIX/BigBoy.mdix", 2136, 0xd3b8d373412e51e9),
+    ("ComparisonFiles/MDIX/IntermediateTest.mdix", 309, 0x21a98e2c0320af55),
+    ("ComparisonFiles/MDIX/Unholy.mdix", 15444, 0x53c0df99f9ceecef),
+    ("advanced/BuiltinSystem.mdix", 153, 0xf65f2b3e14d0b55f),
+    ("advanced/EnumWithCompressionAndOrEnc.mdix", 12, 0x8e3cc83cc71a6065),
+    ("advanced/EnumsWithStuffImported.mdix", 6, 0x2a285c4bfdc835d2),
+    ("advanced/FullFunctionTest.mdix", 7893, 0x32071c0330749ad7),
+    ("advanced/all_datatypes_test.mdix", 1158, 0x28c53a6d9dd7b963),
+    ("advanced/array_instance_test.mdix", 1359, 0xe86e05070912b629),
+    ("advanced/array_static_test.mdix", 798, 0xe7476c1028626c06),
+    ("advanced/data_variable_usage.mdix", 657, 0x80d825aa7a5d9e80),
+    ("advanced/datetime_static_test.mdix", 678, 0x7aceeaef7b7a53f3),
+    ("advanced/dix_static_test.mdix", 801, 0x28bb65ef404db270),
+    ("advanced/enum_static_test.mdix", 708, 0xc3e964f34c1a8f50),
+    ("advanced/guid_static_test.mdix", 345, 0xd3f04f7ba92dabe7),
+    ("advanced/ip_static_test.mdix", 510, 0xb3e57e48d84a6ce2),
+    ("advanced/json_decoder.mdix", 2787, 0x7ad5f1e15e32b6dc),
+    ("advanced/math_static_test.mdix", 627, 0xafc73a4e7de1d345),
+    ("advanced/number_instance_test.mdix", 525, 0x86b0f30a1e936e86),
+    ("advanced/object_builtins_test.mdix", 852, 0xfae8acbe4aa83221),
+    ("advanced/random_static_test.mdix", 642, 0x1191500df2ad5ce0),
+    ("advanced/string_instance_test.mdix", 600, 0x692dc81f9234da92),
+    ("advanced/tuple_instance_test.mdix", 678, 0x4e21eae9faec7b5f),
+    ("advanced/universal_instance_test.mdix", 486, 0x0237a12fd557430a),
+    ("basic/EnumUsage.mdix", 252, 0x4a9264d1bd691499),
+    ("basic/a_test.mdix", 48, 0x2d4a08ce167a69fd),
+    ("basic/basic_test.mdix", 177, 0x2ca453447e5591be),
+    ("basic/lsp_tester.mdix", 663, 0xfe49341e94162c89),
+    ("basic/tuple_instance_test.mdix", 678, 0x4e21eae9faec7b5f),
+    ("chemistry_db/core/builders.mdix", 1194, 0x7e303dec2d159033),
+    ("chemistry_db/core/enums.mdix", 0, 0xcbf29ce484222325),
+    ("chemistry_db/core/physics.mdix", 525, 0x8945e2f91db0ba85),
+    ("chemistry_db/core/units.mdix", 2766, 0x481971f2ad8247fb),
+    ("chemistry_db/elements_database.mdix", 87975, 0x0d9a464a46c218c2),
+    ("intermediate/CompleteFeature.mdix", 300, 0x6e5a669cde3b77f8),
+    ("intermediate/ComplexData.mdix", 291, 0x42e0c46d35aadb09),
+    ("intermediate/ComplexFull.mdix", 3249, 0x7360c52101629e25),
+    ("intermediate/Configuration.mdix", 81, 0x8a7eaf744314f90b),
+    ("intermediate/EnumUsage.mdix", 252, 0x4a9264d1bd691499),
+    ("intermediate/ErrorHandling.mdix", 42, 0x1d0a994cc1a09c52),
+    ("intermediate/FullDataTestNoFunc.mdix", 2256, 0x349f180e3f6675f1),
+    ("intermediate/FullDataTestWithFunc.mdix", 10818, 0x39e799007803524a),
+    ("intermediate/FunctionScoping.mdix", 237, 0xcf453e806fb55b00),
+    ("tests/cli/01_basic.mdix", 33, 0x678c7cd3cf3da372),
+    ("tests/cli/02_enums.mdix", 33, 0x014bb7fbc4043fd5),
+    ("tests/cli/03_quickfuncs.mdix", 213, 0xc63e46c077248f34),
+    ("tests/cli/04_all_types.mdix", 144, 0xfa23ba423b8c96f0),
+    ("tests/cli/05_game_config.mdix", 285, 0xb19c7137ac84a5b9),
+    ("tests/cli/06_app_config.mdix", 87, 0x8d4063a5d4b019df),
+    ("tests/dlm/01_gzip.mdix", 39, 0x517b89af4a5b5e45),
+    ("tests/dlm/02_bzip2.mdix", 39, 0x517b89af4a5b5e45),
+    ("tests/dlm/03_lzma.mdix", 39, 0x517b89af4a5b5e45),
+    ("tests/dlm/04_aes128_password.mdix", 72, 0x368b08cc5c565512),
+    ("tests/dlm/05_aes256_password.mdix", 66, 0x1842a483b06c7dbf),
+    ("tests/dlm/06_chacha20_password.mdix", 81, 0x62bae6f3a99e2148),
+    ("tests/dlm/07_diy_audit.mdix", 39, 0x517b89af4a5b5e45),
+    ("tests/dlm/08_enhanced_audit.mdix", 42, 0x37e092f3312e512e),
+    ("tests/dlm/09_gzip_aes256.mdix", 81, 0x62bae6f3a99e2148),
+    ("tests/dlm/10_full_pipeline.mdix", 81, 0x62bae6f3a99e2148),
+    ("tests/dlm/11_enum_only_gzip.mdix", 18, 0xdb7a58f6824130d0),
+    ("tests/dlm/12_enum_only_aes256.mdix", 51, 0x0276a52726157dce),
+    ("tests/dlm/13_enum_only_gzip_aes256.mdix", 51, 0x0276a52726157dce),
+    ("tests/dlm/security_01_keyfile_aes256.mdix", 273, 0x865fe9ab0a465787),
+    ("tests/dlm/security_02_password_aes256.mdix", 246, 0xfac06979256c6e0a),
+    ("tests/dlm/security_03_keyfile_gzip_aes256.mdix", 333, 0x5070fb4003ef96c3),
+    ("tests/dlm/security_05_password_full_pipeline.mdix", 666, 0xd0b480ddbc49c860),
+    ("tests/dlm/serialize_target.mdix", 60, 0xac7a6fac65145f83),
+    ("tests/imports/01_basic_import.mdix", 36, 0xa964e5e0d7a1167e),
+    ("tests/imports/02_alias_funcs_in_quickfuncs.mdix", 144, 0xfb6d99566f172c31),
+    ("tests/imports/03_alias_funcs_in_data.mdix", 192, 0xaa71f82bff794d86),
+    ("tests/imports/04_funcs_in_funcs.mdix", 183, 0xcfa9058fb31a5d5d),
+    ("tests/imports/05_enum_in_funcs.mdix", 246, 0xe2eedceba4b09cbf),
+    ("tests/imports/06_cloud_basic.mdix", 120, 0x891fa0c25863b811),
+    ("tests/imports/07_cloud_verify_invalid.mdix", 30, 0x943d8a3b355e62b9),
+    ("tests/imports/09_cloud_transitive.mdix", 171, 0x6b7116c565d87356),
+    ("tests/imports/10_cloud_cyclic.mdix", 9, 0x12cbf800e843bef5),
+    ("tests/imports/11_enum_only_import_no_funcs.mdix", 30, 0x1ad9c467e31b4856),
+    ("tests/imports/base_types.mdix", 150, 0xcc3019eda0b2ffca),
+    ("tests/imports/circular_a.mdix", 3, 0xffddf111accdf15e),
+    ("tests/imports/circular_b.mdix", 3, 0xffddf111accdf15e),
+    ("tests/imports/enum_only_types.mdix", 0, 0xcbf29ce484222325),
+    ("tests/imports/game_helpers.mdix", 174, 0xcff2aa979179a167),
+];
+
+/// The same for the crafted sources below.
+const CRAFTED_RECORDING: &[(&str, usize, u64)] = &[
+    ("static_calls", 189, 0x58c0c37c2761bdd2),
+    ("instance_methods", 204, 0xee5cc824434f42c5),
+    ("operators", 189, 0x2a8b6f7848f13f20),
+    ("data_values_and_access", 126, 0xdb74a622fef167d2),
+];
+
+fn corpus_files() -> (PathBuf, Vec<PathBuf>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("mdix_files");
     let mut files = Vec::new();
     walk(&root, &mut files);
     assert!(files.len() >= 50, "expected the corpus under {}, found {}", root.display(), files.len());
+    (root, files)
+}
+
+fn relative(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root).expect("under the corpus").to_string_lossy().replace('\\', "/")
+}
+
+#[test]
+fn the_entry_points_agree_and_give_the_recorded_answers_on_every_node_of_the_corpus() {
+    let (root, files) = corpus_files();
 
     let mut tally = Tally::default();
     let mut compiled = 0;
+    let mut matched = 0;
     for path in &files {
         let bytes = std::fs::read(path).expect("readable file");
         let Some((document, table)) = compile(&bytes, &path.to_string_lossy()) else { continue };
-        compare(&path.display().to_string(), &document, &table, &mut tally);
+        let fingerprint = compare(&path.display().to_string(), &document, &table, &mut tally);
         compiled += 1;
+        let name = relative(&root, path);
+        if let Some((_, nodes, hash)) = CORPUS_RECORDING.iter().find(|(n, _, _)| *n == name) {
+            assert_eq!(
+                (fingerprint.nodes, fingerprint.hash),
+                (*nodes, *hash),
+                "{name}: the answers differ from the recording (if the file changed on purpose, run the ignored `print_recording` test)"
+            );
+            matched += 1;
+        }
     }
 
     println!(
-        "{compiled} files, {} comparisons ({} with a type, {} without), kinds seen: {:?}",
+        "{compiled} files ({matched} recorded), {} comparisons ({} with a type, {} without), kinds seen: {:?}",
         tally.nodes, tally.some, tally.none, tally.kinds
     );
     assert!(compiled >= 60, "only {compiled} corpus files compiled");
+    assert!(matched >= 60, "only {matched} corpus files are in the recording");
     assert!(tally.nodes >= 20_000, "only {} comparisons", tally.nodes);
     assert!(tally.some > 5_000 && tally.none > 1_000, "the comparison was lopsided: {} typed, {} untyped", tally.some, tally.none);
     // The comparison must have seen results of several different kinds, not only integers.
@@ -264,20 +414,49 @@ const CRAFTED: &[(&str, &str)] = &[
 ];
 
 #[test]
-fn the_two_implementations_agree_on_crafted_sources() {
+fn the_entry_points_agree_and_give_the_recorded_answers_on_crafted_sources() {
     let mut tally = Tally::default();
     let mut compiled = 0;
     for (name, text) in CRAFTED {
         let Some((document, table)) = compile(text.as_bytes(), name) else { continue };
-        compare(name, &document, &table, &mut tally);
+        let fingerprint = compare(name, &document, &table, &mut tally);
+        let (_, nodes, hash) = CRAFTED_RECORDING
+            .iter()
+            .find(|(n, _, _)| n == name)
+            .unwrap_or_else(|| panic!("no recording for {name}"));
+        assert_eq!((fingerprint.nodes, fingerprint.hash), (*nodes, *hash), "{name}: the answers differ from the recording");
         compiled += 1;
     }
     println!("{compiled} crafted sources, {} comparisons, kinds seen: {:?}", tally.nodes, tally.kinds);
-    assert!(compiled >= 3, "only {compiled} crafted sources compiled");
+    assert_eq!(compiled, CRAFTED.len(), "a crafted source no longer compiles");
     assert!(tally.nodes >= 300, "only {} comparisons", tally.nodes);
 }
 
+/// Prints `CORPUS_RECORDING` and `CRAFTED_RECORDING` for the current code. Run it with
+/// `cargo test --test type_inference_arena print_recording -- --ignored --nocapture` after a change
+/// to a corpus file or to the sources above, and paste the output over the two tables.
+#[test]
+#[ignore]
+fn print_recording() {
+    let (root, files) = corpus_files();
+    println!("CORPUS_RECORDING");
+    for path in &files {
+        let bytes = std::fs::read(path).expect("readable file");
+        let Some((document, table)) = compile(&bytes, &path.to_string_lossy()) else { continue };
+        let f = compare("recording", &document, &table, &mut Tally::default());
+        println!("    (\"{}\", {}, 0x{:016x}),", relative(&root, path), f.nodes, f.hash);
+    }
+    println!("CRAFTED_RECORDING");
+    for (name, text) in CRAFTED {
+        let Some((document, table)) = compile(text.as_bytes(), name) else { continue };
+        let f = compare(name, &document, &table, &mut Tally::default());
+        println!("    (\"{name}\", {}, 0x{:016x}),", f.nodes, f.hash);
+    }
+}
+
 // ==================== nodes built by hand ====================
+//
+// The expected answers below were recorded from the original owned implementation.
 
 fn pos() -> Position {
     Position::new(1, 1)
@@ -311,7 +490,8 @@ fn variable(name: &str, t: DataType) -> VariableInfo {
     }
 }
 
-/// Compares the two implementations on one owned value, and returns what they agreed on.
+/// Checks the owned and arena entry points against each other on one owned value, and returns what
+/// they agreed on.
 fn same_value(visitor: &TypeInferenceVisitor, label: &str, value: &Value) -> (Option<DataType>, Option<DataType>) {
     let mut arena = Arena::new();
     let id = arena.import_value(value);
@@ -321,7 +501,8 @@ fn same_value(visitor: &TypeInferenceVisitor, label: &str, value: &Value) -> (Op
     owned
 }
 
-/// Compares the two implementations on one owned expression, and returns what they agreed on.
+/// Checks the owned and arena entry points against each other on one owned expression, and returns
+/// what they agreed on.
 fn same_expression(visitor: &TypeInferenceVisitor, label: &str, expr: &Expression) -> (Option<DataType>, Option<DataType>) {
     let mut arena = Arena::new();
     let id = arena.import_expr(expr);
@@ -413,15 +594,16 @@ fn collections_and_conditionals_agree_on_hand_built_nodes() {
     let visitor = TypeInferenceVisitor::new(&table, None);
     let array = |values: Vec<Value>| Value::Array { values, position: pos() };
 
-    // Uniform, mixed, empty and nested arrays, with and without a typeless item.
-    for (label, value) in [
-        ("uniform ints", array(vec![int(1), int(2)])),
-        ("mixed", array(vec![int(1), text("a")])),
-        ("empty", array(vec![])),
-        ("nested", array(vec![array(vec![int(1)]), array(vec![int(2)])])),
-        ("typeless item", array(vec![int(1), Value::Null { position: pos() }, int(3)])),
+    // Uniform, mixed, empty and nested arrays, with and without a typeless item: the type, and the
+    // element type, recorded from the original implementation.
+    for (label, value, expected) in [
+        ("uniform ints", array(vec![int(1), int(2)]), "(Some(TypedArray(Int)), Some(Int))"),
+        ("mixed", array(vec![int(1), text("a")]), "(Some(Array), None)"),
+        ("empty", array(vec![]), "(Some(Array), None)"),
+        ("nested", array(vec![array(vec![int(1)]), array(vec![int(2)])]), "(Some(TypedArray(Array)), Some(TypedArray(Int)))"),
+        ("typeless item", array(vec![int(1), Value::Null { position: pos() }, int(3)]), "(Some(Array), Some(Int))"),
     ] {
-        same_value(&visitor, label, &value);
+        assert_eq!(format!("{:?}", same_value(&visitor, label, &value)), expected, "{label}");
     }
 
     // A conditional takes the first branch that has a type.
@@ -435,4 +617,58 @@ fn collections_and_conditionals_agree_on_hand_built_nodes() {
     assert_eq!(same_expression(&visitor, "both typed", &conditional(int(1), text("a"))).0, Some(DataType::Int));
     assert_eq!(same_expression(&visitor, "first untyped", &conditional(Value::Null { position: pos() }, text("a"))).0, Some(DataType::String));
     assert_eq!(same_expression(&visitor, "both untyped", &conditional(Value::Null { position: pos() }, Value::Null { position: pos() })).0, None);
+}
+
+fn qualified_call(parts: &[&str]) -> Expression {
+    Expression::QualifiedIdentifier {
+        parts: parts.iter().map(|s| s.to_string()).collect(),
+        arguments: Some(vec![]),
+        position: pos(),
+    }
+}
+
+#[test]
+fn a_positional_tuple_method_gives_the_type_of_its_slot() {
+    let table = SymbolTable::new();
+    let slots = [ElemType::Int, ElemType::String, ElemType::Float, ElemType::Bool, ElemType::Long, ElemType::Double];
+    let typed = DataType::TypedTuple(slots.map(Some));
+    let gappy = DataType::TypedTuple([Some(ElemType::Int), None, Some(ElemType::Float), None, None, None]);
+
+    let mut locals = HashMap::new();
+    locals.insert("t".to_string(), Some(typed));
+    locals.insert("g".to_string(), Some(gappy));
+    locals.insert("p".to_string(), Some(DataType::Tuple));
+    let visitor = TypeInferenceVisitor::new(&table, Some(locals));
+
+    for (method, slot) in [("first", 0), ("second", 1), ("third", 2), ("fourth", 3), ("fifth", 4), ("sixth", 5)] {
+        let got = same_expression(&visitor, method, &qualified_call(&["t", method])).0;
+        assert_eq!(got, Some(slots[slot].to_data_type()), "t.{method}()");
+    }
+    // A slot with no annotation, and a tuple with none at all, have no type.
+    assert_eq!(same_expression(&visitor, "gap", &qualified_call(&["g", "second"])).0, None);
+    assert_eq!(same_expression(&visitor, "gap", &qualified_call(&["g", "third"])).0, Some(DataType::Float));
+    assert_eq!(same_expression(&visitor, "plain", &qualified_call(&["p", "first"])).0, None);
+    // `get` takes the first annotated slot, and an unknown method has no type.
+    assert_eq!(same_expression(&visitor, "get", &qualified_call(&["t", "get"])).0, Some(DataType::Int));
+    assert_eq!(same_expression(&visitor, "unknown", &qualified_call(&["t", "seventh"])).0, None);
+}
+
+#[test]
+fn an_element_hint_types_the_elements_of_a_plain_array_called_through_a_qualified_name() {
+    let table = SymbolTable::new();
+    let mut locals = HashMap::new();
+    locals.insert("xs".to_string(), Some(DataType::Array));
+    locals.insert("ys".to_string(), Some(DataType::TypedArray(ElemType::String)));
+    let mut hints = HashMap::new();
+    hints.insert("xs".to_string(), DataType::Int);
+    hints.insert("ys".to_string(), DataType::Bool);
+
+    let hinted = TypeInferenceVisitor::new_with_element_hints(&table, Some(locals.clone()), Some(hints));
+    let unhinted = TypeInferenceVisitor::new(&table, Some(locals));
+    for method in ["first", "last", "get"] {
+        // A plain array takes the hint; a typed array keeps its own element type.
+        assert_eq!(same_expression(&hinted, method, &qualified_call(&["xs", method])).0, Some(DataType::Int), "xs.{method}() hinted");
+        assert_eq!(same_expression(&unhinted, method, &qualified_call(&["xs", method])).0, None, "xs.{method}() unhinted");
+        assert_eq!(same_expression(&hinted, method, &qualified_call(&["ys", method])).0, Some(DataType::String), "ys.{method}()");
+    }
 }

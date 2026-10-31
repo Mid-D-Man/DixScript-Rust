@@ -220,18 +220,23 @@ qualified identifiers (enum access, namespaced calls, methods on typed collectio
 property access. The `@DATA` analyzer, the `@QUICKFUNCS` analyzer and the language server use it.
 
 **Decisions:**
-- **This file reads the owned `Value` and `Expression` types and is unchanged in behavior.**
-  `type_inference_arena.rs` adds the same four entry points for a node in an `Arena` (see
-  `arena-ast.md`). The two implementations share every function that depends on names alone, so a
-  few private items here (the method tables, the identifier and function lookups, the numeric
-  check) and the three fields became `pub(super)`. Nothing else here changed.
-- **Both implementations exist on purpose, for now.** The `@QUICKFUNCS` analyzer and the language
-  server still call the owned entry points, and the analyzer calls them from inside its own
-  recursion, so turning them into a wrapper that copies each subtree into an arena would make that
-  analyzer slower until it moves. When it moves, these entry points become wrappers over the arena
-  ones and the duplicated tree-walking code is deleted.
-- This file is the oracle for `tests/type_inference_arena.rs`, which compares the two on every node
-  of the corpus.
+- **The four owned entry points are wrappers.** `infer_type_from_value`, `infer_type_from_expression`,
+  `infer_element_type_from_value` and `infer_element_type_from_expression` copy their argument into a
+  scratch arena and call the entry point of the same name with an `_id` suffix, which lives in
+  `type_inference_arena.rs` (see `arena-ast.md`). There is one implementation of the walk, so the two
+  forms cannot disagree. A caller that already holds an arena should call the `_id` forms: they copy
+  nothing.
+- **What depends on names alone stays here and is shared:** the method tables, the identifier and
+  function lookups, the function return types, the numeric check and the tuple slot of a positional
+  method. The tree-walking code that used to be here (about 750 lines) and the two method tables only it
+  used are gone.
+- **The cost for the language server is not measured.** It calls the owned entry points on single
+  expressions, so each call now copies that expression's subtree into an arena first. That is linear in
+  the size of the expression, and the expressions it asks about are small, but a very deep expression
+  asked about at every level of its own walk would pay for the copy at each level.
+- The public items of this file now have rustdoc, with two examples that run as doctests.
+- `tests/type_inference_arena.rs` pins the answers to the ones the owned walker gave before it was
+  removed.
 
 ### `Compiler/Core/SectionAnalyzers/data_section_analyzer.rs`
 
@@ -670,8 +675,8 @@ codes are reachable from text or from hand-built input.
   checks and reads statements, expressions and values through the arena. `analyze(&QuickFuncsSection,
   ...)` stays for callers that only have an owned `DixScript`: it copies the section into a scratch
   arena and calls `analyze_doc`, so the two cannot disagree.
-- **Types are inferred with the arena entry points of `TypeInferenceVisitor`.** The owned visitor is no
-  longer called from here, but the language server still uses it, so it stays.
+- **Types are inferred with the arena entry points of `TypeInferenceVisitor`.** The owned entry points
+  are wrappers over them now and are used by the language server.
 - **The arena is passed down as an argument** (31 validators take it), as in the `@DATA` analyzer.
 - **Resolutions are keyed by position and name parts, not by node,** so the map the enhancer reads is
   the same whichever tree was analyzed.
@@ -1590,6 +1595,6 @@ requires the larger to take less than 7 times as long.
   call written as a value is not resolved, which the recorded output depends on.
 - **Not done in this drop.** CI on stable Rust has not been run. The owned tree is still cloned and
   the enhanced section still copied out of the arena, so there is no saving yet; speed and peak
-  memory were not measured. The owned `TypeInferenceVisitor` entry points are not wrappers yet, the
+  memory were not measured. The owned `TypeInferenceVisitor` entry points became wrappers in the next drop (see `arena-ast.md`), the
   orchestrator still reads `@ENUMS`, `@DLM` and `@IMPORTS` through the owned tree, and the language
   server still calls the owned entry points.

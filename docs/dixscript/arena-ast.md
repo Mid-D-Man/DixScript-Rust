@@ -1268,6 +1268,6 @@ sources.
   now cover them, all eight are noticed, and the new expectations were run against the original
   implementation first.
 - **Not done in this drop.** The language server's cost for the copy is not measured. `AstVisitorBase`
-  is untouched. The orchestrator still reads `@ENUMS`, `@DLM` and `@IMPORTS` through the owned tree, and
+  is untouched. The orchestrator read `@ENUMS`, `@DLM` and `@IMPORTS` through the owned tree in that drop (it reads them from the document in the next one, see `compiler.md`), and
   the value resolver, the runtime and the DLM auditor still read the owned types. CI on stable Rust has
   not been run.

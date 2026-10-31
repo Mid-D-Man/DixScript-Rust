@@ -284,8 +284,33 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         true
     }
 
+    /// The `@IMPORTS` section of the tree that is read: the document's when one is attached, the
+    /// owned tree's otherwise. The section is the same owned type in both.
+    fn imports_section(&self) -> Option<&'a ImportsSection> {
+        match self.document {
+            Some(document) => document.imports.as_ref(),
+            None           => self.ast.imports.as_ref(),
+        }
+    }
+
+    /// The `@ENUMS` section of the tree that is read. See [`imports_section`](Self::imports_section).
+    fn enums_section(&self) -> Option<&'a EnumsSection> {
+        match self.document {
+            Some(document) => document.enums.as_ref(),
+            None           => self.ast.enums.as_ref(),
+        }
+    }
+
+    /// The `@DLM` section of the tree that is read. See [`imports_section`](Self::imports_section).
+    fn dlm_section(&self) -> Option<&'a DLMSection> {
+        match self.document {
+            Some(document) => document.dlm.as_ref(),
+            None           => self.ast.dlm.as_ref(),
+        }
+    }
+
     fn analyze_phase2_imports_semantic(&mut self) -> bool {
-        let imports = match &self.ast.imports {
+        let imports = match self.imports_section() {
             Some(s) if !s.imports.is_empty() => s,
             _ => return true,
         };
@@ -340,7 +365,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
     fn analyze_phase3_imports_resolution(&mut self) -> bool {
         if self.operational_settings.skip_imports_resolution { return true; }
 
-        let imports = match &self.ast.imports {
+        let imports = match self.imports_section() {
             Some(s) if !s.imports.is_empty() => s,
             _ => return true,
         };
@@ -390,7 +415,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
     }
 
     fn analyze_phase4_foundation(&mut self) -> bool {
-        let enums = match &self.ast.enums {
+        let enums = match self.enums_section() {
             Some(s) => s,
             None    => return true,
         };
@@ -477,7 +502,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
     }
 
     fn analyze_phase6_independent(&mut self) {
-        let dlm = match &self.ast.dlm {
+        let dlm = match self.dlm_section() {
             Some(s) => s,
             None    => return,
         };
@@ -604,10 +629,10 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
     /// Checks `@SECURITY`, and reports a missing one when `@DLM` asks for an encryptor.
     ///
-    /// Reads the `Document` when the caller attached one, and the owned tree otherwise. The
-    /// `@DLM` section is the same owned type in both, so it is read from the tree.
+    /// Reads the `Document` when the caller attached one, and the owned tree otherwise, for both
+    /// `@SECURITY` and the `@DLM` section that decides whether one is required.
     fn analyze_phase8_generated(&mut self) {
-        let requires_security = self.ast.dlm.as_ref()
+        let requires_security = self.dlm_section()
             .map(|dlm| dlm.modules.iter().any(|m| matches!(m.module_type, DLMModuleType::DEncryptor)))
             .unwrap_or(false);
 

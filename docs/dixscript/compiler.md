@@ -428,6 +428,16 @@ token stream, parses it, and assigns the result onto a `Document`, which `parse`
   and that includes the check that `@DLM` with an encryptor has a `@SECURITY` section. The
   constructors are unchanged, so the imports resolver, the language server and every test that
   builds the analyzer from an owned tree compile and behave as they did.
+- **`@IMPORTS`, `@ENUMS` and `@DLM` are read from the tree that is read as well.** The document
+  holds the owned types for them, so they need no arena entry point; three small helpers,
+  `imports_section`, `enums_section` and `dlm_section`, return the document's section when one is
+  attached and the owned tree's otherwise. The five places that read these sections use them: the
+  imports in the semantic phase and in the resolution phase, the enums, the `@DLM` phase, and the
+  `@DLM` that decides whether `@SECURITY` is required. Every section the orchestrator looks at now
+  follows the one rule, so the owned export can go as soon as the last stage after the orchestrator has
+  moved. For a file the loader produces the result is the same as before. For a pair that disagrees on
+  purpose, the `@DLM` of the document now decides whether an encryptor needs a `@SECURITY` section; it
+  used to be the `@DLM` of the owned tree.
 - The analyzer does not check that the document and the owned tree describe the same file. A pair
   that disagrees is analysed as a mixture of both, and two tests build such a pair on purpose to
   show which half a section reads.
@@ -897,6 +907,27 @@ change, and checks which tree is read.
   large as it was, and only the path to a resolved identifier is allocated.
 
 **Tests:** `cargo test -p dixscript --test quickfuncs_enhancer_document`. 15 tests, all passing on
+Rust 1.75.
+
+### `tests/orchestrator_sections_document.rs`
+
+**What it does:** Shows which tree the orchestrator reads `@IMPORTS`, `@ENUMS` and `@DLM` from. Each
+test gives the analyzer an owned tree and a document that disagree on purpose, one with the section
+and one without, attaches the document or not, and checks what the result holds.
+
+**Decisions:**
+- **Both directions for each section.** The document has it and the tree does not, then the other way
+  round, each with the document attached and detached. A read that ignores the document, or ignores
+  the tree, fails one of the four.
+- **The feature checks are reached by switching the features after parsing,** because the parser itself
+  refuses a section whose feature is off. The imports check runs in two phases, so the error is reported
+  twice; the test pins that.
+- **The encryptor requirement is reached by taking the generated `@SECURITY` section out** of the tree
+  that is read, since the parser adds a default one whenever `@DLM` asks for an encryptor.
+- **Equality with the code from before the change is not repeated here.** It was checked once, over the
+  corpus and 75 crafted sources with the features on and off (see the Fixes entry).
+
+**Tests:** `cargo test -p dixscript --test orchestrator_sections_document`. 7 tests, all passing on
 Rust 1.75.
 
 ## Fixes and Problems
@@ -1596,5 +1627,32 @@ requires the larger to take less than 7 times as long.
 - **Not done in this drop.** CI on stable Rust has not been run. The owned tree is still cloned and
   the enhanced section still copied out of the arena, so there is no saving yet; speed and peak
   memory were not measured. The owned `TypeInferenceVisitor` entry points became wrappers in the next drop (see `arena-ast.md`), the
-  orchestrator still reads `@ENUMS`, `@DLM` and `@IMPORTS` through the owned tree, and the language
+  orchestrator read `@ENUMS`, `@DLM` and `@IMPORTS` through the owned tree in that drop (it reads them from the document since the one after the next, see below), and the language
   server still calls the owned entry points.
+
+### Fixes and Problems: the orchestrator reads `@IMPORTS`, `@ENUMS` and `@DLM` from the Document
+
+- **What changed.** The five places in `general_semantics_analyzer.rs` that read these sections through
+  the owned tree now read them through the tree that is read, with three helpers. Nothing else in the
+  library changed.
+- **How it was checked against the previous code.** A throwaway harness printed the whole semantic
+  result (errors with ids, types, sections, messages and positions, warnings, every section result,
+  the enums, functions, namespaces and data variables of the symbol table) for the 84 corpus files and
+  75 crafted sources (16 of them new, for enums, `@DLM` and imports), through the owned path and through
+  the document, with the default features and with the features switched to `data` only after parsing.
+  The four outputs after the change are identical to the ones from before it, byte for byte; before
+  the change the two paths were already identical to each other. With the features off the run reaches
+  the orchestrator's own feature errors (49 for `@ENUMS`, 25 for `@IMPORTS`).
+- **One existing test changed, on purpose.** The third case of
+  `a_missing_section_is_looked_up_in_the_attached_document` in `security_analyzer_document.rs` gave the
+  analyzer an owned tree with an encryptor and a document with no `@DLM`, and expected the requirement
+  for `@SECURITY` to come from the owned tree. Under the rule that the tree that is read decides, a
+  document with no `@DLM` asks for nothing, so the case now uses a document with the encryptor and no
+  `@SECURITY` section (which still reports `SEM0002`), and a new assertion pins the other reading. No
+  file the loader produces is affected, because its tree is exported from its document.
+- **Bugs were injected afterwards.** Eight bugs reverted each read to the owned tree, one at a time
+  (each helper, the two imports phases, the enums phase, the `@DLM` phase, the encryptor requirement),
+  and all eight are noticed by the seven new tests.
+- **Not done in this drop.** The value resolver, the runtime, the DLM auditor and the binary packer
+  still read the owned types, as do `version_constraints`, `version_manager` and `ImportsResolver`;
+  the owned export therefore stays. CI on stable Rust has not been run.

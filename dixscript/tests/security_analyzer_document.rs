@@ -602,8 +602,9 @@ fn the_analyzer_reads_the_owned_tree_when_no_document_is_attached() {
 
 #[test]
 fn a_missing_section_is_looked_up_in_the_attached_document() {
-    // `@DLM` asks for an encryptor (that section is read from the owned tree in both cases), so
-    // a file with no @SECURITY section is an error. Which tree says "no section" decides it.
+    // `@DLM` asks for an encryptor, so a file with no @SECURITY section is an error. Both the
+    // `@DLM` section and the `@SECURITY` section are read from the document when one is attached,
+    // so which tree says "no section" decides it.
     let mut requires = parse(source("sec_dlm_requires_security"), ErrorHandlingStrategy::Continue).expect("parses");
     // The parser added a default @SECURITY section; take it away to model a file without one.
     requires.ast.security = None;
@@ -623,7 +624,15 @@ fn a_missing_section_is_looked_up_in_the_attached_document() {
     // The document has no section: the error is reported even though the tree has one.
     let with_tree_section = parse(source("sec_dlm_requires_security"), ErrorHandlingStrategy::Continue).expect("parses");
     assert!(with_tree_section.ast.security.is_some());
-    let (result, _) = analyze(&with_tree_section.ast, &with_tree_section.settings, Some(&without_section.document));
+    let mut document_without_section = parse(source("sec_dlm_requires_security"), ErrorHandlingStrategy::Continue).expect("parses");
+    document_without_section.document.security = None;
+    let (result, _) = analyze(&with_tree_section.ast, &with_tree_section.settings, Some(&document_without_section.document));
     assert!(result.errors.iter().any(|e| e.error_id == "SEM0002"), "{:?}", result.errors);
+    assert!(!result.section_results.contains_key("SECURITY"));
+
+    // The requirement comes from the `@DLM` of the document too: a document with no `@DLM` asks for
+    // nothing, whatever the owned tree says.
+    let (result, _) = analyze(&with_tree_section.ast, &with_tree_section.settings, Some(&without_section.document));
+    assert!(!result.errors.iter().any(|e| e.error_id == "SEM0002"), "{:?}", result.errors);
     assert!(!result.section_results.contains_key("SECURITY"));
 }

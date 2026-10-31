@@ -73,6 +73,11 @@ Breaking release.
   keep their signatures and results, and now copy their argument into a scratch arena and call the
   `_id` entry points. The code that walked the owned tree is gone, and the public items of
   `type_inference_visitor.rs` have rustdoc with examples.
+- **`GeneralSemanticAnalyzer::with_document` now covers `@IMPORTS`, `@ENUMS` and `@DLM`** as well, so
+  every section the analyzer looks at is read from the document when one is attached. They are the same
+  owned types in both trees, so the results do not change for a file the loader produces. For a
+  document and an owned tree that disagree, the `@DLM` of the document decides whether an encryptor
+  needs a `@SECURITY` section.
 
 ### Removed
 

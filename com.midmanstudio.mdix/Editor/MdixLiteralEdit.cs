@@ -47,6 +47,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 case MdixLiteralKind.Bool:     return db.GetBool(path).UnwrapOr(false) ? "true" : "false";
                 case MdixLiteralKind.String:   return db.GetString(path).UnwrapOr(string.Empty);
                 case MdixLiteralKind.HexColor: return span.TextIn(source);
+                case MdixLiteralKind.Enum:     return span.TextIn(source);
                 case MdixLiteralKind.RawString: return db.GetString(path).UnwrapOr(string.Empty);
                 case MdixLiteralKind.Date:
                 case MdixLiteralKind.Timestamp: return db.GetString(path).UnwrapOr(string.Empty);
@@ -80,20 +81,33 @@ namespace MidManStudio.Mdix.Unity.Editor
             switch (kind)
             {
                 case MdixLiteralKind.Int:
-                {
-                    long n;
-                    if (!MdixSourceMap.TryParseWhole(text, out n) || n < int.MinValue || n > int.MaxValue)
-                    { error = "Enter a whole number from -2147483648 to 2147483647."; return false; }
-                    literal = expected = n.ToString(Inv);
-                    return true;
-                }
                 case MdixLiteralKind.Long:
                 {
+                    // The notation (decimal, 0x or 0b) and the type stay as they were; any notation may be typed.
                     long n;
-                    if (!MdixSourceMap.TryParseWhole(MdixSourceMap.TrimSuffix(text, 'L', 'l'), out n))
-                    { error = "Enter a whole number."; return false; }
+                    if (!MdixIntegerText.TryRewrite(oldLiteral, kind == MdixLiteralKind.Long, text, out literal, out n, out error)) return false;
                     expected = n.ToString(Inv);
-                    literal  = expected + "L";
+                    return true;
+                }
+                case MdixLiteralKind.Enum:
+                {
+                    var dot = (oldLiteral ?? string.Empty).IndexOf('.');
+                    if (dot <= 0) { error = "This is not an enum value."; return false; }
+
+                    var typeName = oldLiteral.Substring(0, dot);
+                    var member   = text;
+
+                    var typed = text.IndexOf('.');
+                    if (typed >= 0)
+                    {
+                        if (!string.Equals(text.Substring(0, typed), typeName, StringComparison.Ordinal))
+                        { error = "This value is a " + typeName + ": pick one of its members."; return false; }
+                        member = text.Substring(typed + 1);
+                    }
+
+                    if (!IsIdentifier(member)) { error = "Enter a member of " + typeName + "."; return false; }
+
+                    literal = expected = typeName + "." + member;
                     return true;
                 }
                 case MdixLiteralKind.Float:
@@ -189,7 +203,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                     var hex = text.StartsWith("#", StringComparison.Ordinal) ? text.Substring(1) : text;
                     float r, g, b, a;
                     if (!MdixSourceMap.TryParseHex("#" + hex, out r, out g, out b, out a))
-                    { error = "Enter a colour like #FF8800 or #FF8800CC."; return false; }
+                    { error = "Enter a colour like #F80, #F80C, #FF8800 or #FF8800CC."; return false; }
                     literal = "#" + hex.ToUpperInvariant();
                     return true;
                 }
@@ -197,6 +211,13 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             error = "This kind of value cannot be edited here.";
             return false;
+        }
+
+        private static bool IsIdentifier(string s)
+        {
+            if (string.IsNullOrEmpty(s) || !(char.IsLetter(s[0]) || s[0] == '_')) return false;
+            foreach (var c in s) if (!(char.IsLetterOrDigit(c) || c == '_')) return false;
+            return true;
         }
 
         /// <summary>Text as a quoted literal: the compiler's escapes written for backslash, the quote, newline, return and tab.</summary>
@@ -378,6 +399,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 case MdixLiteralKind.Timestamp: return MdixValueType.Timestamp;
                 case MdixLiteralKind.Regex:    return MdixValueType.Regex;
                 case MdixLiteralKind.Blob:     return MdixValueType.Blob;
+                case MdixLiteralKind.Enum:     return MdixValueType.Enum;
                 default:                       return MdixValueType.HexColor;
             }
         }

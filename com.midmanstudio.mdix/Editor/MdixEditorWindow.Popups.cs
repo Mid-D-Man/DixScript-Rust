@@ -33,6 +33,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 case MdixLiteralKind.Timestamp:
                 case MdixLiteralKind.Regex:
                 case MdixLiteralKind.Blob:
+                case MdixLiteralKind.Enum:
                 case MdixLiteralKind.RawString:
                     return true;
 
@@ -103,6 +104,32 @@ namespace MidManStudio.Mdix.Unity.Editor
                     _lastRegexTestText = editor.TestText;
                     return ApplyExplorerEdit(path, editor.Pattern, oldLiteral, () => popup.Close());
                 };
+            }
+            else if (kind == MdixLiteralKind.Enum)
+            {
+                // "Type.MEMBER": the members come from the @ENUMS section of the text being edited.
+                var dot      = initial.IndexOf('.');
+                var typeName = dot > 0 ? initial.Substring(0, dot) : initial;
+                var current  = dot > 0 ? initial.Substring(dot + 1) : string.Empty;
+
+                MdixEnumDef def;
+                if (!MdixSourceMap.BuildEnums(_sourceText).TryGetValue(typeName, out def))
+                {
+                    SetStatus("✗  " + typeName + " is not declared in this file's @ENUMS section, so its members are not known here.", error: true);
+                    return;
+                }
+
+                var picker = new MdixEnumPicker(def, current);
+                picker.Changed += () =>
+                {
+                    if (popup != null) popup.SetApplyEnabled(picker.IsChanged);
+                };
+
+                title         = "Choose " + typeName;
+                body          = picker.Root;
+                focus         = null;
+                startDisabled = true;
+                apply         = () => ApplyExplorerEdit(path, picker.Selected, oldLiteral, () => popup.Close());
             }
             else if (kind == MdixLiteralKind.Blob)
             {

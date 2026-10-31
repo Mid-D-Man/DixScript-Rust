@@ -602,3 +602,26 @@
     flex-wrap: wrap;
     margin-top: 10px;
 }
+
+/* Enum popup */
+.mdix-enum {
+    min-width: 280px;
+}
+
+.mdix-enum__list {
+    max-height: 260px;
+    margin-top: 6px;
+}
+
+.mdix-enum__item {
+    margin-left: 0;
+    margin-right: 0;
+    margin-bottom: 2px;
+    -unity-text-align: middle-left;
+}
+
+.mdix-enum__item--on {
+    background-color: #1E3A7A;
+    border-color: #3B7EF6;
+    color: #E8EDF5;
+}

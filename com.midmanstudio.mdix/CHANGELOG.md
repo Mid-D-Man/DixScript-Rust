@@ -51,6 +51,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   base64), **Save as** writes the data to a file, and **Open** opens a temporary copy in the default
   app. Needs the built-in modules `unitywebrequestaudio` and `imageconversion` (both on by default).
   (`Editor/Popups/MdixBlobEditor.cs`, `MdixAudioPreview.cs`, `MdixBlobTemp.cs`.)
+- MDIX Studio Explorer: hex (`0xFF`) and binary (`0b1010`) integers can be edited. Type the number in
+  any notation (`255`, `0xFF`, `0b1111_1111`); it is written back in the notation the file used, and
+  the type stays the same: an Int refuses a value that would not fit in 32 bits, and a Long keeps an
+  `L` it had. Read the way the compiler's lexer reads them (`_` separators, an `L` suffix, and
+  `0xFFFFFFFF` is a Long, not -1). (`Editor/Popups/MdixIntegerText.cs`.)
+- MDIX Studio Explorer: 4-digit colours (`#RGBA`) can be edited, and keep their length.
+- MDIX Studio Explorer: an enum value (`Rarity.RARE`) opens a picker listing the members declared in
+  the file's `@ENUMS` section, with their numbers when the declaration gave one. The runtime cannot
+  list an enum's members, so an enum declared in an imported file is not found and stays read-only.
+  (`Editor/Popups/MdixEnumPicker.cs`.)
+- MDIX Studio Explorer: the plain rows of a `name::` list (`testArray:: 1, 2, 3`) can be edited like
+  array items. A row that is a function call is still skipped.
+- **Assets, Create, MDIX, Explorer Tour Samples** writes two sample files and a README into the
+  project: `ExplorerTour.mdix` (text, dates, timestamps, regexes and blobs of every kind, including a
+  PNG, a JPEG, a WAV and an Ogg Vorbis) and `NumbersEnumsAndLists.mdix` (numbers, hex and binary
+  integers, colours, enums, arrays and tuples), for trying the Explorer's editors. They are embedded
+  in `Editor/MdixSampleData.cs` because the repository's `.gitignore` ignores `Samples~` folders.
 - MDIX Studio Explorer: blob and regex values show `blob  4.2 KB  PNG` and `r:(pattern)` instead
   of `?`. The type is read from the first bytes only, so a large blob costs nothing to show.
   (`Editor/Popups/MdixBlobInfo.cs`.)

@@ -8,9 +8,11 @@ namespace MidManStudio.Mdix.Unity.Editor
 {
     /// <summary>
     /// The kinds of literal the Explorer can edit. Regex and Blob are written <c>r:("...")</c> and
-    /// <c>b:("...")</c>; their span covers the whole of that, prefix and parentheses included.
+    /// <c>b:("...")</c>; their span covers the whole of that, prefix and parentheses included. An Enum is
+    /// <c>Type.MEMBER</c>, and only counts when Type is declared in the file's @ENUMS section. An Int or a Long
+    /// may be written in decimal, hex (<c>0xFF</c>) or binary (<c>0b1010</c>).
     /// </summary>
-    internal enum MdixLiteralKind { Int, Long, Float, Double, Bool, String, HexColor, RawString, Date, Timestamp, Regex, Blob }
+    internal enum MdixLiteralKind { Int, Long, Float, Double, Bool, String, HexColor, RawString, Date, Timestamp, Regex, Blob, Enum }
 
     /// <summary>Where one literal sits in the source text.</summary>
     internal readonly struct MdixValueSpan
@@ -29,14 +31,40 @@ namespace MidManStudio.Mdix.Unity.Editor
         public string TextIn(string source) => source.Substring(Start, Length);
     }
 
+    /// <summary>One member of an enum declared in @ENUMS. <see cref="Value"/> is the text after "=", or null when none was written.</summary>
+    internal sealed class MdixEnumMember
+    {
+        public readonly string Name;
+        public readonly string Value;
+
+        public MdixEnumMember(string name, string value) { Name = name; Value = value; }
+    }
+
+    /// <summary>An enum declared in @ENUMS: its name and its members, in the order they were written.</summary>
+    internal sealed class MdixEnumDef
+    {
+        public readonly string Name;
+        public readonly List<MdixEnumMember> Members = new List<MdixEnumMember>();
+
+        public MdixEnumDef(string name) { Name = name; }
+
+        public bool Has(string member)
+        {
+            foreach (var m in Members)
+                if (string.Equals(m.Name, member, StringComparison.Ordinal)) return true;
+            return false;
+        }
+    }
+
     /// <summary>
     /// Finds the plain literals of the @DATA section and the data path each one produces, so the Explorer
     /// can change a value by replacing exactly those characters.
     ///
     /// Only what can be located with certainty is mapped: a literal that is the whole value of a property,
-    /// an object member or an array item. That includes `backtick` raw strings, dates, timestamps and the
-    /// regex and blob constructors <c>r:("...")</c> / <c>b:("...")</c>. Anything computed (function-call
-    /// arguments, enum members, expressions, tuples) is left out, so it stays read-only.
+    /// an object member or an array item. That includes `backtick` raw strings, dates, timestamps, the
+    /// regex and blob constructors <c>r:("...")</c> / <c>b:("...")</c>, hex and binary integers and members of
+    /// enums declared in @ENUMS. Anything computed (function-call arguments, expressions, tuples) is left out,
+    /// so it stays read-only.
     ///
     /// This is a small reader of the syntax, not the compiler's parser, so nothing it says is trusted on
     /// its own: <see cref="Matches"/> checks each span against the compiled data, and
@@ -57,7 +85,9 @@ namespace MidManStudio.Mdix.Unity.Editor
             try
             {
                 var tokens = Tokenize(source);
-                new Parser(source, tokens, spans).ParseData();
+                var parser = new Parser(source, tokens, spans);
+                parser.ParseEnums();
+                parser.ParseData();
             }
             catch (Exception)
             {
@@ -65,6 +95,23 @@ namespace MidManStudio.Mdix.Unity.Editor
                 spans.Clear();
             }
             return spans;
+        }
+
+        /// <summary>The enums declared in the source's @ENUMS section, by name. Empty when there are none or the text cannot be read.</summary>
+        public static Dictionary<string, MdixEnumDef> BuildEnums(string source)
+        {
+            if (string.IsNullOrEmpty(source)) return new Dictionary<string, MdixEnumDef>(StringComparer.Ordinal);
+
+            try
+            {
+                var parser = new Parser(source, Tokenize(source), new Dictionary<string, MdixValueSpan>(StringComparer.Ordinal));
+                parser.ParseEnums();
+                return parser.Enums;
+            }
+            catch (Exception)
+            {
+                return new Dictionary<string, MdixEnumDef>(StringComparer.Ordinal);
+            }
         }
 
         /// <summary>True when the compiled value at <paramref name="path"/> is exactly the literal in <paramref name="span"/>.</summary>
@@ -79,17 +126,28 @@ namespace MidManStudio.Mdix.Unity.Editor
             {
                 case MdixLiteralKind.Int:
                 {
-                    long n;
-                    if (type != MdixValueType.Int || !TryParseWhole(text, out n)) return false;
+                    long n; bool isLong; int radix;
+                    if (type != MdixValueType.Int || !MdixIntegerText.TryParse(text, out n, out isLong, out radix) || isLong) return false;
                     var r = db.GetInt(path);
                     return r.IsSuccess && r.SuccessResult == n;
                 }
                 case MdixLiteralKind.Long:
                 {
-                    long n;
-                    if (type != MdixValueType.Long || !TryParseWhole(TrimSuffix(text, 'L', 'l'), out n)) return false;
+                    long n; bool isLong; int radix;
+                    if (type != MdixValueType.Long || !MdixIntegerText.TryParse(text, out n, out isLong, out radix) || !isLong) return false;
                     var r = db.GetLong(path);
                     return r.IsSuccess && r.SuccessResult == n;
+                }
+                case MdixLiteralKind.Enum:
+                {
+                    var dot = text.IndexOf('.');
+                    if (type != MdixValueType.Enum || dot <= 0) return false;
+
+                    var typeName = db.GetEnumName(path);
+                    var member   = db.GetEnumField(path);
+                    return typeName.IsSuccess && member.IsSuccess &&
+                           string.Equals(typeName.SuccessResult, text.Substring(0, dot), StringComparison.Ordinal) &&
+                           string.Equals(member.SuccessResult,   text.Substring(dot + 1), StringComparison.Ordinal);
                 }
                 case MdixLiteralKind.Float:
                 {
@@ -256,7 +314,9 @@ namespace MidManStudio.Mdix.Unity.Editor
             if (text.Length < 2 || text[0] != '#') return false;
             var h = text.Substring(1);
 
+            // #RGB and #RGBA repeat each digit; #RRGGBB and #RRGGBBAA are as written.
             if (h.Length == 3)      h = "" + h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+            else if (h.Length == 4) h = "" + h[0] + h[0] + h[1] + h[1] + h[2] + h[2] + h[3] + h[3];
             else if (h.Length != 6 && h.Length != 8) return false;
 
             int v;
@@ -350,10 +410,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 }
                 else if (c == '0' && i + 1 < n && (s[i + 1] == 'x' || s[i + 1] == 'X' || s[i + 1] == 'b' || s[i + 1] == 'B'))
                 {
-                    int j = i + 2;
-                    while (j < n && (IsIdentPart(s[j]))) j++;
-                    tok.Type = TokType.Other;
-                    tok.End  = j;
+                    ScanPrefixedInteger(s, i, tok);
                 }
                 else if (IsDigit(c) || (c == '-' && i + 1 < n && IsDigit(s[i + 1])))
                 {
@@ -395,6 +452,43 @@ namespace MidManStudio.Mdix.Unity.Editor
         }
 
         /// <summary>Follows the compiler's own scan of decimal numbers, dates and timestamps.</summary>
+        // 0x then hex digits, or 0b then 0 and 1; "_" may separate digits; a trailing L (not followed by an
+        // identifier character) makes a Long. Anything that does not read as an integer stays an unmapped token.
+        private static void ScanPrefixedInteger(string s, int start, Tok tok)
+        {
+            int n = s.Length, j = start + 2;
+            var hex = s[start + 1] == 'x' || s[start + 1] == 'X';
+            var any = false;
+
+            while (j < n)
+            {
+                var c = s[j];
+                if (c == '_') { j++; continue; }
+                if (hex ? IsHexDigit(c) : (c == '0' || c == '1')) { any = true; j++; continue; }
+                break;
+            }
+
+            if (j < n && (s[j] == 'L' || s[j] == 'l') && !(j + 1 < n && IsIdentPart(s[j + 1]))) j++;
+
+            long value; bool isLong; int radix;
+            var valid = any && !(j < n && IsIdentPart(s[j])) &&
+                        MdixIntegerText.TryParse(s.Substring(start, j - start), out value, out isLong, out radix);
+
+            if (valid)
+            {
+                MdixIntegerText.TryParse(s.Substring(start, j - start), out value, out isLong, out radix);
+                tok.Type = TokType.Number;
+                tok.Num  = isLong ? MdixLiteralKind.Long : MdixLiteralKind.Int;
+            }
+            else
+            {
+                // Not an integer the compiler would read: the whole word stays one unmapped token.
+                while (j < n && IsIdentPart(s[j])) j++;
+                tok.Type = TokType.Other;
+            }
+            tok.End = j;
+        }
+
         private static void ScanNumber(string s, int start, Tok tok)
         {
             int n = s.Length, j = start;
@@ -487,10 +581,54 @@ namespace MidManStudio.Mdix.Unity.Editor
             private readonly List<Tok>                          _t;
             private readonly Dictionary<string, MdixValueSpan>  _spans;
             private int                                         _p;
+            private readonly Dictionary<string, MdixEnumDef>    _enums = new Dictionary<string, MdixEnumDef>(StringComparer.Ordinal);
 
             public Parser(string src, List<Tok> tokens, Dictionary<string, MdixValueSpan> spans)
             {
                 _src = src; _t = tokens; _spans = spans;
+            }
+
+            public Dictionary<string, MdixEnumDef> Enums => _enums;
+
+            // Reads "@ENUMS( Name { MEMBER, OTHER = 2 } ... )". A name that is not declared here is not an enum value
+            // in @DATA, so this is what tells Type.MEMBER from any other dotted name.
+            public void ParseEnums()
+            {
+                for (int i = 0; i + 2 < _t.Count; i++)
+                {
+                    if (!(IsSym(i, "@") && IsSectionNameText(i + 1, "ENUMS") && IsSym(i + 2, "(") && _t[i + 1].Start == _t[i].End)) continue;
+
+                    var p = i + 3;
+                    while (p < _t.Count && !IsSym(p, ")"))
+                    {
+                        if (!IsIdent(p) || !IsSym(p + 1, "{")) { p++; continue; }
+
+                        var def = new MdixEnumDef(Text(p));
+                        p += 2;
+
+                        while (p < _t.Count && !IsSym(p, "}"))
+                        {
+                            if (!IsIdent(p)) { p++; continue; }
+
+                            var name  = Text(p);
+                            string value = null;
+                            p++;
+
+                            if (IsSym(p, "=") && p + 1 < _t.Count)
+                            {
+                                var v = _t[p + 1];
+                                if (v.Type == TokType.Number || v.Type == TokType.Other)
+                                    value = _src.Substring(v.Start, v.End - v.Start);
+                                p += 2;
+                            }
+                            def.Members.Add(new MdixEnumMember(name, value));
+                        }
+
+                        if (!_enums.ContainsKey(def.Name)) _enums[def.Name] = def;
+                        p++;                                            // the closing brace
+                    }
+                    return;
+                }
             }
 
             private bool End => _p >= _t.Count;
@@ -641,8 +779,10 @@ namespace MidManStudio.Mdix.Unity.Editor
                     if (row == 0 && IsEntryStart(_p) && !IsSym(_p, "{")) { /* a header with no rows */ return; }
 
                     var before = _p;
+                    // An object row has members; a plain row ("name:: 1, 2, 3") is a literal like any other, and
+                    // only a computed one (a function call) is skipped.
                     if (IsSym(_p, "{")) ParseObject(basePath + "[" + row + "]", 0);
-                    else                SkipExpression(topLevel: true);
+                    else                ParseValue(basePath + "[" + row + "]", topLevel: true, depth: 0);
 
                     if (_p == before) _p++;
                     row++;
@@ -680,7 +820,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 if (tok.Type == TokType.Sym && tok.Sym == "{") { ParseObject(path, depth + 1); return; }
                 if (tok.Type == TokType.Sym && tok.Sym == "[") { ParseArray(path, depth + 1);  return; }
 
-                if (tok.Type == TokType.Ident && TryMapPrefixed(path)) return;
+                if (tok.Type == TokType.Ident && (TryMapPrefixed(path) || TryMapEnum(path))) return;
 
                 MdixLiteralKind kind;
                 var literal = IsEditableLiteral(tok, out kind);
@@ -710,6 +850,25 @@ namespace MidManStudio.Mdix.Unity.Editor
             }
 
             private bool IsBoolWord(int idx) => IsIdentText(idx, "true") || IsIdentText(idx, "false");
+
+            // Type.MEMBER where Type is declared in @ENUMS and has that member. The three parts must touch, and
+            // nothing may continue the expression after them.
+            private bool TryMapEnum(string path)
+            {
+                var at = _p;
+                if (!IsSym(at + 1, ".") || !IsIdent(at + 2)) return false;
+                if (_t[at + 1].Start != _t[at].End || _t[at + 2].Start != _t[at + 1].End) return false;
+
+                MdixEnumDef def;
+                if (!_enums.TryGetValue(Text(at), out def) || !def.Has(Text(at + 2))) return false;
+
+                var last = at + 2;
+                if (last + 1 < _t.Count && ContinuesExpression(last + 1)) return false;
+
+                _spans[path] = new MdixValueSpan(_t[at].Start, _t[last].End - _t[at].Start, MdixLiteralKind.Enum);
+                _p = last + 1;
+                return true;
+            }
 
             /// <summary>
             /// Maps <c>r:("...")</c> and <c>b:("...")</c> as one literal. The compiler reads these only when the
@@ -762,7 +921,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                     case TokType.Hex:
                     {
                         var len = tok.End - tok.Start - 1;
-                        if (len != 3 && len != 6 && len != 8) return false;
+                        if (len != 3 && len != 4 && len != 6 && len != 8) return false;
                         kind = MdixLiteralKind.HexColor;
                         return true;
                     }

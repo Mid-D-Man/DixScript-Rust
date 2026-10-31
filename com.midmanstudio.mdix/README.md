@@ -419,9 +419,10 @@ choose **MDIX → Open in MDIX Studio**.
   capped (200 items per array) and says so.
 
   **Editing values in place.** A value written out in the file as a plain number, text, `true` /
-  `false`, colour, date, timestamp, regex, blob or `raw` string is highlighted when you hover it. Click it, type, and press Enter: the change
+  `false`, colour, date, timestamp, regex, blob, enum member or `raw` string is highlighted when you hover it. Click it, type, and press Enter: the change
   is made in the text of the Editor tab and compiled, and Esc (or clicking away) cancels. A number
-  keeps its type (a `Long` keeps its `L`, a `Float` its `f`, a `Double` stays a double), and text is
+  keeps its type (a `Long` keeps its `L`, a `Float` its `f`, a `Double` stays a double) and a hex or
+  binary one (`0xFF`, `0b1010`) keeps its notation, whichever notation you type, and text is
   escaped for you. A timestamp keeps its zone and fraction digits, and a regex is edited as the
   pattern itself (a backslash is written as `\\` in the file for you). The new text is compiled before it is accepted, and the edit is refused unless
   the value reads back exactly as entered and the data keeps the same paths. Values calculated
@@ -440,12 +441,16 @@ choose **MDIX → Open in MDIX Studio**.
   temporary copy in the default app. A `raw` string, and any text that
   is longer than 100 characters or has line breaks, opens a **text area** (Ctrl or Cmd + Enter
   applies). In a popup Enter applies, Esc cancels, and a refused edit is explained in the popup,
-  which stays open.
+  which stays open. An **enum** value opens a list of the members declared in the file's `@ENUMS`
+  section (an enum declared in an imported file is not found, and stays read-only).
 
   Only plain literals can be edited: a value produced by a function call (the `createEnemy("Goblin",
-  50, ...)` kind), an enum member, an expression, a tuple, `null` or a hex or binary number stays
-  read-only, because there is no single piece of text behind it that a field can hold. Change those
-  in the Editor tab, where a function argument is the thing to edit.
+  50, ...)` kind), an expression, a tuple or `null` stays read-only, because there is no single piece
+  of text behind it that a field can hold. Change those in the Editor tab, where a function argument
+  is the thing to edit.
+
+  To try every editor, use **Assets, Create, MDIX, Explorer Tour Samples**: it writes two sample
+  files and a README into the project, with a PNG, a JPEG, a WAV and an Ogg to look at and play.
 - **Editor tab** — source text editor with live compile status, syntax highlighting and
   language-server features (diagnostics, completion, hover — see below). **Save** on an
   unsaved scratch document asks where to put it.
@@ -547,6 +552,8 @@ com.midmanstudio.mdix/
 │   ├── MdixEditorWindow.Explorer.cs          ← tree view, folding, in-place editing
 │   ├── MdixSourceMap.cs                      ← where each plain literal sits in the text
 │   ├── MdixEditorWindow.Popups.cs            ← opens the value popups from the Explorer
+│   ├── MdixSampleMenu.cs                     ← Create > MDIX > Explorer Tour Samples
+│   ├── MdixSampleData.cs                     ← the sample files' text
 │   ├── MdixLiteralEdit.cs                    ← formats, applies and checks one edit
 │   ├── Popups/
 │   │   ├── MdixPopup.cs                      ← the modal card: Apply, Cancel, error line
@@ -558,6 +565,8 @@ com.midmanstudio.mdix/
 │   │   ├── MdixBlobEditor.cs                 ← blob viewer: preview, replace, save, open
 │   │   ├── MdixAudioPreview.cs               ← plays a WAV or Ogg blob in the editor
 │   │   ├── MdixBlobTemp.cs                   ← temporary copies outside the project
+│   │   ├── MdixIntegerText.cs                ← reads and writes decimal, hex and binary integers
+│   │   ├── MdixEnumPicker.cs                 ← the enum member list
 │   │   └── MdixBlobInfo.cs                   ← names a blob's type, hex dump, text preview
 │   ├── CreateMdixMenuItems.cs
 │   └── UI/

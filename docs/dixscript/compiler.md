@@ -1037,12 +1037,57 @@ Rust 1.75.
 ### `Compiler/ImportsResolution/imports_resolver.rs`
 
 **What it does:** Resolves `@IMPORTS` entries recursively, with cycle detection and
-cloud download.
+cloud download. For each imported file it reads the text, tokenizes and parses it, resolves the
+file's own imports first, analyzes and enhances it, and registers its global functions (the
+enhanced tree of each, with its parameter defaults) and its enums as a namespace of the symbol table.
+
+**Decisions:**
+- **An imported file is parsed to a `Document`, and the analyzer and the enhancer read it.**
+  `read_and_parse_raw` calls `parse_document` and exports the owned tree once, which the nested
+  import walk and the extraction of functions and enums still read. `analyze_and_enhance` gives the
+  document to `GeneralSemanticAnalyzer::with_document` and to `GeneralAstEnhancer::with_document`,
+  the path the loader takes for the main file. Before this, each imported file was parsed to a
+  document, exported, and then copied back into scratch arenas by the owned entry points of every
+  analyzer and of the enhancer.
+- **A file the caller parsed itself takes the owned path.** `resolve_imports`, which takes
+  already parsed trees, passes no document down, so its analysis and enhancement go through the owned
+  entry points as they always did. A file with no content has no document either.
+- **The two paths cannot show up in the result.** The document and the owned tree of an imported
+  file agree by construction, so the namespaces and the errors are the same whichever way they were
+  read; the tests pin the result and compare the two entry points with each other.
+- **The gain is small.** Callgrind on a debug build of the 5 file chemistry import chain counts
+  1,294.8 million instructions before and 1,292.3 million after, about 0.2% fewer, which is within what
+  the harness itself spends. Nothing else was measured.
 
 **Fixes and Problems:**
 - The cloud-import error path used `Result::inspect_err` (Rust 1.76). It is now
   `map_err` with the same side effect that returns the error unchanged, which builds
   on 1.75.
+
+**Tests:** `tests/imports_resolver_document.rs`.
+
+### `tests/imports_resolver_document.rs`
+
+**What it does:** Pins what `ImportsResolver` registers for 16 crafted files, and checks that the
+two ways in give the same namespaces.
+
+**Decisions:**
+- **The files are written to a temporary directory at run time,** because the resolver reads imports
+  from disk. The directory is replaced by `<DIR>` in everything that is fingerprinted, since the error
+  messages carry absolute paths.
+- **`RECORDING` holds, for each file, the number of namespaces, the number of errors and a 64 bit FNV-1a
+  hash of the dump,** which was produced by running the original code. The dump is the namespaces in
+  full (every function with its signature and enhanced tree, every enum, the local imports) and the
+  sorted imports errors. It is checked with the main file's analyzer given its own document and not.
+- **The 16 files** are a library with global and scoped functions, a default value, a lambda and an
+  enum; files that import it directly, twice over (a diamond) and through each other; an empty, a
+  missing, an unparsable and an unanalyzable import; a file that imports itself; and one file with
+  a good import, a bad one and a good one after it.
+- **The caller-parsed entry point is compared with the resolver reading the files itself** for two of
+  them, which is the only place the owned path is exercised on files with nested imports.
+
+**Tests:** `cargo test -p dixscript --test imports_resolver_document`. 5 tests, all passing on
+Rust 1.75.
 
 ### `Utilities/parser_collection_helper.rs`
 
@@ -1654,5 +1699,28 @@ requires the larger to take less than 7 times as long.
   (each helper, the two imports phases, the enums phase, the `@DLM` phase, the encryptor requirement),
   and all eight are noticed by the seven new tests.
 - **Not done in this drop.** The value resolver, the runtime, the DLM auditor and the binary packer
-  still read the owned types, as do `version_constraints`, `version_manager` and `ImportsResolver`;
+  still read the owned types, as do `version_constraints` and `version_manager` (`ImportsResolver` moved in the next drop);
   the owned export therefore stays. CI on stable Rust has not been run.
+
+### Fixes and Problems: `ImportsResolver` parses imported files to a Document
+
+- **What changed.** `imports_resolver.rs` only: an imported file is parsed with `parse_document`, and
+  the semantic analyzer and the enhancer are given the document. The public entry points keep their
+  signatures; `resolve_imports`, which takes trees the caller parsed, still takes the owned path.
+- **How it was checked against the previous code.** A throwaway harness printed, for the 84 corpus
+  files (17 of which import) and 16 crafted files, the whole semantic result of the main file, every
+  imported namespace in full (each function's signature and enhanced tree, the enums and the local
+  imports) and the error manager's imports errors, through the owned path and through the document
+  path. The four outputs after the change are identical to the ones before it, byte for byte. The
+  crafted files reach a success, a diamond, a nested chain, an empty file, a missing file, a parse
+  failure, a semantic failure, a self import, a mix of good and bad imports and a scoped function.
+- **No bug injection was done, and none would show anything.** The document and the owned tree of
+  an imported file agree, so a bug that made the resolver ignore the document would give the same
+  output; the property worth testing is that the output is the original's, which the recording does.
+- **The cost did not change measurably** (about 0.2% fewer instructions on the chemistry chain).
+- **Found while doing it, not changed.** The resolver attaches the config section to the exported
+  tree, which `parse_document` already did; the line is kept so the result stays byte for byte the
+  same. Cloud imports were exercised by the corpus only as far as they go without a network.
+- **Not done in this drop.** The extraction of functions and enums still reads the exported owned
+  tree, the owned export therefore stays, and `version_constraints` and `version_manager` still read
+  the owned tree. CI on stable Rust has not been run.

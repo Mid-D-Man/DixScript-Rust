@@ -78,6 +78,10 @@ Breaking release.
   owned types in both trees, so the results do not change for a file the loader produces. For a
   document and an owned tree that disagree, the `@DLM` of the document decides whether an encryptor
   needs a `@SECURITY` section.
+- **`ImportsResolver` parses each imported file to a `Document`** and gives it to the semantic analyzer
+  and the enhancer, as the loader does for the main file. Its entry points keep their signatures and
+  results; `resolve_imports`, which takes trees the caller parsed, still analyzes them through the owned
+  entry points.
 
 ### Removed
 

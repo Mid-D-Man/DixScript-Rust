@@ -13,6 +13,7 @@ use std::path::Path;
 // CloudProviderFactory gate just below.
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
+use crate::Compiler::AST::arena::Document;
 use crate::Compiler::AST::*;
 use crate::Compiler::Core::{
     ConfigSectionHandler,
@@ -36,6 +37,17 @@ use super::{HashVerifier, CloudFileCache};
 // combined condition.
 #[cfg(all(not(target_arch = "wasm32"), feature = "cloud-import"))]
 use super::CloudProviderFactory;
+
+/// An imported file as `read_and_parse_raw` returns it.
+///
+/// `ast` is the owned tree; `document` is the arena form it was exported from, which the semantic
+/// analyzer and the enhancer then read instead of copying the owned sections back into scratch
+/// arenas. A file with no content has no document, and neither has one that was parsed by the
+/// caller of [`ImportsResolver::resolve_imports`].
+struct ParsedImport {
+    ast:      DixScript,
+    document: Option<Document>,
+}
 
 pub struct ImportsResolver<'a> {
     symbol_table:         &'a mut SymbolTable,
@@ -120,7 +132,7 @@ impl<'a> ImportsResolver<'a> {
                 ));
             }
 
-            let raw_ast = match self.read_and_parse_raw(import, &resolved_path) {
+            let mut parsed = match self.read_and_parse_raw(import, &resolved_path) {
                 Ok(a)  => a,
                 Err(e) => {
                     self.error_manager.log_error(&format!(
@@ -137,7 +149,7 @@ impl<'a> ImportsResolver<'a> {
                 }
             };
 
-            if !self.resolve_import_recursive(&import.alias, &raw_ast, &resolved_path) {
+            if !self.resolve_import_recursive(&import.alias, &parsed.ast, parsed.document.as_mut(), &resolved_path) {
                 self.error_manager.log_error(&format!(
                     "[ImportsResolver] Failed to resolve '{}'",
                     import.alias,
@@ -207,7 +219,7 @@ impl<'a> ImportsResolver<'a> {
                 ));
             }
 
-            if !self.resolve_import_recursive(alias, ast, absolute_path) {
+            if !self.resolve_import_recursive(alias, ast, None, absolute_path) {
                 self.error_manager.log_error(&format!(
                     "[ImportsResolver] Failed to resolve import '{}'",
                     alias
@@ -244,6 +256,7 @@ impl<'a> ImportsResolver<'a> {
         &mut self,
         alias:         &str,
         raw_ast:       &DixScript,
+        document:      Option<&mut Document>,
         absolute_path: &str,
     ) -> bool {
         let normalized_path = if Self::is_cloud_url(absolute_path) {
@@ -284,7 +297,7 @@ impl<'a> ImportsResolver<'a> {
         self.visiting.insert(normalized_path.clone());
         self.import_stack.push(normalized_path.clone());
 
-        let result = self.resolve_import_inner(alias, raw_ast, &normalized_path);
+        let result = self.resolve_import_inner(alias, raw_ast, document, &normalized_path);
 
         self.import_stack.pop();
         self.visiting.remove(&normalized_path);
@@ -297,6 +310,7 @@ impl<'a> ImportsResolver<'a> {
         &mut self,
         alias:           &str,
         raw_ast:         &DixScript,
+        document:        Option<&mut Document>,
         normalized_path: &str,
     ) -> bool {
         let mut local_imports = HashMap::new();
@@ -371,7 +385,7 @@ impl<'a> ImportsResolver<'a> {
                     return false;
                 }
 
-                let nested_raw =
+                let mut nested_raw =
                     match self.read_and_parse_raw(nested_import, &nested_path) {
                         Ok(a)  => a,
                         Err(_) => return false,
@@ -379,7 +393,8 @@ impl<'a> ImportsResolver<'a> {
 
                 if !self.resolve_import_recursive(
                     &nested_import.alias,
-                    &nested_raw,
+                    &nested_raw.ast,
+                    nested_raw.document.as_mut(),
                     &nested_path,
                 ) {
                     return false;
@@ -420,7 +435,7 @@ impl<'a> ImportsResolver<'a> {
         }
 
         let enhanced_ast =
-            match self.analyze_and_enhance(raw_ast, normalized_path, alias, &seed_namespaces) {
+            match self.analyze_and_enhance(raw_ast, document, normalized_path, alias, &seed_namespaces) {
                 Ok(a)  => a,
                 Err(_) => return false,
             };
@@ -475,7 +490,7 @@ impl<'a> ImportsResolver<'a> {
         &mut self,
         import:        &ImportDeclaration,
         resolved_path: &str,
-    ) -> Result<DixScript, String> {
+    ) -> Result<ParsedImport, String> {
         let content = self.read_import_content(import, resolved_path)?;
 
         if let Some(ref verify_hash) = import.verify_hash {
@@ -505,7 +520,7 @@ impl<'a> ImportsResolver<'a> {
                 "[ImportsResolver] Imported file '{}' is empty",
                 resolved_path
             ));
-            return Ok(DixScript::new());
+            return Ok(ParsedImport { ast: DixScript::new(), document: None });
         }
 
         // ── Approach B: tokenize full content ─────────────────────────────────
@@ -582,7 +597,7 @@ impl<'a> ImportsResolver<'a> {
             format!("Failed to create parser: {}", e)
         })?;
 
-        let mut ast = general_parser.parse().map_err(|e| {
+        let document = general_parser.parse_document().map_err(|e| {
             let parse_errors = self.error_manager.get_parse_errors();
             if let Some(first) = parse_errors.first() {
                 self.error_manager.add_imports_resolution_error(
@@ -602,9 +617,12 @@ impl<'a> ImportsResolver<'a> {
 
         // Attach the already-parsed ConfigSection — GeneralParser doesn't
         // parse @CONFIG itself, it receives it as a pre-built argument.
+        // The owned tree that the nested-import walk and the extraction read, exported once from
+        // the document the analyzer and the enhancer will read.
+        let mut ast = document.export();
         ast.config = Some(config_result.config_section);
 
-        Ok(ast)
+        Ok(ParsedImport { ast, document: Some(document) })
     }
 
     // ── Phase 2: Semantic analysis and AST enhancement ────────────────────────
@@ -612,6 +630,7 @@ impl<'a> ImportsResolver<'a> {
     fn analyze_and_enhance(
         &mut self,
         raw_ast:         &DixScript,
+        document:        Option<&mut Document>,
         resolved_path:   &str,
         alias:           &str,
         seed_namespaces: &HashMap<String, ImportedNamespace>,
@@ -630,12 +649,17 @@ impl<'a> ImportsResolver<'a> {
             ));
         }
 
-        let semantic_analyzer = GeneralSemanticAnalyzer::new_with_seed_namespaces(
+        // With a document the analyzer and the enhancer read it; without one (a file the caller
+        // parsed) they read the owned tree.
+        let mut semantic_analyzer = GeneralSemanticAnalyzer::new_with_seed_namespaces(
             raw_ast,
             &import_settings,
             self.error_manager.clone(),
             seed_namespaces,
         );
+        if let Some(document) = document.as_deref() {
+            semantic_analyzer = semantic_analyzer.with_document(document);
+        }
         let semantic_result = semantic_analyzer.analyze();
 
         if !semantic_result.is_success {
@@ -668,7 +692,10 @@ impl<'a> ImportsResolver<'a> {
             ));
         }
 
-        let ast_enhancer = GeneralAstEnhancer::new(&import_settings);
+        let mut ast_enhancer = GeneralAstEnhancer::new(&import_settings);
+        if let Some(document) = document {
+            ast_enhancer = ast_enhancer.with_document(document);
+        }
         let enhancement_result = ast_enhancer.enhance(raw_ast, Some(&semantic_result));
 
         if !enhancement_result.is_success {

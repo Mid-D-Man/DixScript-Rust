@@ -27,7 +27,7 @@ namespace MidManStudio.Mdix.Unity.Editor
     /// is compiled first and refused unless the value reads back exactly as entered and the data keeps the same
     /// paths; values computed from the edited one are allowed to change, and the status bar says which. Values
     /// produced by function calls, expressions and tuples are not literals and stay read-only.
-    /// Dates, timestamps, regexes, blobs, enums, raw strings and long or multi-line text open a popup instead
+    /// Dates, timestamps, regexes, blobs, enums, colours, raw strings and long or multi-line text open a popup instead
     /// of the one-line field (see MdixEditorWindow.Popups.cs); both go through <see cref="ApplyExplorerEdit"/>.
     /// Nothing is written to disk until Save.
     /// </summary>
@@ -102,8 +102,8 @@ namespace MidManStudio.Mdix.Unity.Editor
             foreach (var name in TopLevelNames(db))
             {
                 var type = db.GetValueType(name);
-                if (type == MdixValueType.Array || type == MdixValueType.Object) containers.Add(name);
-                else if (type != MdixValueType.Unknown)                          flat.Add(name);
+                if (type == MdixValueType.Array || type == MdixValueType.Object || type == MdixValueType.Tuple) containers.Add(name);
+                else if (type != MdixValueType.Unknown)                                                         flat.Add(name);
             }
 
             if (flat.Count > 0)
@@ -120,7 +120,17 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             foreach (var name in containers)
             {
-                var type  = db.GetValueType(name);
+                var type = db.GetValueType(name);
+
+                if (type == MdixValueType.Tuple)
+                {
+                    // The title carries the values, so they can be read without opening it.
+                    var json = db.GetTupleRaw(name).UnwrapOr("[]");
+                    AddSection(scroll, "/" + name, "TUPLE  —  " + name + "  " + MdixTupleText.Summary(json, 60),
+                               BuildTupleBody(db, name, json, 1), defaultFolded: true, nested: false);
+                    continue;
+                }
+
                 var body  = type == MdixValueType.Array
                     ? BuildArrayBody(db, name, 1)
                     : BuildObjectBody(db, name, 1);
@@ -159,7 +169,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 var childPath = path + "." + child;
                 var type      = db.GetValueType(childPath);
 
-                if (type == MdixValueType.Array || type == MdixValueType.Object)
+                if (type == MdixValueType.Array || type == MdixValueType.Object || type == MdixValueType.Tuple)
                 {
                     containers.Add(new KeyValuePair<string, MdixValueType>(child, type));
                 }
@@ -215,9 +225,9 @@ namespace MidManStudio.Mdix.Unity.Editor
                         var itemPath = path + "[" + i + "]";
                         var type     = db.GetValueType(itemPath);
 
-                        if (type == MdixValueType.Array || type == MdixValueType.Object)
+                        if (type == MdixValueType.Array || type == MdixValueType.Object || type == MdixValueType.Tuple)
                         {
-                            var label = "[" + i + "]" + ItemHint(db, itemPath, type);
+                            var label = "[" + i + "]" + (type == MdixValueType.Tuple ? string.Empty : ItemHint(db, itemPath, type));
                             body.Add(MakeFoldNode(db, itemPath, label, type, depth, length > AutoFoldAboveItems));
                         }
                         else if (type != MdixValueType.Unknown)
@@ -241,6 +251,9 @@ namespace MidManStudio.Mdix.Unity.Editor
             if (depth >= MaxExplorerDepth)
                 return MakeNoteLabel(label + "  …  nested too deeply to show here");
 
+            if (type == MdixValueType.Tuple)
+                return MakeTupleFoldNode(db, path, label, db.GetTupleRaw(path).UnwrapOr("[]"), depth, true);
+
             var body = type == MdixValueType.Object
                 ? BuildObjectBody(db, path, depth + 1)
                 : BuildArrayBody(db, path, depth + 1);
@@ -250,6 +263,96 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             AddSection(node, path, label + "  " + CountBadge(db, path, type), body, defaultFolded, nested: true);
             return node;
+        }
+
+        // ── Tuples ────────────────────────────────────────────────────────────
+
+        // A tuple is a node whose title shows its values; open it to edit its elements one by one. Its elements have no
+        // paths in the runtime, so they are listed from the tuple's JSON and each one is edited through the literal the
+        // source map found for it (see MdixTupleText).
+        private VisualElement MakeTupleFoldNode(
+            MdixDatabase db, string path, string label, string json, int depth, bool defaultFolded)
+        {
+            if (depth >= MaxExplorerDepth)
+                return MakeNoteLabel(label + "  …  nested too deeply to show here");
+
+            var node = new VisualElement();
+            node.style.marginLeft = new StyleLength(14);
+
+            AddSection(node, path, label + "  " + MdixTupleText.Summary(json, 60),
+                       BuildTupleBody(db, path, json, depth + 1), defaultFolded, nested: true);
+            return node;
+        }
+
+        private VisualElement BuildTupleBody(MdixDatabase db, string path, string json, int depth)
+        {
+            var body  = new VisualElement();
+            var items = MdixTupleText.SplitElements(json);
+
+            if (items.Count == 0)
+            {
+                body.Add(MakeNoteLabel("(empty)"));
+                return body;
+            }
+
+            var shown = Math.Min(items.Count, MaxArrayItemsShown);
+            for (int i = 0; i < shown; i++)
+            {
+                if (!TakeExplorerRow(body)) break;
+
+                var itemPath = path + "[" + i + "]";
+                if (MdixTupleText.IsNested(items[i]))
+                    body.Add(MakeTupleFoldNode(db, itemPath, "[" + i + "]", items[i], depth, false));
+                else
+                    body.Add(Editable(db, MakeTupleElementRow(i, items[i], itemPath), itemPath));
+            }
+
+            if (items.Count > shown)
+                body.Add(MakeNoteLabel("…  " + (items.Count - shown) + " more elements are not shown. The Editor tab has all of them."));
+
+            return body;
+        }
+
+        // A row like the others, for one tuple element: its index, its value and a type chip. The chip names the literal's
+        // kind when the file has one for this element, and what the JSON shows otherwise (a computed element).
+        private VisualElement MakeTupleElementRow(int index, string token, string itemPath)
+        {
+            var row = new VisualElement();
+            row.AddToClassList("mdix-kv-row");
+
+            MdixValueSpan span;
+            var hasSpan = _valueSpans != null && _valueSpans.TryGetValue(itemPath, out span);
+            var chip    = hasSpan ? _valueSpans[itemPath].Kind.ToString().ToLowerInvariant() : MdixTupleText.Chip(token);
+
+            var key = new Label("[" + index + "]");
+            key.AddToClassList("mdix-kv__key");
+
+            var value = new Label(TupleElementText(token, chip));
+            value.AddToClassList("mdix-kv__value");
+
+            var type = new Label(chip);
+            type.AddToClassList("mdix-kv__type");
+
+            if (chip == "enum")                                                         type.AddToClassList("mdix-kv__type--enum");
+            else if (chip == "bool")                                                    type.AddToClassList("mdix-kv__type--bool");
+            else if (chip == "string" || chip == "rawstring" || chip == "date" || chip == "timestamp")
+                                                                                        type.AddToClassList("mdix-kv__type--string");
+
+            row.Add(key);
+            row.Add(value);
+            row.Add(type);
+            return row;
+        }
+
+        // Strings are shown without their quotes, like the other rows; everything else as the tuple's JSON writes it.
+        private static string TupleElementText(string token, string chip)
+        {
+            if (chip == "string" || chip == "rawstring")
+            {
+                try { return MidManStudio.Mdix.Unity.Editor.Lsp.MdixJsonValue.Parse(token).AsString(); }
+                catch (Exception) { /* fall through to the raw text */ }
+            }
+            return MdixTupleText.Format(token);
         }
 
         private static string CountBadge(MdixDatabase db, string path, MdixValueType type)
@@ -279,7 +382,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                     break;
                 }
 
-                if (type == MdixValueType.Array || type == MdixValueType.Object) allScalar = false;
+                if (type == MdixValueType.Array || type == MdixValueType.Object || type == MdixValueType.Tuple) allScalar = false;
 
                 if (type != MdixValueType.Object || !IsFlatObject(db, itemPath)) allFlat = false;
             }
@@ -430,6 +533,7 @@ namespace MidManStudio.Mdix.Unity.Editor
             label.tooltip = popup
                 ? (kind == MdixLiteralKind.Blob ? "Click to view, play or replace."
                   : kind == MdixLiteralKind.Enum ? "Click to choose another member."
+                  : kind == MdixLiteralKind.HexColor ? "Click to pick a colour."
                   : "Click to edit.")
                 : "Click to edit. Enter applies the change to the text, Esc cancels.";
             label.AddToClassList("mdix-kv__value--editable");

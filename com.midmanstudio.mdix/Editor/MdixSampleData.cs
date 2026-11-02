@@ -118,9 +118,9 @@ Second line of the bio.`
         public const string Numbers = @"// ───────────────────────────────────────────────────────────────────────────
 //  Numbers, enums, arrays and tuples
 //
-//  Plain numbers, hex and binary integers, colours and enum members can be edited in the
-//  Explorer. Arrays and tuples are listed for the editors that are still to come: today they
-//  show their items, and each item that is a plain literal is editable on its own.
+//  Plain numbers, hex and binary integers, colours, enum members, array items and the
+//  elements of tuples can all be edited in the Explorer. A tuple's header shows all its
+//  values; unfold it to edit one element at a time.
 // ───────────────────────────────────────────────────────────────────────────
 
 @CONFIG(
@@ -177,6 +177,9 @@ Second line of the bio.`
   labelled          = t:(""Sword"", 3, true)
   nested_tuple      = t:(1, t:(2, 3))
   enum_tuple        = t:(Difficulty.HARD, 14, ""boss"")
+  gradient          = t:(#F00, #00F8, #FF8800)
+  schedule          = t:(2026-01-15, 2025-01-15T10:30:00Z, ""kickoff"")
+  list_in_tuple     = t:([1, 2, 3], ""tag"")
 
   // ── An object that mixes them ──────────────────────────────────────────
   player = {
@@ -235,11 +238,17 @@ The `items` rows come from a function call (`makeItem(...)`), so they are comput
 |---|---|
 | `level`, `gold`, `speed`, `gravity`, `alive`, `temperature` | edit in place. |
 | `flags_hex`, `mask_binary`, `big_hex`, `long_hex`, `grouped_hex` | edit in place. Type the number in any notation (`255`, `0xFF`, `0b1111_1111`); it is written back in the notation the file used. `big_hex` is a 64-bit long (it does not fit in 32 bits); an int refuses a value that would become a long. |
-| `tint_rgb`, `tint_rgba`, `tint_rrggbb`, `tint_rrggbbaa`, `palette`, `player.tint` | edit in place. `#RGBA` (4 digits) works too, and keeps its length. |
 | `difficulty`, `drop_rarity`, `mood`, `rarities`, `player.rarity` | open the enum picker, which lists the members from the `@ENUMS` section (with their numbers when the declaration gave one). |
 | `scores`, `names`, `switches`, `ratios`, `hex_list`, `palette`, `grid`, `testArray`, `player.inventory` | edit each item on its own. |
+| `tint_rgb`, `tint_rgba`, `tint_rrggbb`, `tint_rrggbbaa`, `palette`, `gradient`, `player.tint` | open **Unity's colour picker** from the colour swatch (a wheel or box, sliders, an eyedropper), with the hex value beside it. A colour that was written in the short form (`#F80`) stays short when the picked colour fits it exactly, and is written in full otherwise. |
+| `spawn_point`, `labelled`, `nested_tuple`, `enum_tuple`, `gradient`, `schedule`, `list_in_tuple` | show all their values in the header. Unfold one to edit its elements one at a time, each with the editor for its kind: a date opens the picker, an enum its member list, a colour the colour picker. A tuple inside a tuple unfolds again. |
 
-Not editable yet: adding, removing and reordering array items, and tuples (`spawn_point`, `labelled`, `nested_tuple`, `enum_tuple`). They are listed so you can see them; the editors for them are the next step.
+Not editable yet: adding, removing and reordering array items (each existing item can be edited).
+
+Things to try that should be refused:
+
+- In a tuple, change an element to text that is not valid for its kind (a date `2026-02-30`, a number that does not fit an int).
+- In the colour box, type `#12` or `#GGG`. The box turns red and Apply is disabled.
 ";
     }
 }

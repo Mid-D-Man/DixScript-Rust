@@ -625,3 +625,23 @@
     border-color: #3B7EF6;
     color: #E8EDF5;
 }
+
+/* Colour popup */
+.mdix-color {
+    min-width: 300px;
+}
+
+.mdix-color__row {
+    flex-direction: row;
+    align-items: center;
+    margin-top: 6px;
+}
+
+.mdix-color__field {
+    width: 150px;
+    margin-right: 8px;
+}
+
+.mdix-color__text {
+    width: 110px;
+}

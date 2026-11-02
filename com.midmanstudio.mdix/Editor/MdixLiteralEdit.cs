@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using MidManStudio.Mdix.Unity.Editor.Lsp;
 using MidManStudio.Mdix.Core;
 
 namespace MidManStudio.Mdix.Unity.Editor
@@ -38,6 +39,11 @@ namespace MidManStudio.Mdix.Unity.Editor
         /// <summary>The value as plain text for the edit field: no quotes, no type suffix.</summary>
         public static string EditText(MdixDatabase db, string path, MdixValueSpan span, string source)
         {
+            // A tuple element: the runtime has no value of its own for it, so its text comes from the literal.
+            string tuplePath; int[] indexes;
+            if (MdixTupleText.TrySplitPath(path, p => db.GetValueType(p) == MdixValueType.Tuple, out tuplePath, out indexes))
+                return MdixTupleText.ElementEditText(span.Kind, span.TextIn(source));
+
             switch (span.Kind)
             {
                 case MdixLiteralKind.Int:      return db.GetInt(path).UnwrapOr(0).ToString(Inv);
@@ -289,6 +295,8 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             string literal, expected, error, oldLiteral;
             Dictionary<string, string> before;
+            string tuplePath = null, oldTupleJson = null;
+            int[] tupleIndexes = null;
 
             var loaded = Dix.LoadStr(source);
             if (loaded.IsFailure)
@@ -302,6 +310,10 @@ namespace MidManStudio.Mdix.Unity.Editor
                 oldLiteral = span.TextIn(source);
                 if (!TryFormat(span.Kind, oldLiteral, input, out literal, out expected, out error))
                     return MdixEditResult.Fail(error);
+
+                // In a tuple: remember the whole tuple, to prove afterwards that only this element changed.
+                if (MdixTupleText.TrySplitPath(path, p => db.GetValueType(p) == MdixValueType.Tuple, out tuplePath, out tupleIndexes))
+                    oldTupleJson = db.GetTupleRaw(tuplePath).UnwrapOr(null);
 
                 before = Snapshot(db);
             }
@@ -324,7 +336,9 @@ namespace MidManStudio.Mdix.Unity.Editor
 
             using (var db = reloaded.SuccessResult)
             {
-                var problem = CheckValue(db, path, span.Kind, expected, literal);
+                var problem = tuplePath != null
+                    ? CheckTupleElement(db, tuplePath, tupleIndexes, span.Kind, literal, oldTupleJson)
+                    : CheckValue(db, path, span.Kind, expected, literal);
                 if (problem != null) return MdixEditResult.Fail(problem);
 
                 var after = Snapshot(db);
@@ -339,7 +353,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                         if (!after.TryGetValue(pair.Key, out now))
                             return MdixEditResult.Fail("That value changed the shape of the data (\"" + pair.Key + "\" is gone), so it was not applied.");
 
-                        if (now != pair.Value && pair.Key != path)
+                        if (now != pair.Value && !IsSelfOrTupleAbove(pair.Key, path))
                         {
                             result.AlsoChangedCount++;
                             if (result.AlsoChanged.Count < MaxListedChange) result.AlsoChanged.Add(pair.Key);
@@ -380,6 +394,40 @@ namespace MidManStudio.Mdix.Unity.Editor
             if (expected != null && shown != expected)
                 return "The file reads the new value as \"" + Shorten(shown) + "\", not \"" + Shorten(expected) + "\", so it was not applied.";
             return null;
+        }
+
+        // The edited element reads back as entered, and no other part of its tuple changed.
+        private static string CheckTupleElement(
+            MdixDatabase db, string tuplePath, int[] indexes, MdixLiteralKind kind, string literal, string oldJson)
+        {
+            if (db.GetValueType(tuplePath) != MdixValueType.Tuple)
+                return "The tuple is no longer a tuple after that change, so it was not applied.";
+
+            var raw = db.GetTupleRaw(tuplePath);
+            if (raw.IsFailure) return "The tuple could not be read back, so it was not applied.";
+
+            try
+            {
+                var now = MdixJsonValue.Parse(raw.SuccessResult);
+
+                if (!MdixTupleText.ElementMatches(kind, literal, MdixTupleText.Navigate(now, indexes)))
+                    return "The file reads the new element differently from what was entered, so it was not applied.";
+
+                if (oldJson != null && !MdixTupleText.SameExcept(MdixJsonValue.Parse(oldJson), now, indexes))
+                    return "That change altered other parts of the tuple, so it was not applied.";
+
+                return null;
+            }
+            catch (Exception)
+            {
+                return "The tuple could not be read back, so it was not applied.";
+            }
+        }
+
+        // An element edit changes its own tuple's JSON: that is the edit, not a side effect to report.
+        private static bool IsSelfOrTupleAbove(string key, string path)
+        {
+            return key == path || path.StartsWith(key + "[", StringComparison.Ordinal);
         }
 
         private static string Shorten(string s) => s.Length > 40 ? s.Substring(0, 40) + "…" : s;
@@ -477,6 +525,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                     return r.IsSuccess ? MdixBlobInfo.Fingerprint(r.SuccessResult.RawBase64) : "?";
                 }
                 case MdixValueType.Null:      return "null";
+                case MdixValueType.Tuple:     return db.GetTupleRaw(path).UnwrapOr("?");      // the whole value, so a change anywhere in it shows
                 default:                      return "(" + type + ")";
             }
         }

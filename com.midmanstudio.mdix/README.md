@@ -419,7 +419,7 @@ choose **MDIX → Open in MDIX Studio**.
   capped (200 items per array) and says so.
 
   **Editing values in place.** A value written out in the file as a plain number, text, `true` /
-  `false`, colour, date, timestamp, regex, blob, enum member or `raw` string is highlighted when you hover it. Click it, type, and press Enter: the change
+  `false`, colour, date, timestamp, regex, blob, enum member, tuple element or `raw` string is highlighted when you hover it. Click it, type, and press Enter: the change
   is made in the text of the Editor tab and compiled, and Esc (or clicking away) cancels. A number
   keeps its type (a `Long` keeps its `L`, a `Float` its `f`, a `Double` stays a double) and a hex or
   binary one (`0xFF`, `0b1010`) keeps its notation, whichever notation you type, and text is
@@ -444,10 +444,14 @@ choose **MDIX → Open in MDIX Studio**.
   which stays open. An **enum** value opens a list of the members declared in the file's `@ENUMS`
   section (an enum declared in an imported file is not found, and stays read-only).
 
+  A **colour** opens Unity's colour picker from a swatch (a wheel or box, sliders, an eyedropper),
+  with the hex value beside it. A **tuple** is a node whose header shows all its values; unfold it to
+  edit its elements one at a time.
+
   Only plain literals can be edited: a value produced by a function call (the `createEnemy("Goblin",
-  50, ...)` kind), an expression, a tuple or `null` stays read-only, because there is no single piece
-  of text behind it that a field can hold. Change those in the Editor tab, where a function argument
-  is the thing to edit.
+  50, ...)` kind), an expression or `null` stays read-only, and so does a tuple element that is
+  computed, because there is no single piece of text behind it that a field can hold. Change those
+  in the Editor tab, where a function argument is the thing to edit.
 
   To try every editor, use **Assets, Create, MDIX, Explorer Tour Samples**: it writes two sample
   files and a README into the project, with a PNG, a JPEG, a WAV and an Ogg to look at and play.
@@ -567,6 +571,9 @@ com.midmanstudio.mdix/
 │   │   ├── MdixBlobTemp.cs                   ← temporary copies outside the project
 │   │   ├── MdixIntegerText.cs                ← reads and writes decimal, hex and binary integers
 │   │   ├── MdixEnumPicker.cs                 ← the enum member list
+│   │   ├── MdixTupleText.cs                  ← finds, checks and shows tuple elements (no Unity types)
+│   │   ├── MdixColorEditor.cs                ← the colour popup (Unity's colour field and a hex box)
+│   │   ├── MdixColorText.cs                  ← reads and writes colour literals as bytes
 │   │   └── MdixBlobInfo.cs                   ← names a blob's type, hex dump, text preview
 │   ├── CreateMdixMenuItems.cs
 │   └── UI/

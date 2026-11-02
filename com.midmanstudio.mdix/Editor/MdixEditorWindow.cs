@@ -533,11 +533,18 @@ namespace MidManStudio.Mdix.Unity.Editor
                 MdixValueType.Null      => "null",
                 MdixValueType.Array     => "[array]",
                 MdixValueType.Object    => "{object}",
-                MdixValueType.Tuple     => "(tuple)",
+                MdixValueType.Tuple     => TupleSummary(db, path),
                 MdixValueType.Blob      => BlobSummary(db, path),
                 MdixValueType.Regex     => RegexSummary(db, path),
                 _                       => "?",
             };
+        }
+
+        /// <summary>A tuple on one line, for example <c>(1.5, "Sword", Rarity.RARE)</c>.</summary>
+        private static string TupleSummary(MdixDatabase db, string path)
+        {
+            var raw = db.GetTupleRaw(path);
+            return raw.IsSuccess ? MdixTupleText.Summary(raw.SuccessResult) : "(?)";
         }
 
         /// <summary>For example "blob  4.2 KB  PNG": only the start of the data is read to name its type.</summary>

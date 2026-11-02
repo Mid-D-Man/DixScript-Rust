@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using MidManStudio.Mdix.Unity.Editor.Lsp;
 using System.Text;
 using MidManStudio.Mdix.Core;
 
@@ -63,8 +64,9 @@ namespace MidManStudio.Mdix.Unity.Editor
     /// Only what can be located with certainty is mapped: a literal that is the whole value of a property,
     /// an object member or an array item. That includes `backtick` raw strings, dates, timestamps, the
     /// regex and blob constructors <c>r:("...")</c> / <c>b:("...")</c>, hex and binary integers and members of
-    /// enums declared in @ENUMS. Anything computed (function-call arguments, expressions, tuples) is left out,
-    /// so it stays read-only.
+    /// enums declared in @ENUMS. The elements of a tuple <c>t:(a, b)</c> are mapped one by one as <c>path[0]</c>,
+    /// <c>path[1]</c> ... (the tuple itself is not a literal). Anything computed (function-call arguments,
+    /// expressions) is left out, so it stays read-only.
     ///
     /// This is a small reader of the syntax, not the compiler's parser, so nothing it says is trusted on
     /// its own: <see cref="Matches"/> checks each span against the compiled data, and
@@ -97,6 +99,23 @@ namespace MidManStudio.Mdix.Unity.Editor
             return spans;
         }
 
+        /// <summary>True when the element at <paramref name="indexes"/> of the tuple reads back as this literal.</summary>
+        internal static bool TupleElementMatches(MdixDatabase db, string tuplePath, int[] indexes, MdixLiteralKind kind, string literal)
+        {
+            var raw = db.GetTupleRaw(tuplePath);
+            if (raw.IsFailure) return false;
+
+            try
+            {
+                var element = MdixTupleText.Navigate(MdixJsonValue.Parse(raw.SuccessResult), indexes);
+                return MdixTupleText.ElementMatches(kind, literal, element);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
         /// <summary>The enums declared in the source's @ENUMS section, by name. Empty when there are none or the text cannot be read.</summary>
         public static Dictionary<string, MdixEnumDef> BuildEnums(string source)
         {
@@ -119,6 +138,12 @@ namespace MidManStudio.Mdix.Unity.Editor
         {
             if (span.Start < 0 || span.End > source.Length) return false;
             var text = span.TextIn(source);
+
+            // A tuple element has no path of its own in the runtime: it is checked through the tuple's JSON.
+            string tuplePath; int[] indexes;
+            if (MdixTupleText.TrySplitPath(path, p => db.GetValueType(p) == MdixValueType.Tuple, out tuplePath, out indexes))
+                return TupleElementMatches(db, tuplePath, indexes, span.Kind, text);
+
             var type = db.GetValueType(path);
             var inv  = CultureInfo.InvariantCulture;
 
@@ -801,6 +826,13 @@ namespace MidManStudio.Mdix.Unity.Editor
                 _p = save;
 
                 if (fused) return true;
+
+                // t:(  r:(  b:(  are constructors, not an entry named t, r or b: the compiler's lexer reads them
+                // as one token whenever the letter, the colon and the parenthesis touch.
+                if (at == idx + 1 && IsSym(at, ":") && _t[idx].End - _t[idx].Start == 1 &&
+                    (_src[_t[idx].Start] == 't' || _src[_t[idx].Start] == 'r' || _src[_t[idx].Start] == 'b') &&
+                    _t[at].Start == _t[idx].End && IsSym(at + 1, "(") && _t[at + 1].Start == _t[at].End) return false;
+
                 if (IsSym(at, "=") || IsSym(at, "::") || IsSym(at, ":")) return true;
 
                 // name.path:  or  name.path::
@@ -820,7 +852,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 if (tok.Type == TokType.Sym && tok.Sym == "{") { ParseObject(path, depth + 1); return; }
                 if (tok.Type == TokType.Sym && tok.Sym == "[") { ParseArray(path, depth + 1);  return; }
 
-                if (tok.Type == TokType.Ident && (TryMapPrefixed(path) || TryMapEnum(path))) return;
+                if (tok.Type == TokType.Ident && (TryMapPrefixed(path) || TryMapEnum(path) || TryMapTuple(path, depth))) return;
 
                 MdixLiteralKind kind;
                 var literal = IsEditableLiteral(tok, out kind);
@@ -850,6 +882,56 @@ namespace MidManStudio.Mdix.Unity.Editor
             }
 
             private bool IsBoolWord(int idx) => IsIdentText(idx, "true") || IsIdentText(idx, "false");
+
+            // t:( a, b, ... ): the parentheses must close and nothing may continue the expression after them, so a
+            // computed value is never half-mapped. Each element is then read like an array item, at path[i].
+            private bool TryMapTuple(string path, int depth)
+            {
+                var at = _p;
+                var id = _t[at];
+                if (id.End - id.Start != 1 || _src[id.Start] != 't') return false;
+
+                if (!IsSym(at + 1, ":") || _t[at + 1].Start != id.End)         return false;
+                if (!IsSym(at + 2, "(") || _t[at + 2].Start != _t[at + 1].End) return false;
+
+                var close = FindClosing(at + 2);
+                if (close < 0 || !IsSym(close, ")")) return false;
+                if (close + 1 < _t.Count && ContinuesExpression(close + 1)) return false;
+
+                _p = at + 3;
+                var index = 0;
+                var guard = 0;
+
+                while (_p < close && guard++ < 1_000_000)
+                {
+                    SkipCommas();
+                    if (_p >= close) break;
+
+                    var before = _p;
+                    ParseValue(path + "[" + index + "]", topLevel: false, depth: depth + 1);
+                    if (_p == before) _p++;
+                    index++;
+                }
+
+                _p = close + 1;
+                return true;
+            }
+
+            // The token that closes the bracket opened at <paramref name="open"/>, or -1.
+            private int FindClosing(int open)
+            {
+                var level = 0;
+                for (int i = open; i < _t.Count; i++)
+                {
+                    if (IsSym(i, "(") || IsSym(i, "[") || IsSym(i, "{")) level++;
+                    else if (IsSym(i, ")") || IsSym(i, "]") || IsSym(i, "}"))
+                    {
+                        level--;
+                        if (level == 0) return i;
+                    }
+                }
+                return -1;
+            }
 
             // Type.MEMBER where Type is declared in @ENUMS and has that member. The three parts must touch, and
             // nothing may continue the expression after them.

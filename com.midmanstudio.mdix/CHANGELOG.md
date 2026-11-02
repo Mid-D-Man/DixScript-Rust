@@ -68,6 +68,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   PNG, a JPEG, a WAV and an Ogg Vorbis) and `NumbersEnumsAndLists.mdix` (numbers, hex and binary
   integers, colours, enums, arrays and tuples), for trying the Explorer's editors. They are embedded
   in `Editor/MdixSampleData.cs` because the repository's `.gitignore` ignores `Samples~` folders.
+- MDIX Studio Explorer: tuples show their values and their elements can be edited. A tuple is a node
+  whose header lists all its values, for example `(1.5, "Sword", Rarity.RARE)`; unfold it to edit one
+  element at a time, each with the editor for its kind (a date opens the picker, an enum its member
+  list). A tuple inside a tuple, or an array inside a tuple, unfolds again. The runtime gives a tuple
+  only as a whole (as JSON) and has no paths for its elements, so an element is checked by reading the
+  tuple back and requiring that only that element changed. Tuples can have any number of elements. An
+  element that is computed (a function call, an expression) stays read-only. Tuples used as
+  `name::` rows, and `t:(`, `r:(` and `b:(` constructors at the start of such a row, are read correctly
+  now. (`Editor/Popups/MdixTupleText.cs`.)
+- MDIX Studio Explorer: a colour opens a popup with Unity's colour field (click the swatch for the
+  picker with its wheel or box, sliders and eyedropper), the R, G, B and A values, and a text box with
+  the hex value, each following the others. A colour written in the short form (`#F80`, `#F80C`) stays
+  short when the picked colour fits it exactly and is written in full otherwise; alpha is written when
+  the colour had it or is not opaque. (`Editor/Popups/MdixColorEditor.cs`, `MdixColorText.cs`.)
 - MDIX Studio Explorer: blob and regex values show `blob  4.2 KB  PNG` and `r:(pattern)` instead
   of `?`. The type is read from the first bytes only, so a large blob costs nothing to show.
   (`Editor/Popups/MdixBlobInfo.cs`.)

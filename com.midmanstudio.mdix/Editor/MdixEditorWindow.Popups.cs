@@ -7,8 +7,8 @@ namespace MidManStudio.Mdix.Unity.Editor
 {
     /// <summary>
     /// Popup editors for Explorer values that a one-line field does not suit: dates and timestamps (a month
-    /// grid and time boxes), regexes (live matching), blobs (preview, playback, replace) and long or raw text
-    /// (a text area).
+    /// grid and time boxes), regexes (live matching), blobs (preview, playback, replace), enums (a member list),
+    /// colours (Unity's picker) and long or raw text (a text area).
     ///
     /// A popup changes the value through the same path as the inline field, <see cref="ApplyExplorerEdit"/>:
     /// the new literal is compiled first and refused unless the value reads back as entered. A refusal is
@@ -34,6 +34,7 @@ namespace MidManStudio.Mdix.Unity.Editor
                 case MdixLiteralKind.Regex:
                 case MdixLiteralKind.Blob:
                 case MdixLiteralKind.Enum:
+                case MdixLiteralKind.HexColor:
                 case MdixLiteralKind.RawString:
                     return true;
 
@@ -104,6 +105,23 @@ namespace MidManStudio.Mdix.Unity.Editor
                     _lastRegexTestText = editor.TestText;
                     return ApplyExplorerEdit(path, editor.Pattern, oldLiteral, () => popup.Close());
                 };
+            }
+            else if (kind == MdixLiteralKind.HexColor)
+            {
+                var editor = new MdixColorEditor(initial);
+
+                editor.Changed += () =>
+                {
+                    if (popup == null) return;
+                    popup.SetError(editor.Error);
+                    popup.SetApplyEnabled(editor.CanApply);
+                };
+
+                title         = "Pick a colour";
+                body          = editor.Root;
+                focus         = editor.FocusTarget;
+                startDisabled = true;                       // nothing to apply until the colour changes
+                apply         = () => editor.Error ?? ApplyExplorerEdit(path, editor.Text, oldLiteral, () => popup.Close());
             }
             else if (kind == MdixLiteralKind.Enum)
             {

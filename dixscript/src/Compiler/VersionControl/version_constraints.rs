@@ -6,60 +6,21 @@
 //! Uses native Rust collections (no DixCore wrappers)
 
 use std::collections::{HashMap, HashSet};
+use crate::Compiler::AST::arena::{Arena, DocData, DocDataEntry, DocQuickFuncs, Document, ValueNode};
 use crate::Compiler::AST::*;
-use crate::Compiler::VersionControl::{VersionManager, ForwardCompatibilityManager};
+use crate::Compiler::VersionControl::VersionManager;
 use crate::Compiler::Extensions::TypeSystemManager;
-use crate::Builtins::Resolver::static_object_registry;
-use crate::Builtins::Resolver::instance_method_registry;
-use crate::Builtins::Core::DixType;
 
 /// Defines constraints and limitations based on DixScript version.
 /// Singleton instance coordinated with VersionManager.
 pub struct VersionConstraints {
-    version_manager:       &'static std::sync::RwLock<VersionManager>,
-    forward_compat_manager: Option<ForwardCompatibilityManager>,
+    version_manager: &'static std::sync::RwLock<VersionManager>,
 }
 
 impl VersionConstraints {
     /// Create new VersionConstraints instance
     pub fn new() -> Self {
-        VersionConstraints {
-            version_manager:        VersionManager::instance(),
-            forward_compat_manager: None,
-        }
-    }
-
-    /// Create with forward compatibility manager
-    pub fn with_forward_compat(forward_compat: ForwardCompatibilityManager) -> Self {
-        VersionConstraints {
-            version_manager:        VersionManager::instance(),
-            forward_compat_manager: Some(forward_compat),
-        }
-    }
-
-    // ==================== TYPE VALIDATION ====================
-
-    /// Checks if a value type is valid for the current version
-    pub fn is_valid_value_type(&self, value_type: &str) -> bool {
-        if value_type.is_empty() {
-            return false;
-        }
-        let supported_types = TypeSystemManager::get_supported_types();
-        supported_types.contains(&value_type.to_lowercase().as_str())
-    }
-
-    /// Checks if a default value is compatible with a parameter type
-    pub fn is_valid_default_value(&self, param_type: DataType, value_type: DataType) -> bool {
-        TypeSystemManager::can_convert(value_type, param_type)
-    }
-
-    /// Validates type annotation compatibility
-    pub fn is_valid_type_annotation(&self, data_type: Option<DataType>, _value: &Value) -> bool {
-        if data_type.is_none() {
-            return true;
-        }
-        // TypeSystemManager handles detailed validation
-        true
+        VersionConstraints { version_manager: VersionManager::instance() }
     }
 
     // ==================== DLM MODULE VALIDATION ====================
@@ -126,23 +87,7 @@ impl VersionConstraints {
             return manager.supports_section_type(&normalized_section);
         }
 
-        // Try forward compatibility for unknown sections
-        if let Some(ref fc_manager) = self.forward_compat_manager {
-            let result =
-                fc_manager.handle_unknown_element("section", &normalized_section, None, None);
-            return result.is_ok();
-        }
-
         false
-    }
-
-    /// Checks if a section requires advanced mode (informational — not used for gating)
-    pub fn requires_advanced_mode(&self, section_type: &str) -> bool {
-        let normalized = section_type
-            .to_uppercase()
-            .trim_start_matches('@')
-            .to_string();
-        matches!(normalized.as_str(), "QUICKFUNCS" | "ENUMS" | "IMPORTS")
     }
 
     // ==================== FEATURE CONTROL VALIDATION ====================
@@ -176,164 +121,14 @@ impl VersionConstraints {
         if section_list.is_empty() {
             return false;
         }
-        let valid_sections: HashSet<&str> =
-            ["quickfuncs", "enums", "imports", "dlm", "data", "security", "raw", "schema"]
-                .iter()
-                .copied()
-                .collect();
-
         section_list
             .split(',')
             .map(|s| s.trim().to_lowercase())
             .filter(|s| !s.is_empty())
-            .all(|s| valid_sections.contains(s.as_str()))
-    }
-
-    // ==================== FUNCTION AND EXPRESSION VALIDATION ====================
-
-    /// Validates if a function type is valid for the current version
-    pub fn is_valid_function_type(&self, function_type: &str) -> bool {
-        if function_type.is_empty() {
-            return false;
-        }
-        let manager = self.version_manager.read().unwrap();
-        match function_type.to_lowercase().as_str() {
-            "quickfunc" => manager.supports_feature("quickfuncs_section"),
-            "imported"  => manager.supports_feature("imported_function_calls"),
-            _           => self.handle_unknown_feature("function", function_type),
-        }
-    }
-
-    /// Validates QuickFunction signature — delegates to TypeSystemManager
-    pub fn validate_quick_function_signature(&self, function: &QuickFunction) -> Vec<String> {
-        match TypeSystemManager::validate_quick_function_signature(function) {
-            Ok(_)       => Vec::new(),
-            Err(errors) => errors,
-        }
-    }
-
-    // ==================== BUILT-IN SYSTEM VALIDATION ====================
-
-    /// Validates static method call
-    pub fn is_valid_static_method_call(&self, object_name: &str, _method_name: &str) -> bool {
-        let manager = self.version_manager.read().unwrap();
-        if !manager.supports_feature("static_object_registry") {
-            return false;
-        }
-        static_object_registry::has_static_object(object_name)
-    }
-
-    /// Validates instance method call on a type
-    pub fn is_valid_instance_method_call(&self, type_name: DixType, method_name: &str) -> bool {
-        let manager = self.version_manager.read().unwrap();
-        if !manager.supports_feature("instance_method_registry") {
-            return false;
-        }
-        instance_method_registry::has_instance_method(type_name, method_name)
-    }
-
-    /// Validates Dix function call
-    pub fn is_valid_dix_function_call(&self, function_name: &str) -> bool {
-        let manager = self.version_manager.read().unwrap();
-        if !manager.supports_feature("dix_function_calls") {
-            return false;
-        }
-        let valid_dix_functions: HashSet<&str> =
-            ["logEvent", "getSystemInfo", "validateConfig"]
-                .iter()
-                .copied()
-                .collect();
-        valid_dix_functions.contains(function_name)
-    }
-
-    // ==================== DATA SECTION VALIDATION ====================
-
-    /// Validates data entry based on current version and whether quickfuncs are enabled.
-    ///
-    /// `quickfuncs_enabled` — true when "advanced" or "quickfuncs" is in the feature set.
-    /// QuickFunc calls inside @DATA are only valid when that feature is available.
-    pub fn validate_data_entry(
-        &self,
-        entry: &DataEntry,
-        quickfuncs_enabled: bool,
-    ) -> Vec<String> {
-        match entry {
-            DataEntry::SimpleProperty { value, name, .. } => {
-                self.validate_simple_property(value, name, quickfuncs_enabled)
-            }
-            DataEntry::TableProperty { properties, path, .. } => {
-                self.validate_table_property(properties, path, quickfuncs_enabled)
-            }
-            DataEntry::GroupArray { items, path, .. } => {
-                self.validate_group_array(items, path, quickfuncs_enabled)
-            }
-            DataEntry::ObjectProperty { .. } => {
-                Vec::new() // No special validation needed
-            }
-        }
-    }
-
-    fn validate_simple_property(
-        &self,
-        value: &Value,
-        name: &str,
-        quickfuncs_enabled: bool,
-    ) -> Vec<String> {
-        let mut errors = Vec::new();
-        if matches!(value, Value::QuickFuncCall { .. }) && !quickfuncs_enabled {
-            errors.push(format!(
-                "QuickFunction calls in DATA require 'advanced' or 'quickfuncs' feature \
-                 (property: {})",
-                name
-            ));
-        }
-        errors
-    }
-
-    fn validate_table_property(
-        &self,
-        properties: &[PropertyAssignment],
-        path: &TablePath,
-        quickfuncs_enabled: bool,
-    ) -> Vec<String> {
-        let mut errors = Vec::new();
-        if path.segments.is_empty() {
-            errors.push("Table property must have a valid path".to_string());
-            return errors;
-        }
-        for assignment in properties {
-            if matches!(assignment.value, Value::QuickFuncCall { .. }) && !quickfuncs_enabled {
-                errors.push(format!(
-                    "QuickFunction calls in DATA require 'advanced' or 'quickfuncs' feature \
-                     (property: {}.{})",
-                    path, assignment.name
-                ));
-            }
-        }
-        errors
-    }
-
-    fn validate_group_array(
-        &self,
-        items: &[Value],
-        path: &TablePath,
-        quickfuncs_enabled: bool,
-    ) -> Vec<String> {
-        let mut errors = Vec::new();
-        if path.segments.is_empty() {
-            errors.push("Group array must have a valid path".to_string());
-            return errors;
-        }
-        for item in items {
-            if matches!(item, Value::QuickFuncCall { .. }) && !quickfuncs_enabled {
-                errors.push(format!(
-                    "QuickFunction calls in DATA require 'advanced' or 'quickfuncs' feature \
-                     (group array: {})",
-                    path
-                ));
-            }
-        }
-        errors
+            .all(|s| matches!(
+                s.as_str(),
+                "quickfuncs" | "enums" | "imports" | "dlm" | "data" | "security" | "raw" | "schema"
+            ))
     }
 
     // ==================== CONFIG SECTION VALIDATION ====================
@@ -413,17 +208,6 @@ impl VersionConstraints {
 
     // ==================== HELPER METHODS ====================
 
-    /// Handles unknown features through forward compatibility manager
-    fn handle_unknown_feature(&self, feature_type: &str, feature_name: &str) -> bool {
-        if let Some(ref fc_manager) = self.forward_compat_manager {
-            fc_manager
-                .handle_unknown_element(feature_type, feature_name, None, None)
-                .is_ok()
-        } else {
-            false
-        }
-    }
-
     /// Extract the active feature set from a @CONFIG section as a lowercase HashSet.
     ///
     /// Rules:
@@ -485,7 +269,7 @@ impl VersionConstraints {
         let manager = self.version_manager.read().unwrap();
 
         let mut constraints = HashMap::new();
-        constraints.insert("Version".to_string(), json!(manager.get_current_version()));
+        constraints.insert("Version".to_string(), json!(manager.current_version()));
         constraints.insert(
             "SupportedSections".to_string(),
             json!(["CONFIG", "IMPORTS", "DLM", "ENUMS", "QUICKFUNCS", "DATA", "SECURITY"]),
@@ -539,31 +323,76 @@ impl VersionConstraints {
     /// constraints and feature requirements.
     ///
     /// Feature gating rules (all case-insensitive):
-    /// * `features -> advanced`          → all sections permitted.
-    /// * `features -> basic`             → only DATA and SECURITY permitted.
-    /// * `features -> quickfuncs`        → QUICKFUNCS permitted; others still blocked.
-    /// * `features -> quickfuncs,enums`  → QUICKFUNCS + ENUMS permitted.
-    /// * `features -> imports`           → IMPORTS permitted.
+    /// * `features -> advanced`          -> all sections permitted.
+    /// * `features -> basic`             -> only DATA and SECURITY permitted.
+    /// * `features -> quickfuncs`        -> QUICKFUNCS permitted; others still blocked.
+    /// * `features -> quickfuncs,enums`  -> QUICKFUNCS + ENUMS permitted.
+    /// * `features -> imports`           -> IMPORTS permitted.
     /// * DATA and SECURITY are always permitted regardless of feature mode.
     /// * DLM is gated by the version manager's `dlm_section` feature flag (true in v1.0.0).
+    ///
+    /// [`validate_script_doc`](Self::validate_script_doc) does the same for a file held as a
+    /// [`Document`].
     pub fn validate_script(&self, script: &DixScript) -> ValidationResult {
+        self.validate_sections(
+            script.config.as_ref(),
+            script.imports.is_some(),
+            script.dlm.as_ref(),
+            script.enums.is_some(),
+            Deep::Owned {
+                quick_functions: script.quick_functions.as_ref(),
+                data:            script.data.as_ref(),
+            },
+        )
+    }
+
+    /// The validation of [`validate_script`](Self::validate_script), reading a [`Document`].
+    ///
+    /// `@CONFIG`, `@IMPORTS`, `@DLM` and `@ENUMS` are the same owned types in a document, so only
+    /// `@QUICKFUNCS` and `@DATA` are read through the arena, and of those only what the checks look
+    /// at: the parameters of each function and the top-level kind of each value.
+    pub fn validate_script_doc(&self, document: &Document) -> ValidationResult {
+        self.validate_sections(
+            document.config.as_ref(),
+            document.imports.is_some(),
+            document.dlm.as_ref(),
+            document.enums.is_some(),
+            Deep::Arena {
+                arena:           &document.arena,
+                quick_functions: document.quick_functions.as_ref(),
+                data:            document.data.as_ref(),
+            },
+        )
+    }
+
+    /// The validation both entry points share. `deep` holds the two sections that are looked into,
+    /// in whichever form the caller has them; the other sections are only looked at for presence
+    /// or are the same types in both.
+    fn validate_sections(
+        &self,
+        config:      Option<&ConfigSection>,
+        has_imports: bool,
+        dlm:         Option<&DLMSection>,
+        has_enums:   bool,
+        deep:        Deep<'_>,
+    ) -> ValidationResult {
         let mut result = ValidationResult::new();
 
         // Extract active features as a lowercase HashSet for O(1) lookup.
-        let features    = self.extract_features(script.config.as_ref());
+        let features    = self.extract_features(config);
         let is_advanced = features.contains("advanced");
         result.is_advanced_mode = is_advanced;
 
-        // ── @CONFIG ──────────────────────────────────────────────────────────
-        if let Some(ref config) = script.config {
+        // @CONFIG
+        if let Some(config) = config {
             let config_errors = self.validate_config_section(config);
             result.errors.extend(
                 config_errors.into_iter().map(|e| format!("CONFIG: {}", e)),
             );
         }
 
-        // ── @IMPORTS — requires "advanced" OR explicit "imports" feature ─────
-        if script.imports.is_some() {
+        // @IMPORTS: requires "advanced" OR explicit "imports" feature
+        if has_imports {
             let imports_ok = is_advanced || features.contains("imports");
             if !imports_ok {
                 result.errors.push(
@@ -579,18 +408,17 @@ impl VersionConstraints {
             }
         }
 
-        // ── @DLM — content validated regardless of user feature mode ─────────
-        // DLM availability is controlled by the version manager, not the user's
-        // `features` setting, so we validate its contents unconditionally here.
-        if let Some(ref dlm) = script.dlm {
+        // @DLM: content validated regardless of user feature mode. DLM availability is controlled
+        // by the version manager, not the user's `features` setting.
+        if let Some(dlm) = dlm {
             let dlm_errors = self.validate_dlm_section(dlm);
             result.errors.extend(
                 dlm_errors.into_iter().map(|e| format!("DLM: {}", e)),
             );
         }
 
-        // ── @ENUMS — requires "advanced" OR explicit "enums" feature ─────────
-        if script.enums.is_some() {
+        // @ENUMS: requires "advanced" OR explicit "enums" feature
+        if has_enums {
             let enums_ok = is_advanced || features.contains("enums");
             if !enums_ok {
                 result.errors.push(
@@ -599,35 +427,34 @@ impl VersionConstraints {
             }
         }
 
-        // ── @QUICKFUNCS — requires "advanced" OR explicit "quickfuncs" feature
-        if let Some(ref quick_functions) = script.quick_functions {
-            let qf_ok = is_advanced || features.contains("quickfuncs");
-            if !qf_ok {
+        // Both the section's own permission and the permission of the calls in @DATA turn on the
+        // same feature.
+        let quickfuncs_available = is_advanced || features.contains("quickfuncs");
+
+        // @QUICKFUNCS: requires "advanced" OR explicit "quickfuncs" feature. Signatures are only
+        // validated when the section is actually permitted.
+        if deep.has_quick_functions() {
+            if !quickfuncs_available {
                 result.errors.push(
                     "QUICKFUNCS section requires advanced mode or the 'quickfuncs' feature"
                         .to_string(),
                 );
             } else {
-                // Only validate signatures when the section is actually permitted.
-                let func_errors = self.validate_quick_functions_section(quick_functions);
                 result.errors.extend(
-                    func_errors.into_iter().map(|e| format!("QUICKFUNCS: {}", e)),
+                    deep.quick_function_errors().into_iter().map(|e| format!("QUICKFUNCS: {}", e)),
                 );
             }
         }
 
-        // ── @DATA — QuickFunc calls inside DATA need quickfuncs to be enabled ─
-        // DATA itself is always permitted; only the QuickFunc-call sub-check
-        // depends on whether quickfuncs are available.
-        if let Some(ref data) = script.data {
-            let qf_available = is_advanced || features.contains("quickfuncs");
-            let data_errors  = self.validate_data_section(data, qf_available);
+        // @DATA: always permitted; only the QuickFunc-call sub-check depends on whether
+        // quickfuncs are available.
+        if deep.has_data() {
             result.errors.extend(
-                data_errors.into_iter().map(|e| format!("DATA: {}", e)),
+                deep.data_errors(quickfuncs_available).into_iter().map(|e| format!("DATA: {}", e)),
             );
         }
 
-        // @SECURITY — always permitted, no extra validation needed here.
+        // @SECURITY: always permitted, no extra validation needed here.
 
         result.is_valid = result.errors.is_empty();
         result
@@ -669,34 +496,154 @@ impl VersionConstraints {
         errors
     }
 
-    fn validate_quick_functions_section(
-        &self,
-        quick_funcs: &QuickFuncsSection,
-    ) -> Vec<String> {
-        let mut errors = Vec::new();
-        for function in &quick_funcs.functions {
-            errors.extend(self.validate_quick_function_signature(function));
-        }
-        errors
-    }
-
-    fn validate_data_section(
-        &self,
-        data: &DataSection,
-        quickfuncs_enabled: bool,
-    ) -> Vec<String> {
-        let mut errors = Vec::new();
-        for entry in &data.entries {
-            errors.extend(self.validate_data_entry(entry, quickfuncs_enabled));
-        }
-        errors
-    }
 }
 
 impl Default for VersionConstraints {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ==================== THE TWO SECTIONS THAT ARE LOOKED INTO ====================
+
+/// `@QUICKFUNCS` and `@DATA` as the caller holds them: the owned sections, or the sections of a
+/// [`Document`] with the arena they point into.
+///
+/// The checks look at the parameters of each function and at the top-level kind of each value,
+/// nothing deeper. That is a scan of a few fields per entry, so it is written once for each form
+/// rather than copying a whole section into an arena to scan it once.
+enum Deep<'a> {
+    Owned {
+        quick_functions: Option<&'a QuickFuncsSection>,
+        data:            Option<&'a DataSection>,
+    },
+    Arena {
+        arena:           &'a Arena,
+        quick_functions: Option<&'a DocQuickFuncs>,
+        data:            Option<&'a DocData>,
+    },
+}
+
+impl Deep<'_> {
+    fn has_quick_functions(&self) -> bool {
+        match self {
+            Deep::Owned { quick_functions, .. } => quick_functions.is_some(),
+            Deep::Arena { quick_functions, .. } => quick_functions.is_some(),
+        }
+    }
+
+    fn has_data(&self) -> bool {
+        match self {
+            Deep::Owned { data, .. } => data.is_some(),
+            Deep::Arena { data, .. } => data.is_some(),
+        }
+    }
+
+    /// The signature errors of every function: a default value that does not convert to the
+    /// type declared for its parameter.
+    fn quick_function_errors(&self) -> Vec<String> {
+        match self {
+            Deep::Owned { quick_functions: Some(section), .. } => section
+                .functions
+                .iter()
+                .flat_map(|f| TypeSystemManager::validate_quick_function_signature(f).err().unwrap_or_default())
+                .collect(),
+            Deep::Arena { arena, quick_functions: Some(section), .. } => section
+                .functions
+                .iter()
+                .flat_map(|f| {
+                    TypeSystemManager::validate_doc_quick_function_signature(f, arena).err().unwrap_or_default()
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The errors of every data entry: a table or group array with no path, and (when
+    /// `quickfuncs_available` is false) a QuickFunction call as a value.
+    fn data_errors(&self, quickfuncs_available: bool) -> Vec<String> {
+        match self {
+            Deep::Owned { data: Some(data), .. } => owned_data_errors(data, quickfuncs_available),
+            Deep::Arena { arena, data: Some(data), .. } => arena_data_errors(data, arena, quickfuncs_available),
+            _ => Vec::new(),
+        }
+    }
+}
+
+const EMPTY_TABLE_PATH: &str = "Table property must have a valid path";
+const EMPTY_GROUP_PATH: &str = "Group array must have a valid path";
+
+/// The error for a QuickFunction call in `@DATA`, with where it is.
+fn call_in_data(location: std::fmt::Arguments<'_>) -> String {
+    format!("QuickFunction calls in DATA require 'advanced' or 'quickfuncs' feature ({})", location)
+}
+
+fn owned_data_errors(data: &DataSection, quickfuncs_available: bool) -> Vec<String> {
+    let is_call = |value: &Value| !quickfuncs_available && matches!(value, Value::QuickFuncCall { .. });
+    let mut errors = Vec::new();
+    for entry in &data.entries {
+        match entry {
+            DataEntry::SimpleProperty { name, value, .. } => {
+                if is_call(value) {
+                    errors.push(call_in_data(format_args!("property: {}", name)));
+                }
+            }
+            DataEntry::TableProperty { path, properties, .. } => {
+                if path.segments.is_empty() {
+                    errors.push(EMPTY_TABLE_PATH.to_string());
+                    continue;
+                }
+                for assignment in properties.iter().filter(|a| is_call(&a.value)) {
+                    errors.push(call_in_data(format_args!("property: {}.{}", path, assignment.name)));
+                }
+            }
+            DataEntry::GroupArray { path, items, .. } => {
+                if path.segments.is_empty() {
+                    errors.push(EMPTY_GROUP_PATH.to_string());
+                    continue;
+                }
+                for _ in items.iter().filter(|v| is_call(v)) {
+                    errors.push(call_in_data(format_args!("group array: {}", path)));
+                }
+            }
+            DataEntry::ObjectProperty { .. } => {}
+        }
+    }
+    errors
+}
+
+fn arena_data_errors(data: &DocData, arena: &Arena, quickfuncs_available: bool) -> Vec<String> {
+    let is_call = |id| !quickfuncs_available && matches!(arena.value(id), ValueNode::QuickFuncCall { .. });
+    let mut errors = Vec::new();
+    for entry in &data.entries {
+        match entry {
+            DocDataEntry::SimpleProperty { name, value, .. } => {
+                if is_call(*value) {
+                    errors.push(call_in_data(format_args!("property: {}", name)));
+                }
+            }
+            DocDataEntry::TableProperty { path, properties, .. } => {
+                if path.segments.is_empty() {
+                    errors.push(EMPTY_TABLE_PATH.to_string());
+                    continue;
+                }
+                for assignment in properties.iter().filter(|a| is_call(a.value)) {
+                    errors.push(call_in_data(format_args!("property: {}.{}", path, assignment.name)));
+                }
+            }
+            DocDataEntry::GroupArray { path, items, .. } => {
+                if path.segments.is_empty() {
+                    errors.push(EMPTY_GROUP_PATH.to_string());
+                    continue;
+                }
+                for _ in arena.value_list(*items).iter().filter(|id| is_call(**id)) {
+                    errors.push(call_in_data(format_args!("group array: {}", path)));
+                }
+            }
+            DocDataEntry::ObjectProperty { .. } => {}
+        }
+    }
+    errors
 }
 
 // ==================== VALIDATION RESULT ====================
@@ -706,9 +653,7 @@ impl Default for VersionConstraints {
 pub struct ValidationResult {
     pub is_valid:        bool,
     pub errors:          Vec<String>,
-    pub warnings:        Vec<String>,
     pub is_advanced_mode: bool,
-    pub detected_version: Option<String>,
 }
 
 impl ValidationResult {
@@ -716,9 +661,7 @@ impl ValidationResult {
         ValidationResult {
             is_valid:         false,
             errors:           Vec::new(),
-            warnings:         Vec::new(),
             is_advanced_mode: false,
-            detected_version: None,
         }
     }
 }
@@ -741,25 +684,12 @@ impl std::fmt::Display for ValidationResult {
             write!(f, " (Advanced Mode)")?;
         }
 
-        if let Some(ref version) = self.detected_version {
-            write!(f, " - Version: {}", version)?;
-        }
-
         if !self.errors.is_empty() {
             write!(
                 f,
                 "\nErrors ({}):\n  {}",
                 self.errors.len(),
                 self.errors.join("\n  ")
-            )?;
-        }
-
-        if !self.warnings.is_empty() {
-            write!(
-                f,
-                "\nWarnings ({}):\n  {}",
-                self.warnings.len(),
-                self.warnings.join("\n  ")
             )?;
         }
 

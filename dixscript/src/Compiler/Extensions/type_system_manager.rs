@@ -3,6 +3,7 @@
 //!
 //! All methods are stateless utility functions.
 
+use crate::Compiler::AST::arena::{Arena, DocQuickFunction, ExprNode};
 use crate::Compiler::AST::{
     DataType, QuickFunction, QuickFuncParam, Expression, Value, Position
 };
@@ -246,42 +247,57 @@ impl TypeSystemManager {
         result
     }
 
-    /// Validate QuickFunction signature
+    /// Validate a QuickFunction signature: every parameter that has both a declared type and a
+    /// default value must have a default that converts to that type.
+    ///
+    /// [`validate_doc_quick_function_signature`](Self::validate_doc_quick_function_signature) is the
+    /// same check over a function in an arena.
     pub fn validate_quick_function_signature(function: &QuickFunction) -> Result<bool, Vec<String>> {
         let mut errors = Vec::new();
 
-        // Validate return type if specified
-        if let Some(return_type) = function.return_type {
-            if !Self::is_valid_data_type(return_type) {
-                errors.push(format!("Invalid return type: {:?}", return_type));
-            }
-        }
-
-        // Validate parameters
         for param in &function.parameters {
-            if let Some(param_type) = param.data_type {
-                if !Self::is_valid_data_type(param_type) {
-                    errors.push(format!("Parameter '{}' has invalid type: {:?}", param.name, param_type));
-                }
-            }
-
-            // If has default value, check it matches type
-            if let (Some(ref default_expr), Some(param_type)) = (&param.default_value, param.data_type) {
+            if let (Some(default_expr), Some(param_type)) = (&param.default_value, param.data_type) {
                 let value_type = Self::infer_expression_type(default_expr);
                 if !Self::can_convert(value_type, param_type) {
-                    errors.push(format!(
-                        "Parameter '{}' default value type {:?} cannot convert to declared type {:?}",
-                        param.name, value_type, param_type
-                    ));
+                    errors.push(Self::default_mismatch(&param.name, value_type, param_type));
                 }
             }
         }
 
-        if errors.is_empty() {
-            Ok(true)
-        } else {
-            Err(errors)
+        if errors.is_empty() { Ok(true) } else { Err(errors) }
+    }
+
+    /// The check of [`validate_quick_function_signature`](Self::validate_quick_function_signature)
+    /// for a function whose nodes are in `arena`.
+    ///
+    /// Only the value of a default is copied out of the arena, to be typed by the same code as an
+    /// owned one; the body, which is most of a function, is not touched.
+    pub fn validate_doc_quick_function_signature(
+        function: &DocQuickFunction,
+        arena:    &Arena,
+    ) -> Result<bool, Vec<String>> {
+        let mut errors = Vec::new();
+
+        for param in &function.parameters {
+            if let (Some(default), Some(param_type)) = (param.default_value, param.data_type) {
+                let value_type = match arena.expr(default) {
+                    ExprNode::Value { value, .. } => Self::infer_value_type(&arena.export_value(*value)),
+                    _ => DataType::Any,
+                };
+                if !Self::can_convert(value_type, param_type) {
+                    errors.push(Self::default_mismatch(&param.name, value_type, param_type));
+                }
+            }
         }
+
+        if errors.is_empty() { Ok(true) } else { Err(errors) }
+    }
+
+    fn default_mismatch(param_name: &str, value_type: DataType, param_type: DataType) -> String {
+        format!(
+            "Parameter '{}' default value type {:?} cannot convert to declared type {:?}",
+            param_name, value_type, param_type
+        )
     }
 
     /// Validate individual parameter

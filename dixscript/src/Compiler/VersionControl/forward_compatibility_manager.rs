@@ -55,7 +55,7 @@ impl ForwardCompatibilityManager {
     ) -> CompatibilityValidationResult {
         let script_version = super::version_manager::extract_version_from_ast(script);
         let manager = VersionManager::instance().read().unwrap();
-        let compiler_version = manager.get_current_version().to_string();
+        let compiler_version = manager.current_version().to_string();
 
         let mut result = CompatibilityValidationResult {
             is_compatible: false,
@@ -99,7 +99,7 @@ impl ForwardCompatibilityManager {
             "Unknown {} '{}' not supported in v{}",
             element_type,
             element_name,
-            manager.get_current_version()
+            manager.current_version()
         );
 
         let error_manager = ErrorManager::get_shared_instance();
@@ -134,7 +134,7 @@ impl ForwardCompatibilityManager {
         info.insert("Mode".to_string(), format!("{:?}", self.mode));
         info.insert(
             "CompilerVersion".to_string(),
-            manager.get_current_version().to_string(),
+            manager.current_version().to_string(),
         );
         info.insert(
             "Note".to_string(),

@@ -82,9 +82,20 @@ Breaking release.
   and the enhancer, as the loader does for the main file. Its entry points keep their signatures and
   results; `resolve_imports`, which takes trees the caller parsed, still analyzes them through the owned
   entry points.
+- **`VersionConstraints::validate_script_doc(&Document)`** validates a file held as a `Document` and gives
+  the same result as `validate_script` for it; the orchestrator's version phase calls it when a document is
+  attached. `TypeSystemManager::validate_doc_quick_function_signature` is the arena form of the signature
+  check.
 
 ### Removed
-
+- `VersionConstraints::with_forward_compat`, `is_valid_value_type`, `is_valid_default_value`,
+  `is_valid_type_annotation`, `requires_advanced_mode`, `is_valid_function_type`,
+  `is_valid_static_method_call`, `is_valid_instance_method_call`, `is_valid_dix_function_call`,
+  `validate_quick_function_signature` and `validate_data_entry`. None had a caller in the workspace;
+  `is_valid_type_annotation` returned true for any argument.
+- `VersionManager::validate_script_features`, `supports_feature_control`, `supports_dual_parsers`,
+  `get_recommended_parser` and `get_current_version` (use `current_version`).
+- `ValidationResult::warnings` and `detected_version`, which nothing ever set.
 - **`DCompressor.bzip2` and `DCompressor.lzma`.** gzip is the only DLM
   compression codec. The `bzip2` and `lzma-rust2` dependencies are gone
   (10 fewer crates in the default build). A file that names either codec

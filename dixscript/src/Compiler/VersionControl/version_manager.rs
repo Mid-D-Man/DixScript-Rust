@@ -113,16 +113,11 @@ impl VersionManager {
         &self.current_version
     }
 
-    /// Get current version (deprecated, use current_version)
-    pub fn get_current_version(&self) -> &str {
-        &self.current_version
-    }
-
     /// Check if feature is supported in current version
     /// PERFORMANCE: O(1) - HashSet lookup (~20ns)
     #[inline]
     pub fn supports_feature(&self, feature_key: &str) -> bool {
-        self.feature_map.contains(&feature_key.to_string())
+        self.feature_map.contains(feature_key)
     }
 
     /// True if this manager can read files declared at `target_version`: any
@@ -158,75 +153,11 @@ impl VersionManager {
         self.supports_feature(&section_feature)
     }
 
-    /// Check if feature control is supported
-    #[inline]
-    pub fn supports_feature_control(&self) -> bool {
-        self.supports_feature("feature_control")
-    }
-
     /// Check if builtin registry is supported
     #[inline]
     pub fn supports_builtin_registry(&self) -> bool {
         self.supports_feature("static_object_registry")
             && self.supports_feature("instance_method_registry")
-    }
-
-    /// Check if dual parser system is supported
-    #[inline]
-    pub fn supports_dual_parsers(&self) -> bool {
-        self.supports_feature("dual_parser_system")
-    }
-
-    /// Get recommended parser for section type
-    pub fn get_recommended_parser(&self, section_type: &str) -> &'static str {
-        match section_type.to_uppercase().as_str() {
-            "CONFIG" | "DLM" | "DATA" | "ENUMS" | "SECURITY" | "IMPORTS" => "LL",
-            "QUICKFUNCS" => "LALR",
-            _ => "LL",
-        }
-    }
-
-    /// Validate script features (returns list of unsupported features)
-    pub fn validate_script_features(&self, script: &crate::Compiler::AST::DixScript) -> Vec<String> {
-        let mut unsupported = Vec::new();
-
-        if script.config.is_some() && !self.supports_feature("config_section") {
-            unsupported.push("CONFIG section".to_string());
-        }
-
-        if script.imports.is_some() && !self.supports_feature("imports_section") {
-            unsupported.push("IMPORTS section".to_string());
-        }
-
-        if script.dlm.is_some() && !self.supports_feature("dlm_section") {
-            unsupported.push("DLM section".to_string());
-        }
-
-        if script.enums.is_some() && !self.supports_feature("enums_section") {
-            unsupported.push("ENUMS section".to_string());
-        }
-
-        if script.quick_functions.is_some() && !self.supports_feature("quickfuncs_section") {
-            unsupported.push("QUICKFUNCS section".to_string());
-        }
-
-        if script.data.is_some() && !self.supports_feature("data_section") {
-            unsupported.push("DATA section".to_string());
-        }
-
-        if script.security.is_some() && !self.supports_feature("security_section") {
-            unsupported.push("SECURITY section".to_string());
-        }
-
-        if !script.raw.is_empty() && !self.supports_feature("raw_section") {
-            unsupported.push("RAW section".to_string());
-        }
-
-        if script.schema.is_some() && !self.supports_feature("schema_section") {
-            unsupported.push("SCHEMA section".to_string());
-        }
-
-        unsupported
     }
 
     /// Get version information
@@ -404,7 +335,7 @@ mod tests {
     #[test]
     fn test_version_manager_singleton() {
         let manager = VERSION_MANAGER.read().unwrap();
-        assert_eq!(manager.get_current_version(), VERSION_1_0);
+        assert_eq!(manager.current_version(), VERSION_1_0);
     }
 
     #[test]
@@ -493,6 +424,6 @@ mod tests {
         VersionManager::initialize("1.0.0");
         VersionManager::initialize("1.0.0");
         let manager = VERSION_MANAGER.read().unwrap();
-        assert_eq!(manager.get_current_version(), VERSION_1_0);
+        assert_eq!(manager.current_version(), VERSION_1_0);
     }
 }

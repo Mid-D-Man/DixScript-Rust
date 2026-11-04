@@ -454,6 +454,44 @@ that.
 section-name list that needed `"raw"`/`"raw_section"` added, found while
 wiring the feature gate through, not part of any pre-existing plan.
 
+**Reading the Document.** `VersionConstraints::validate_script_doc(&Document)` does the validation of
+`validate_script(&DixScript)` for a file held as a `Document`, and the orchestrator's version phase
+calls it when a document is attached. Both are one skeleton, `validate_sections`, that takes the
+`@CONFIG`, `@DLM`, the presence of `@IMPORTS` and `@ENUMS` (all the same owned types in a document) and
+a `Deep` value holding `@QUICKFUNCS` and `@DATA` in whichever form the caller has. Only those two are
+looked into, and only for the parameters of each function and the top-level kind of each value.
+- **The leaf scans are written once for each form instead of copying a section into an arena to scan
+  it once.** Each is a loop over the entries with a handful of field tests. Copying all of `@DATA` into
+  an arena to run it would cost far more than the scan, and the language server, which has no
+  document, would pay for it on every analysis. The messages are shared by `call_in_data` and two
+  constants.
+- **`TypeSystemManager::validate_doc_quick_function_signature` is the arena form of the signature check.**
+  It copies out only the value of a default, to be typed by the code the owned form uses, and never
+  touches a body. Both forms dropped the two checks that could not fail, a return type and a parameter
+  type being tested with `is_valid_data_type`, which returns true for every type.
+- **The scan for calls in `@DATA` runs only when quick functions are not available**, since that is the
+  only case in which a call is an error, instead of testing every value either way.
+- **Two small costs went.** `is_valid_section_list` built a set of eight strings on each call and is a
+  `match` now; `VersionManager::supports_feature` allocated a `String` to look a `&str` up in a set of
+  `String`s and no longer does.
+
+**Dead code removed.** Everything below had no reference anywhere in the workspace (the library, its
+tests and benches, every sibling crate, and the docs), was a check that always passed, or was a
+duplicate:
+- `VersionConstraints`: `with_forward_compat`, and with it the `forward_compat_manager` field and the two
+  branches only it could reach (`handle_unknown_feature` and the unknown-section fallback of
+  `is_valid_section_type`); `is_valid_value_type`, `is_valid_default_value`, `is_valid_type_annotation`
+  (it returned true for any argument), `requires_advanced_mode`, `is_valid_function_type`,
+  `is_valid_static_method_call`, `is_valid_instance_method_call`, `is_valid_dix_function_call`,
+  `validate_quick_function_signature` and `validate_data_entry` (their work is in the skeleton now).
+- `VersionManager`: `validate_script_features`, `supports_feature_control`, `supports_dual_parsers`,
+  `get_recommended_parser`, and `get_current_version`, a deprecated duplicate of `current_version`
+  whose callers (the lexer, `ForwardCompatibilityManager` and `VersionConstraints`) now call that.
+- `ValidationResult`: the `warnings` and `detected_version` fields, which nothing ever set, and the
+  parts of its `Display` that printed them.
+
+**Tests:** `tests/version_constraints_document.rs`.
+
 **Language version 2.0.0.** The manager knows two language versions, 1.0.0 and
 2.0.0, and a file picks one with `@CONFIG` `version`. They are the same language
 except for the DLM codecs: bzip2 and lzma are valid in 1.0.0 and invalid in 2.0.0.
@@ -929,6 +967,28 @@ and one without, attaches the document or not, and checks what the result holds.
 
 **Tests:** `cargo test -p dixscript --test orchestrator_sections_document`. 7 tests, all passing on
 Rust 1.75.
+
+### `tests/version_constraints_document.rs`
+
+**What it does:** Pins the result of `VersionConstraints` for six hand-built scripts under 24 `@CONFIG`
+variants to what the code before the change gave, and checks that the owned and document forms agree.
+
+**Decisions:**
+- **The variants are the point.** The parser refuses a section whose feature is off, so the checks that
+  gate sections on the `features` setting cannot be reached from text. The tests replace the config of
+  a parsed or hand-built script with 24 variants instead: feature lists and strings, advanced and basic,
+  unknown names, a number where a string belongs, first entry wins, versions, debug modes, no config and
+  an empty one.
+- **`RECORDING` holds, for each script, a fingerprint of its 24 result lines,** produced by running the
+  original code, and the test checks it through both forms. The six scripts cover every shape of data
+  entry (with a call in a table, a group and a plain property, and an empty path), quick function
+  parameters with defaults that convert and that do not, every `@DLM` module and codec, and `@IMPORTS` and
+  `@ENUMS` on their own and together with everything else.
+- **The corpus is compared form against form** under the same 24 variants (84 files, and at least 200
+  of the results are errors, so the variants do bite).
+- **Which tree the version phase reads** is tested with an owned tree and a document that disagree.
+
+**Tests:** `cargo test -p dixscript --test version_constraints_document`. 5 tests, all passing on Rust 1.75.
 
 ## Fixes and Problems
 
@@ -1724,3 +1784,29 @@ requires the larger to take less than 7 times as long.
 - **Not done in this drop.** The extraction of functions and enums still reads the exported owned
   tree, the owned export therefore stays, and `version_constraints` and `version_manager` still read
   the owned tree. CI on stable Rust has not been run.
+
+### Fixes and Problems: `VersionConstraints` reads the Document, and what was dead in it is gone
+
+- **What changed.** `version_constraints.rs`, `version_manager.rs` and the signature check in
+  `type_system_manager.rs`, plus one call in the orchestrator and the three callers of the removed
+  `get_current_version`. The list of what was removed is under the modules heading.
+- **How it was checked against the original.** A throwaway harness printed the whole `ValidationResult`
+  of the original `validate_script` for the 84 corpus files and 75 crafted sources under 24 config
+  variants (3,724 lines), and for six hand-built scripts under the same variants (144 lines), under
+  language version 1.0.0 and under 2.0.0. After the change the owned form and the document form both
+  print the same lines, byte for byte, once the two removed fields, which were always empty, are taken
+  out of the original's text. The semantic output of the whole pipeline for the corpus and the 16 crafted
+  import files is also identical to the one from before, except for today's date in the default of a date
+  parameter, which follows the clock.
+- **25 bugs were injected afterwards and all 25 are noticed.** They broke each branch of both data scans,
+  both signature checks, the section gates, the section list, the presence tests of the two forms, the
+  orchestrator's choice of tree and the feature lookup.
+- **Found while doing it, not changed.** The version phase reports a section that needs a feature, and the
+  analyzer's own phases report it again as a feature error. The parser also refuses such a section before
+  analysis, so the version phase's feature gates are only reached with a config changed after parsing, as
+  the tests do. `ForwardCompatibilityManager::handle_unknown_element` has no caller now that
+  `VersionConstraints` does not call it; it is public and was left alone. `TypeSystemManager::validate_parameter`
+  has no caller either and was left alone, as it was outside these files.
+- **Not done in this drop.** The owned `validate_script` has no wrapper over the arena form, on purpose;
+  the language server uses it. The owned export, the value resolver, the runtime, the DLM auditor and
+  the binary packer remain. CI on stable Rust has not been run.

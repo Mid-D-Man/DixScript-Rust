@@ -263,7 +263,12 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             self.error_manager.log_info("Phase 1: version compatibility check");
         }
 
-        let validation = VersionConstraints::new().validate_script(self.ast);
+        // Read from the tree that is read, like every other section.
+        let constraints = VersionConstraints::new();
+        let validation = match self.document {
+            Some(document) => constraints.validate_script_doc(document),
+            None           => constraints.validate_script(self.ast),
+        };
 
         if !validation.is_valid {
             for error in &validation.errors {

@@ -163,7 +163,7 @@ impl<'src> Tokenizer<'src> {
         let version_allows_all_tokens = VersionManager::instance()
             .read()
             .map(|vm| {
-                let v = vm.get_current_version();
+                let v = vm.current_version();
                 v.starts_with("1.") || v.starts_with("2.")
             })
             .unwrap_or(true);
@@ -313,7 +313,7 @@ impl<'src> Tokenizer<'src> {
     fn handle_unsupported_token(&self, token: &Token) {
         let msg = if self.debug_config.is_enabled {
             let v = VersionManager::instance().read()
-                .map(|vm| vm.get_current_version().to_string())
+                .map(|vm| vm.current_version().to_string())
                 .unwrap_or_else(|_| "unknown".to_string());
             format!("Token type not supported in version {}", v)
         } else {

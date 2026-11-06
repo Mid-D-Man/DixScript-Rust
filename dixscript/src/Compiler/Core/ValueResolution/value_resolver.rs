@@ -20,6 +20,7 @@ use crate::Utilities::RustcHash::FxHashMap;
 
 use crate::Builtins::Core::{DixType, DixValue};
 use crate::Builtins::Resolver;
+use crate::Compiler::AST::arena::{Arena, DocData, Document};
 use crate::Compiler::AST::{
     DataEntry, DataSection, DixScript, EnumDeclaration, EnumField, EnumsSection, Expression,
     ObjectProperty, Position, PropertyAssignment, Value,
@@ -29,6 +30,7 @@ use crate::Compiler::Utilities::{PathBuilder, SymbolTable, ImportedNamespace};
 use crate::ErrorManager::{DebugConfig, ErrorManager};
 
 use super::ast_walker::ASTWalker;
+use super::enum_resolution::{resolve_data_enums, EnumPass};
 use super::execution_context::ExecutionContext;
 use super::function_interpreter::{FunctionInterpreter, InterpreterError};
 use super::supporting_classes::{FunctionCallInfo, ResolutionRecord, ValueResolutionResult};
@@ -135,16 +137,11 @@ pub struct ValueResolver<'a> {
     resolution_history: Vec<ResolutionRecord>,
     start_time: Instant,
     error_manager: ErrorManager,
-    /// Imported (cross-file) enums actually referenced during Phase 1,
-    /// keyed by qualified name exactly as it appears in `Value::EnumValue.
-    /// enum_name` (e.g. "Types.Priority") -> field_name -> resolved int.
-    /// Merged into `self.ast.enums` at the end of `resolve_all_enum_values`
-    /// so `DixData::from_ast` and `value_encoder.rs`'s local-only enums
-    /// table both pick up imported enums for free, without either of them
-    /// needing symbol_table access themselves. `RefCell` because
-    /// `resolve_enums_in_value` is `&self` (part of a read-only recursive
-    /// descent over `&self.ast`), not `&mut self`.
-    imported_enum_usages: RefCell<FxHashMap<String, HashMap<String, i32>>>,
+    /// The document whose arena phase 1 reads and rewrites, when the caller has one.
+    ///
+    /// Set by [`with_document`](ValueResolver::with_document). Without it phase 1 copies the
+    /// owned data section into a scratch arena instead.
+    document: Option<&'a mut Document>,
 }
 
 impl<'a> ValueResolver<'a> {
@@ -219,9 +216,20 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             resolution_history: Vec::new(),
             start_time: Instant::now(),
             error_manager,
-            imported_enum_usages: RefCell::new(FxHashMap::default()),
+            document: None,
         }
     }
+    /// Gives phase 1 the document the data section was parsed into.
+    ///
+    /// Phase 1 then reads and rewrites the document's `@DATA` in its arena instead of copying
+    /// the owned data section, and whether a data section exists is decided by the document.
+    /// The owned tree passed to the constructor is still the one the later phases read and the
+    /// result is built from.
+    pub fn with_document(mut self, document: &'a mut Document) -> Self {
+        self.document = Some(document);
+        self
+    }
+
     // ==================== MAIN ORCHESTRATION ====================
 
     pub fn resolve(mut self) -> ValueResolutionResult {
@@ -307,892 +315,115 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
 
     // ==================== PHASE 1: ENUM PRE-RESOLUTION ====================
 
+    /// Resolves the enum references of the data section (phase 1).
+    ///
+    /// The walk itself is `enum_resolution::resolve_data_enums`; this method decides which tree
+    /// it reads and keeps the owned tree the later phases read in step with the result.
     fn resolve_all_enum_values(&mut self) -> Result<(), ResolverError> {
-        if self.ast.data.is_none() {
+        let Some(pass) = self.run_enum_pass()? else {
             if self.debug_config.is_enabled {
                 self.error_manager
                     .log_debug("No DATA section — skipping enum pre-resolution");
             }
             return Ok(());
-        }
-
-        if self.debug_config.is_enabled {
-            self.error_manager
-                .log_info("Pre-processing: resolving all enum values to integers");
-        }
-
-        let (entries_snapshot, section_position) = {
-            let data = self.ast.data.as_ref().unwrap();
-            (data.entries.clone(), data.position)
         };
 
-        let cap = entries_snapshot.len().max(MIN_CAPACITY);
-        let mut new_entries = Vec::with_capacity(cap);
-        let mut local_count = 0usize;
-        let mut imported_count = 0usize;
-
-        for entry in &entries_snapshot {
-            let (new_entry, lc, ic) = self.resolve_enums_in_entry(entry)?;
-            new_entries.push(new_entry);
-            local_count += lc;
-            imported_count += ic;
-        }
-
-        self.ast.data = Some(DataSection {
-            entries: new_entries,
-            position: section_position,
-        });
-
-        // Merge any imported enums actually referenced above into this
-        // file's own @ENUMS section, so DixData::from_ast's
-        // extract_enums_section and value_encoder.rs's local_enums table --
-        // neither of which has symbol_table access -- see them too. Keyed
-        // by the full qualified name ("Types.Priority"), which can never
-        // collide with a local enum's bare name ("Priority"), so this is
-        // additive only and never shadows a real local declaration.
-        let imported_enums: Vec<(String, HashMap<String, i32>)> = self
-            .imported_enum_usages
-            .borrow()
-            .iter()
-            .map(|(name, fields)| (name.clone(), fields.clone()))
-            .collect();
-
-        if !imported_enums.is_empty() {
-            let section = self.ast.enums.get_or_insert_with(|| EnumsSection {
-                enums: Vec::new(),
-                position: Position::UNKNOWN,
-            });
-
-            let mut merged_count = 0usize;
-            for (qualified_name, fields) in imported_enums {
-                if section.enums.iter().any(|d| d.name == qualified_name) {
-                    continue; // already merged (e.g. resolve() called more than once)
-                }
-
-                let mut field_list: Vec<EnumField> = fields
-                    .into_iter()
-                    .map(|(field_name, field_value)| {
-                        EnumField::new(field_name, Some(field_value), Position::UNKNOWN)
-                    })
-                    .collect();
-                // Cosmetic only (affects declaration order if this synthesized
-                // section is ever introspected/serialized back to source) --
-                // lookups are by name, not position, so this has no effect on
-                // correctness either way.
-                field_list.sort_by_key(|f| f.value.unwrap_or(0));
-
-                section.enums.push(EnumDeclaration::new(
-                    qualified_name,
-                    field_list,
-                    Position::UNKNOWN,
-                ));
-                merged_count += 1;
-            }
-
-            if self.debug_config.is_enabled {
-                self.error_manager.log_info(&format!(
-                    "Merged {} imported enum declaration(s) into local @ENUMS",
-                    merged_count
-                ));
-            }
-        }
+        self.merge_imported_enums(pass.usages);
 
         if self.debug_config.is_enabled {
             self.error_manager.log_info(&format!(
                 "Resolved {} local + {} imported enum values",
-                local_count, imported_count
+                pass.local, pass.imported
             ));
         }
 
         Ok(())
     }
 
-    fn resolve_enums_in_entry(
-        &self,
-        entry: &DataEntry,
-    ) -> Result<(DataEntry, usize, usize), ResolverError> {
-        match entry {
-            DataEntry::SimpleProperty { name, data_type, value, position } => {
-                let (new_value, lc, ic) = self.resolve_enums_in_value(value)?;
-                if lc + ic > 0 {
-                    Ok((
-                        DataEntry::SimpleProperty {
-                            name: name.clone(),
-                            data_type: *data_type,
-                            value: new_value,
-                            position: *position,
-                        },
-                        lc,
-                        ic,
-                    ))
-                } else {
-                    Ok((entry.clone(), 0, 0))
-                }
-            }
-
-            DataEntry::TableProperty { path, properties, position } => {
-                let mut new_properties = Vec::with_capacity(properties.len().max(MIN_CAPACITY));
-                let mut any_changed = false;
-                let mut total_lc = 0usize;
-                let mut total_ic = 0usize;
-
-                for prop in properties {
-                    let (new_value, lc, ic) = self.resolve_enums_in_value(&prop.value)?;
-                    total_lc += lc;
-                    total_ic += ic;
-                    if lc + ic > 0 {
-                        new_properties.push(PropertyAssignment {
-                            name: prop.name.clone(),
-                            data_type: prop.data_type,
-                            value: new_value,
-                            position: prop.position,
-                        });
-                        any_changed = true;
-                    } else {
-                        new_properties.push(prop.clone());
-                    }
-                }
-
-                if any_changed {
-                    Ok((
-                        DataEntry::TableProperty {
-                            path: path.clone(),
-                            properties: new_properties,
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((entry.clone(), 0, 0))
-                }
-            }
-
-            DataEntry::GroupArray { path, items, position } => {
-                let mut new_items = Vec::with_capacity(items.len().max(MIN_CAPACITY));
-                let mut any_changed = false;
-                let mut total_lc = 0usize;
-                let mut total_ic = 0usize;
-
-                for item in items {
-                    let (new_value, lc, ic) = self.resolve_enums_in_value(item)?;
-                    total_lc += lc;
-                    total_ic += ic;
-                    if lc + ic > 0 {
-                        new_items.push(new_value);
-                        any_changed = true;
-                    } else {
-                        new_items.push(item.clone());
-                    }
-                }
-
-                if any_changed {
-                    Ok((
-                        DataEntry::GroupArray {
-                            path: path.clone(),
-                            items: new_items,
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((entry.clone(), 0, 0))
-                }
-            }
-
-            DataEntry::ObjectProperty { name, data_type, object, position } => {
-                let (new_obj, lc, ic) = self.resolve_enums_in_object_literal(object)?;
-                if lc + ic > 0 {
-                    Ok((
-                        DataEntry::ObjectProperty {
-                            name: name.clone(),
-                            data_type: *data_type,
-                            object: Box::from(new_obj),
-                            position: *position,
-                        },
-                        lc,
-                        ic,
-                    ))
-                } else {
-                    Ok((entry.clone(), 0, 0))
-                }
-            }
-        }
-    }
-
-    fn resolve_enums_in_value(
-        &self,
-        value: &Value,
-    ) -> Result<(Value, usize, usize), ResolverError> {
-        match value {
-            // Direct enum value reference at a leaf/data position (a bare
-            // `Enum.FIELD` sitting as a field's value, table property, group
-            // array item, or array element -- resolve_enums_in_entry calls
-            // this function directly on those). Validate the reference
-            // exactly as before (same lookups, same error paths for a bad
-            // namespace/enum/field), but do NOT collapse to Value::Integer.
-            //
-            // BUGFIX: this used to always return Value::Integer here,
-            // discarding enum_name/field_name. That's correct for enums used
-            // in actual *computation* (arithmetic, QuickFunc call arguments)
-            // where a concrete int is genuinely needed -- but those go
-            // through the separate Expression::EnumAccess arms in
-            // resolve_enums_in_expr below, not this one. This arm only ever
-            // fires for enums sitting as plain data, where collapsing to a
-            // bare Integer meant every downstream consumer that cares about
-            // enum identity (DixData::from_ast's DixValue::Enum
-            // construction, the mdix-ffi mdix_get_enum_name/
-            // mdix_get_enum_field FFI exports, Runtime/schema.rs's
-            // ExpectedValueType::Enum validation) silently stopped working
-            // for any file whose Stage 7 (Runtime/loader.rs) happened to run
-            // -- which is any file with a QuickFunc anywhere in scope,
-            // whether or not that QuickFunc has anything to do with the enum
-            // field in question. Leaving the node intact here means all of
-            // those consumers see real enum identity again, and
-            // Compiler/Core/BinarySerialization/value_encoder.rs's
-            // ValueTypeTag::Enum wire format (see encode_enum) can actually
-            // tag it correctly in binary output too, instead of it having
-            // already been silently flattened to a plain int before the
-            // encoder ever saw it.
-            Value::EnumValue { enum_name, value: enum_field, position } => {
-                if let Some(dot) = enum_name.find('.') {
-                    let ns_name = &enum_name[..dot];
-                    let actual_enum = &enum_name[dot + 1..];
-                    let ns = self
-                        .symbol_table
-                        .try_get_namespace(ns_name)
-                        .ok_or_else(|| ResolverError::InvalidEnumAccess {
-                            location: format!("{}.{}.{}", ns_name, actual_enum, enum_field),
-                            message: format!("Namespace '{}' not found", ns_name),
-                            position: *position,
-                        })?;
-                    let fields = ns.enums.get(actual_enum).ok_or_else(|| {
-                        ResolverError::InvalidEnumAccess {
-                            location: format!("{}.{}.{}", ns_name, actual_enum, enum_field),
-                            message: format!("Enum '{}' not found", actual_enum),
-                            position: *position,
-                        }
-                    })?;
-                    fields.get(enum_field.as_str()).ok_or_else(|| {
-                        ResolverError::InvalidEnumAccess {
-                            location: format!("{}.{}.{}", ns_name, actual_enum, enum_field),
-                            message: format!("Field '{}' not found", enum_field),
-                            position: *position,
-                        }
-                    })?;
-
-                    // Record the full enum (all fields, not just this one) so
-                    // it can be merged into self.ast.enums once the whole
-                    // walk finishes -- see resolve_all_enum_values and the
-                    // `imported_enum_usages` field doc comment. Keyed by the
-                    // full qualified name ("Types.Priority") exactly as it
-                    // appears here, so it can never collide with a local
-                    // enum's bare name.
-                    self.imported_enum_usages
-                        .borrow_mut()
-                        .entry(enum_name.clone())
-                        .or_insert_with(|| fields.clone());
-
-                    return Ok((value.clone(), 0, 1));
-                }
-
-                self.symbol_table
-                    .try_get_enum_field_value(enum_name, enum_field)
-                    .ok_or_else(|| ResolverError::InvalidEnumAccess {
-                        location: format!("{}.{}", enum_name, enum_field),
-                        message: format!("Enum field '{}' not found", enum_field),
-                        position: *position,
-                    })?;
-                Ok((value.clone(), 1, 0))
-            }
-
-            // Expression wrapper — delegate to resolve_enums_in_expr for full recursion.
-            Value::Expression { expr, position } => {
-                let (new_expr, lc, ic) = self.resolve_enums_in_expr(expr.as_ref())?;
-                if lc + ic > 0 {
-                    Ok((
-                        Value::Expression {
-                            expr: Box::new(new_expr),
-                            position: *position,
-                        },
-                        lc,
-                        ic,
-                    ))
-                } else {
-                    Ok((value.clone(), 0, 0))
-                }
-            }
-
-            // QuickFunction call — resolve enums in every argument expression.
-            // This is the primary fix: enums passed as QuickFunc args in @DATA are
-            // now resolved to integers before the ASTWalker collects call sites.
-            Value::QuickFuncCall { function_name, arguments, position } => {
-                let mut new_args = Vec::with_capacity(arguments.len().max(MIN_CAPACITY));
-                let mut any_changed = false;
-                let mut total_lc = 0usize;
-                let mut total_ic = 0usize;
-
-                for arg in arguments {
-                    let (new_arg, lc, ic) = self.resolve_enums_in_expr(arg)?;
-                    total_lc += lc;
-                    total_ic += ic;
-                    if lc + ic > 0 {
-                        new_args.push(new_arg);
-                        any_changed = true;
-                    } else {
-                        new_args.push(arg.clone());
-                    }
-                }
-
-                if any_changed {
-                    Ok((
-                        Value::QuickFuncCall {
-                            function_name: function_name.clone(),
-                            arguments: new_args,
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((value.clone(), 0, 0))
-                }
-            }
-
-            Value::Array { values, position }
-            | Value::NestedArray { values, position, .. } => {
-                let mut new_values = Vec::with_capacity(values.len().max(MIN_CAPACITY));
-                let mut any_changed = false;
-                let mut total_lc = 0usize;
-                let mut total_ic = 0usize;
-
-                for item in values {
-                    let (nv, lc, ic) = self.resolve_enums_in_value(item)?;
-                    total_lc += lc;
-                    total_ic += ic;
-                    if lc + ic > 0 {
-                        new_values.push(nv);
-                        any_changed = true;
-                    } else {
-                        new_values.push(item.clone());
-                    }
-                }
-
-                if any_changed {
-                    Ok((Value::Array { values: new_values, position: *position }, total_lc, total_ic))
-                } else {
-                    Ok((value.clone(), 0, 0))
-                }
-            }
-
-            Value::Object { properties, position } => {
-                let (new_obj, lc, ic) =
-                    self.resolve_enums_in_properties(properties, *position)?;
-                if lc + ic > 0 {
-                    Ok((new_obj, lc, ic))
-                } else {
-                    Ok((value.clone(), 0, 0))
-                }
-            }
-
-            Value::PrefixedConstructor { prefix, arguments, position } => {
-                let mut new_args = Vec::with_capacity(arguments.len().max(MIN_CAPACITY));
-                let mut any_changed = false;
-                let mut total_lc = 0usize;
-                let mut total_ic = 0usize;
-
-                for arg in arguments {
-                    let (nv, lc, ic) = self.resolve_enums_in_value(arg)?;
-                    total_lc += lc;
-                    total_ic += ic;
-                    if lc + ic > 0 {
-                        new_args.push(nv);
-                        any_changed = true;
-                    } else {
-                        new_args.push(arg.clone());
-                    }
-                }
-
-                if any_changed {
-                    Ok((
-                        Value::PrefixedConstructor {
-                            prefix: prefix.clone(),
-                            arguments: new_args,
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((value.clone(), 0, 0))
-                }
-            }
-
-            // Interpolated strings may contain enum accesses in their expressions.
-            Value::InterpolatedString { template, expressions, position } => {
-                let mut new_exprs = Vec::with_capacity(expressions.len().max(MIN_CAPACITY));
-                let mut any_changed = false;
-                let mut total_lc = 0usize;
-                let mut total_ic = 0usize;
-
-                for expr in expressions {
-                    let (ne, lc, ic) = self.resolve_enums_in_expr(expr)?;
-                    total_lc += lc;
-                    total_ic += ic;
-                    if lc + ic > 0 {
-                        new_exprs.push(ne);
-                        any_changed = true;
-                    } else {
-                        new_exprs.push(expr.clone());
-                    }
-                }
-
-                if any_changed {
-                    Ok((
-                        Value::InterpolatedString {
-                            template: template.clone(),
-                            expressions: new_exprs,
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((value.clone(), 0, 0))
-                }
-            }
-
-            _ => Ok((value.clone(), 0, 0)),
-        }
-    }
-
-    fn resolve_enums_in_properties(
-        &self,
-        properties: &[ObjectProperty],
-        position: Position,
-    ) -> Result<(Value, usize, usize), ResolverError> {
-        let mut new_props = Vec::with_capacity(properties.len().max(MIN_CAPACITY));
-        let mut any_changed = false;
-        let mut total_lc = 0usize;
-        let mut total_ic = 0usize;
-
-        for prop in properties {
-            let (nv, lc, ic) = self.resolve_enums_in_value(&prop.value)?;
-            total_lc += lc;
-            total_ic += ic;
-            if lc + ic > 0 {
-                new_props.push(ObjectProperty {
-                    key: prop.key.clone(),
-                    value: nv,
-                    position: prop.position,
-                });
-                any_changed = true;
-            } else {
-                new_props.push(prop.clone());
-            }
-        }
-
-        Ok((
-            Value::Object { properties: new_props, position },
-            total_lc,
-            total_ic,
-        ))
-    }
-
-    fn resolve_enums_in_object_literal(
-        &self,
-        obj: &Value,
-    ) -> Result<(Value, usize, usize), ResolverError> {
-        match obj {
-            Value::Object { properties, position } => {
-                self.resolve_enums_in_properties(properties, *position)
-            }
-            _ => Ok((obj.clone(), 0, 0)),
-        }
-    }
-
-    /// Recursively resolves enum accesses inside any expression node.
+    /// Runs the enum walk over the data section, or returns `None` when there is none.
     ///
-    /// Handles:
-    /// - `EnumAccess` (local and imported) → `Value::Integer`
-    /// - `QuickFuncCall` args (covers enums inside calls inside calls)
-    /// - `ImportedFunctionCall` args
-    /// - `Value` wrapper (delegates back to `resolve_enums_in_value`)
-    /// - All binary/unary/conditional expression variants
-    fn resolve_enums_in_expr(
-        &self,
-        expr: &Expression,
-    ) -> Result<(Expression, usize, usize), ResolverError> {
-        match expr {
-            // Local enum: AIType.AGGRESSIVE → Integer(value)
-            Expression::EnumAccess {
-                namespace_name: None,
-                enum_name,
-                value: enum_field,
-                position,
-            } => {
-                let int_val = self
-                    .symbol_table
-                    .try_get_enum_field_value(enum_name, enum_field)
-                    .ok_or_else(|| ResolverError::InvalidEnumAccess {
-                        location: format!("{}.{}", enum_name, enum_field),
-                        message: format!("Enum '{}' field '{}' not found", enum_name, enum_field),
-                        position: *position,
-                    })?;
-                Ok((
-                    Expression::Value {
-                        value: Value::Integer { value: int_val, position: *position },
-                        position: *position,
-                    },
-                    1,
-                    0,
-                ))
+    /// With a document attached the walk reads and rewrites the document's data in its arena, so
+    /// whether a data section exists is decided by the document. Without one the owned data is
+    /// copied into a scratch arena first. Either way the owned data the later phases read is
+    /// replaced only when the walk changed something, or when it has no data of its own.
+    fn run_enum_pass(&mut self) -> Result<Option<EnumPass>, ResolverError> {
+        let debug = self.debug_config.is_enabled;
+        match self.document.as_deref_mut() {
+            Some(Document { arena, data, .. }) => {
+                let Some(data) = data.as_mut() else { return Ok(None) };
+                if debug {
+                    self.error_manager
+                        .log_info("Pre-processing: resolving all enum values to integers");
+                }
+                let pass = resolve_data_enums(arena, data, self.symbol_table)?;
+                if pass.changed || self.ast.data.is_none() {
+                    self.ast.data = Some(data.export(arena));
+                }
+                Ok(Some(pass))
+            }
+            None => {
+                let Some(owned) = self.ast.data.as_ref() else { return Ok(None) };
+                if debug {
+                    self.error_manager
+                        .log_info("Pre-processing: resolving all enum values to integers");
+                }
+                let mut arena = Arena::new();
+                let mut data = DocData::from_owned(&mut arena, owned);
+                let pass = resolve_data_enums(&mut arena, &mut data, self.symbol_table)?;
+                if pass.changed {
+                    self.ast.data = Some(data.export(&arena));
+                }
+                Ok(Some(pass))
+            }
+        }
+    }
+
+    /// Merges the imported enums the walk referenced into this file's own `@ENUMS` section, so
+    /// `DixData::from_ast`'s `extract_enums_section` and `value_encoder.rs`'s `local_enums`
+    /// table, neither of which has symbol table access, see them too.
+    ///
+    /// Each enum is keyed by its full qualified name (`Types.Priority`), which can never collide
+    /// with a local enum's bare name (`Priority`), so the merge is additive and never shadows a
+    /// real local declaration. The section is created when the file has none.
+    fn merge_imported_enums(&mut self, usages: FxHashMap<String, HashMap<String, i32>>) {
+        if usages.is_empty() {
+            return;
+        }
+
+        let section = self.ast.enums.get_or_insert_with(|| EnumsSection {
+            enums: Vec::new(),
+            position: Position::UNKNOWN,
+        });
+
+        let mut merged_count = 0usize;
+        for (qualified_name, fields) in usages {
+            if section.enums.iter().any(|d| d.name == qualified_name) {
+                continue; // already merged (e.g. resolve() called more than once)
             }
 
-            // Imported enum: Namespace.EnumName.Field → Integer(value)
-            Expression::EnumAccess {
-                namespace_name: Some(ns_name),
-                enum_name,
-                value: enum_field,
-                position,
-            } => {
-                let ns = self
-                    .symbol_table
-                    .try_get_namespace(ns_name)
-                    .ok_or_else(|| ResolverError::InvalidEnumAccess {
-                        location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
-                        message: format!("Namespace '{}' not found", ns_name),
-                        position: *position,
-                    })?;
-                let fields = ns.enums.get(enum_name.as_str()).ok_or_else(|| {
-                    ResolverError::InvalidEnumAccess {
-                        location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
-                        message: format!("Enum '{}' not found in namespace '{}'", enum_name, ns_name),
-                        position: *position,
-                    }
-                })?;
-                let int_val = fields.get(enum_field.as_str()).ok_or_else(|| {
-                    ResolverError::InvalidEnumAccess {
-                        location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
-                        message: format!("Field '{}' not found", enum_field),
-                        position: *position,
-                    }
-                })?;
-                Ok((
-                    Expression::Value {
-                        value: Value::Integer { value: *int_val, position: *position },
-                        position: *position,
-                    },
-                    0,
-                    1,
-                ))
-            }
+            let mut field_list: Vec<EnumField> = fields
+                .into_iter()
+                .map(|(field_name, field_value)| {
+                    EnumField::new(field_name, Some(field_value), Position::UNKNOWN)
+                })
+                .collect();
+            // Cosmetic only (affects declaration order if this synthesized section is ever
+            // introspected or serialized back to source); lookups are by name.
+            field_list.sort_by_key(|f| f.value.unwrap_or(0));
 
-            // Value wrapper — recurse into the inner value.
-            Expression::Value { value, position } => {
-                let (new_val, lc, ic) = self.resolve_enums_in_value(value)?;
-                if lc + ic > 0 {
-                    Ok((Expression::Value { value: new_val, position: *position }, lc, ic))
-                } else {
-                    Ok((expr.clone(), 0, 0))
-                }
-            }
+            section.enums.push(EnumDeclaration::new(
+                qualified_name,
+                field_list,
+                Position::UNKNOWN,
+            ));
+            merged_count += 1;
+        }
 
-            // QuickFunction call — recurse into every argument.
-            // This covers enums inside calls inside calls (arbitrary depth).
-            Expression::QuickFuncCall { name, arguments, position } => {
-                let mut new_args = Vec::with_capacity(arguments.len().max(MIN_CAPACITY));
-                let mut any_changed = false;
-                let mut total_lc = 0usize;
-                let mut total_ic = 0usize;
-
-                for arg in arguments {
-                    let (na, lc, ic) = self.resolve_enums_in_expr(arg)?;
-                    total_lc += lc;
-                    total_ic += ic;
-                    if lc + ic > 0 {
-                        new_args.push(na);
-                        any_changed = true;
-                    } else {
-                        new_args.push(arg.clone());
-                    }
-                }
-
-                if any_changed {
-                    Ok((
-                        Expression::QuickFuncCall {
-                            name: name.clone(),
-                            arguments: new_args,
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((expr.clone(), 0, 0))
-                }
-            }
-
-            // Imported function call — recurse into every argument.
-            Expression::ImportedFunctionCall {
-                namespace_name,
-                function_name,
-                arguments,
-                position,
-            } => {
-                let mut new_args = Vec::with_capacity(arguments.len().max(MIN_CAPACITY));
-                let mut any_changed = false;
-                let mut total_lc = 0usize;
-                let mut total_ic = 0usize;
-
-                for arg in arguments {
-                    let (na, lc, ic) = self.resolve_enums_in_expr(arg)?;
-                    total_lc += lc;
-                    total_ic += ic;
-                    if lc + ic > 0 {
-                        new_args.push(na);
-                        any_changed = true;
-                    } else {
-                        new_args.push(arg.clone());
-                    }
-                }
-
-                if any_changed {
-                    Ok((
-                        Expression::ImportedFunctionCall {
-                            namespace_name: namespace_name.clone(),
-                            function_name: function_name.clone(),
-                            arguments: new_args,
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((expr.clone(), 0, 0))
-                }
-            }
-
-            // Static method call — recurse into arguments.
-            Expression::StaticMethodCall {
-                object_name,
-                method_name,
-                arguments,
-                position,
-            } => {
-                let mut new_args = Vec::with_capacity(arguments.len().max(MIN_CAPACITY));
-                let mut any_changed = false;
-                let mut total_lc = 0usize;
-                let mut total_ic = 0usize;
-
-                for arg in arguments {
-                    let (na, lc, ic) = self.resolve_enums_in_expr(arg)?;
-                    total_lc += lc;
-                    total_ic += ic;
-                    if lc + ic > 0 {
-                        new_args.push(na);
-                        any_changed = true;
-                    } else {
-                        new_args.push(arg.clone());
-                    }
-                }
-
-                if any_changed {
-                    Ok((
-                        Expression::StaticMethodCall {
-                            object_name: object_name.clone(),
-                            method_name: method_name.clone(),
-                            arguments: new_args,
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((expr.clone(), 0, 0))
-                }
-            }
-
-            // Binary arithmetic — recurse both sides.
-            Expression::ArithmeticOp { left, operator, right, position } => {
-                let (nl, lc1, ic1) = self.resolve_enums_in_expr(left)?;
-                let (nr, lc2, ic2) = self.resolve_enums_in_expr(right)?;
-                let total_lc = lc1 + lc2;
-                let total_ic = ic1 + ic2;
-                if total_lc + total_ic > 0 {
-                    Ok((
-                        Expression::ArithmeticOp {
-                            left: Box::new(nl),
-                            operator: operator.clone(),
-                            right: Box::new(nr),
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((expr.clone(), 0, 0))
-                }
-            }
-
-            Expression::BitwiseOp { left, operator, right, position } => {
-                let (nl, lc1, ic1) = self.resolve_enums_in_expr(left)?;
-                let (nr, lc2, ic2) = self.resolve_enums_in_expr(right)?;
-                let total_lc = lc1 + lc2;
-                let total_ic = ic1 + ic2;
-                if total_lc + total_ic > 0 {
-                    Ok((
-                        Expression::BitwiseOp {
-                            left: Box::new(nl),
-                            operator: operator.clone(),
-                            right: Box::new(nr),
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((expr.clone(), 0, 0))
-                }
-            }
-
-            Expression::ComparisonOp { left, operator, right, position } => {
-                let (nl, lc1, ic1) = self.resolve_enums_in_expr(left)?;
-                let (nr, lc2, ic2) = self.resolve_enums_in_expr(right)?;
-                let total_lc = lc1 + lc2;
-                let total_ic = ic1 + ic2;
-                if total_lc + total_ic > 0 {
-                    Ok((
-                        Expression::ComparisonOp {
-                            left: Box::new(nl),
-                            operator: operator.clone(),
-                            right: Box::new(nr),
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((expr.clone(), 0, 0))
-                }
-            }
-
-            Expression::LogicalOp { left, operator, right, position } => {
-                let (nl, lc1, ic1) = self.resolve_enums_in_expr(left)?;
-                let (nr, lc2, ic2) = self.resolve_enums_in_expr(right)?;
-                let total_lc = lc1 + lc2;
-                let total_ic = ic1 + ic2;
-                if total_lc + total_ic > 0 {
-                    Ok((
-                        Expression::LogicalOp {
-                            left: Box::new(nl),
-                            operator: operator.clone(),
-                            right: Box::new(nr),
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((expr.clone(), 0, 0))
-                }
-            }
-
-            Expression::UnaryOp { operator, operand, position } => {
-                let (no, lc, ic) = self.resolve_enums_in_expr(operand)?;
-                if lc + ic > 0 {
-                    Ok((
-                        Expression::UnaryOp {
-                            operator: operator.clone(),
-                            operand: Box::new(no),
-                            position: *position,
-                        },
-                        lc,
-                        ic,
-                    ))
-                } else {
-                    Ok((expr.clone(), 0, 0))
-                }
-            }
-
-            Expression::Conditional { condition, true_value, false_value, position } => {
-                let (nc, lc1, ic1) = self.resolve_enums_in_expr(condition)?;
-                let (nt, lc2, ic2) = self.resolve_enums_in_expr(true_value)?;
-                let (nf, lc3, ic3) = self.resolve_enums_in_expr(false_value)?;
-                let total_lc = lc1 + lc2 + lc3;
-                let total_ic = ic1 + ic2 + ic3;
-                if total_lc + total_ic > 0 {
-                    Ok((
-                        Expression::Conditional {
-                            condition: Box::new(nc),
-                            true_value: Box::new(nt),
-                            false_value: Box::new(nf),
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((expr.clone(), 0, 0))
-                }
-            }
-
-            Expression::Parenthesized { expression, position } => {
-                let (ne, lc, ic) = self.resolve_enums_in_expr(expression)?;
-                if lc + ic > 0 {
-                    Ok((
-                        Expression::Parenthesized {
-                            expression: Box::new(ne),
-                            position: *position,
-                        },
-                        lc,
-                        ic,
-                    ))
-                } else {
-                    Ok((expr.clone(), 0, 0))
-                }
-            }
-
-            Expression::PropertyAccess { object, property, position } => {
-                let (no, lc, ic) = self.resolve_enums_in_expr(object)?;
-                if lc + ic > 0 {
-                    Ok((
-                        Expression::PropertyAccess {
-                            object: Box::new(no),
-                            property: property.clone(),
-                            position: *position,
-                        },
-                        lc,
-                        ic,
-                    ))
-                } else {
-                    Ok((expr.clone(), 0, 0))
-                }
-            }
-
-            Expression::IndexAccess { object, index, position } => {
-                let (no, lc1, ic1) = self.resolve_enums_in_expr(object)?;
-                let (ni, lc2, ic2) = self.resolve_enums_in_expr(index)?;
-                let total_lc = lc1 + lc2;
-                let total_ic = ic1 + ic2;
-                if total_lc + total_ic > 0 {
-                    Ok((
-                        Expression::IndexAccess {
-                            object: Box::new(no),
-                            index: Box::new(ni),
-                            position: *position,
-                        },
-                        total_lc,
-                        total_ic,
-                    ))
-                } else {
-                    Ok((expr.clone(), 0, 0))
-                }
-            }
-
-            // Terminal nodes that cannot contain enum accesses.
-            _ => Ok((expr.clone(), 0, 0)),
+        if self.debug_config.is_enabled {
+            self.error_manager.log_info(&format!(
+                "Merged {} imported enum declaration(s) into local @ENUMS",
+                merged_count
+            ));
         }
     }
 
@@ -1870,247 +1101,6 @@ fn execute_iterative_resolution(
         }
     }
 
-    fn resolve_call_arguments(
-        &self,
-        call: &FunctionCallInfo,
-    ) -> Result<Vec<DixValue>, ResolverError> {
-        let ctx = self.data_context.borrow();
-        let mut out = Vec::with_capacity(call.arguments.len().max(MIN_CAPACITY));
-        for arg in &call.arguments {
-            out.push(self.resolve_expr_to_dix(arg, &ctx, call.position)?);
-        }
-        Ok(out)
-    }
-
-    /// Resolve a single expression to a DixValue using the data context.
-    ///
-    /// Now handles `Expression::EnumAccess` as a safety net for any enum that
-    /// Phase 1 missed (e.g. in an expression position not yet covered), so
-    /// resolution never falls through to a Fatal error on a valid enum.
-    fn resolve_expr_to_dix(
-        &self,
-        expr: &Expression,
-        ctx: &FxHashMap<String, DixValue>,
-        call_pos: Position,
-    ) -> Result<DixValue, ResolverError> {
-        match expr {
-            Expression::Value { value, .. } => {
-                Self::resolve_value_to_dix(value, ctx, call_pos)
-            }
-
-            Expression::Identifier { name, .. } => {
-                ctx.get(name.as_str()).cloned().ok_or_else(|| ResolverError::Fatal {
-                    message: format!(
-                        "identifier '{}' missing from context at {}",
-                        name, call_pos
-                    ),
-                })
-            }
-
-            // Safety net: any EnumAccess that survived Phase 1 unresolved is
-            // resolved here before the interpreter sees it.
-            Expression::EnumAccess {
-                namespace_name: None,
-                enum_name,
-                value: enum_field,
-                position,
-            } => {
-                let int_val = self
-                    .symbol_table
-                    .try_get_enum_field_value(enum_name, enum_field)
-                    .ok_or_else(|| ResolverError::InvalidEnumAccess {
-                        location: format!("{}.{}", enum_name, enum_field),
-                        message: format!(
-                            "Enum '{}' field '{}' not found (late resolution)",
-                            enum_name, enum_field
-                        ),
-                        position: *position,
-                    })?;
-                Ok(DixValue::from_int(int_val))
-            }
-
-            Expression::EnumAccess {
-                namespace_name: Some(ns_name),
-                enum_name,
-                value: enum_field,
-                position,
-            } => {
-                let ns = self
-                    .symbol_table
-                    .try_get_namespace(ns_name)
-                    .ok_or_else(|| ResolverError::InvalidEnumAccess {
-                        location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
-                        message: format!("Namespace '{}' not found (late resolution)", ns_name),
-                        position: *position,
-                    })?;
-                let fields = ns.enums.get(enum_name.as_str()).ok_or_else(|| {
-                    ResolverError::InvalidEnumAccess {
-                        location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
-                        message: format!(
-                            "Enum '{}' not found in namespace '{}' (late resolution)",
-                            enum_name, ns_name
-                        ),
-                        position: *position,
-                    }
-                })?;
-                let int_val = fields.get(enum_field.as_str()).ok_or_else(|| {
-                    ResolverError::InvalidEnumAccess {
-                        location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
-                        message: format!("Field '{}' not found (late resolution)", enum_field),
-                        position: *position,
-                    }
-                })?;
-                Ok(DixValue::from_int(*int_val))
-            }
-
-            _ => Err(ResolverError::Fatal {
-                message: format!("cannot resolve expr to DixValue at {}", call_pos),
-            }),
-        }
-    }
-// value_resolver.rs — fn resolve_value_to_dix
-// (Builtins::Core::DixValue, used in Phase 4 argument resolution)
-
-fn resolve_value_to_dix(
-    value: &Value,
-    ctx: &FxHashMap<String, DixValue>,
-    call_pos: Position,
-) -> Result<DixValue, ResolverError> {
-    match value {
-        // ── Primitives ────────────────────────────────────────────────────────
-        Value::Integer { value, .. }  => Ok(DixValue::from_int(*value)),
-        Value::Long { value, .. }     => Ok(DixValue::from_long(*value)),
-        Value::Float { value, .. }    => Ok(DixValue::from_float(*value)),
-        Value::Double { value, .. }   => Ok(DixValue::from_double(*value)),
-        // FIX: was falling through to Fatal error — causes every chemistry-DB
-        // constant (6.62607015e-34, 6.02214076e23, …) to abort resolution.
-        Value::ScientificNotation { value, .. } => Ok(DixValue::from_double(*value)),
-        Value::String { value, .. }   => Ok(DixValue::from_string(value.clone())),
-        Value::Boolean { value, .. }  => Ok(DixValue::from_bool(*value)),
-        Value::Null { .. }            => Ok(DixValue::null()),
-        Value::HexColor { value, .. } => Ok(DixValue::from_hex(value.clone())),
-
-        // Date/Timestamp: parse string → DateTime<Utc>.
-        Value::Date { value: d, .. } => {
-            let dt = chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-                .ok()
-                .and_then(|nd| nd.and_hms_opt(0, 0, 0))
-                .map(|ndt| ndt.and_utc())
-                .or_else(|| d.parse::<chrono::DateTime<chrono::Utc>>().ok())
-                .unwrap_or_else(chrono::Utc::now);
-            Ok(DixValue::from_date(dt))
-        }
-        Value::Timestamp { value: t, .. } => {
-            let dt = t.parse::<chrono::DateTime<chrono::Utc>>()
-                .unwrap_or_else(|_| chrono::Utc::now());
-            Ok(DixValue::from_timestamp(dt))
-        }
-
-        // InterpolatedString: use template text.
-        Value::InterpolatedString { template, .. } => {
-            Ok(DixValue::from_string(template.clone()))
-        }
-
-        // EnumValue: should be Integer after Phase 1; this is a safety net so
-        // a missed enum doesn't abort the entire resolution pass.
-        Value::EnumValue { .. } => Ok(DixValue::from_int(0)),
-
-        // Identifier: resolve from data context.
-        Value::Identifier { value: id, .. } => {
-            ctx.get(id.as_str()).cloned().ok_or_else(|| ResolverError::Fatal {
-                message: format!(
-                    "identifier '{}' missing from context at {}",
-                    id, call_pos
-                ),
-            })
-        }
-
-        // ── Collections ───────────────────────────────────────────────────────
-        Value::Array { values, .. } => {
-            let items: Result<Vec<DixValue>, ResolverError> = values
-                .iter()
-                .map(|v| Self::resolve_value_to_dix(v, ctx, call_pos))
-                .collect();
-            Ok(DixValue::from_array(items?))
-        }
-
-        // NestedArray: treat identically to Array.
-        Value::NestedArray { values, .. } => {
-            let items: Result<Vec<DixValue>, ResolverError> = values
-                .iter()
-                .map(|v| Self::resolve_value_to_dix(v, ctx, call_pos))
-                .collect();
-            Ok(DixValue::from_array(items?))
-        }
-
-        Value::Object { properties, .. } => {
-            let mut map = FxHashMap::with_capacity_and_hasher(
-                properties.len().max(MIN_CAPACITY),
-                Default::default(),
-            );
-            for prop in properties {
-                map.insert(
-                    prop.key.clone(),
-                    Self::resolve_value_to_dix(&prop.value, ctx, call_pos)?,
-                );
-            }
-            Ok(DixValue::from_object(map.into_iter().collect()))
-        }
-
-        Value::PrefixedConstructor { prefix, arguments, .. } => {
-            match prefix.to_lowercase().as_str() {
-                "b" => {
-                    let data = arguments
-                        .first()
-                        .and_then(|a| {
-                            if let Value::String { value, .. } = a {
-                                Some(value.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or_default();
-                    DixValue::from_blob(data)
-                        .map_err(|e| ResolverError::Fatal { message: e })
-                }
-                "r" => {
-                    let pattern = arguments
-                        .first()
-                        .and_then(|a| {
-                            if let Value::String { value, .. } = a {
-                                Some(value.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or_else(|| ".*".to_string());
-                    DixValue::from_regex(pattern)
-                        .map_err(|e| ResolverError::Fatal { message: e })
-                }
-                // "t" recurses — nested tuples like t:(t:(1,2), t:(3,4)) resolve correctly.
-                "t" => {
-                    let items: Result<Vec<DixValue>, ResolverError> = arguments
-                        .iter()
-                        .take(6)
-                        .map(|a| Self::resolve_value_to_dix(a, ctx, call_pos))
-                        .collect();
-                    Ok(DixValue::from_tuple(items?))
-                }
-                _ => Err(ResolverError::Fatal {
-                    message: format!("unknown prefix constructor: {}", prefix),
-                }),
-            }
-        }
-
-        _ => Err(ResolverError::Fatal {
-            message: format!(
-                "cannot convert value variant {:?} to DixValue at {}",
-                std::mem::discriminant(value),
-                call_pos
-            ),
-        }),
-    }
-}
     // ==================== AST REPLACEMENT ====================
 
     /// Path to the first node (depth first, the order the search below uses) at each target

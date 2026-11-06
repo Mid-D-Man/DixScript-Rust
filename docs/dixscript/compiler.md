@@ -364,8 +364,11 @@ parse, and semantic analysis in sequence.
 - Stage 4 calls `GeneralParser::parse_document` and exports the `Document` once, into the owned
   tree that the stages which have not moved still read. Stage 5 gets both, through
   `with_document`. Stage 6 gets the document again, `&mut` this time, because the `@QUICKFUNCS`
-  enhancer allocates its output in the document's arena, and the document is dropped straight
-  after stage 6, because nothing later reads the arena. When the last stage that reads the owned tree has moved, the export goes away. Imported
+  enhancer allocates its output in the document's arena. Stage 7 gets it too, through
+  `ValueResolver::with_document`, because the first phase of value resolution (enum
+  pre-resolution) reads and rewrites `@DATA` in that arena. The document is dropped after stage 7,
+  whether or not the stage ran, because nothing later reads the arena. When the last stage that
+  reads the owned tree has moved, the export goes away. Imported
   files are still parsed by the imports resolver with `parse`, so their `@RAW`, `@SECURITY` and
   `@SCHEMA` sections take the owned path. Stage 9 still passes the resolved owned tree to
   `SchemaSectionAnalyzer::validate_resolved`, which copies it into a scratch arena.
@@ -1303,7 +1306,8 @@ the allocator for, and fails above 20 MB.
 **What it does:** Resolves values at compile time in five phases: enum pre-resolution, the
 initial data context, discovery of quickfunction calls, iterative execution of those calls
 with the result written back into the AST (phase 4), and the remaining identifier
-references.
+references. Phase 1 is a thin layer over `enum_resolution.rs`; the other phases still read and
+rewrite the owned tree.
 
 **Decisions:**
 - Phase 4 finds where every call sits in the data tree once, before its loop, as a path of
@@ -1314,8 +1318,100 @@ references.
   built is left alone, which is what the old search would also have done.
 - Only the positions of the calls being resolved are indexed, so the index costs one small
   vector per call and not one per node.
+- **Phase 1 runs on the arena and has one implementation.** `ValueResolver::with_document`
+  gives it the `Document` the file was parsed into, and it then reads and rewrites the
+  document's `@DATA` in the document's arena. Without a document it copies the owned data into
+  a scratch arena and walks that, which is what the language server and `ValueResolver::new`
+  callers get. Whether a data section exists is decided by the tree that is read.
+- **The owned data is refreshed only when it has to be.** After the walk the owned section the
+  later phases read is replaced by an export of the resolved section when the walk changed
+  something, and also when the owned tree had no data of its own. A file with no enum
+  expression in its data, which is most files, is neither rebuilt nor exported.
+- **The document is updated too.** When the walk changed something the document's `@DATA`
+  holds the resolved section afterwards, so a later phase that moves to the arena finds it
+  there. `@ENUMS` is not updated in the document: the merge of imported enums below goes to the
+  owned tree, which is the one the result is built from.
+- **Imported enums are merged into the owned `@ENUMS` only through the dotted value form.** A
+  data value written `Types.Priority.HIGH` is checked and recorded, and the whole enum is added
+  to `@ENUMS` under its qualified name (the section is created when the file has none). An enum
+  access inside an expression is checked and becomes an integer but records nothing. This is how
+  it always behaved and it is pinned by a test; the merge itself is unchanged.
+- **Dead code removed.** `resolve_call_arguments`, `resolve_expr_to_dix` and
+  `resolve_value_to_dix` (about 240 lines, private) were never called; the compiler reported
+  them as unused and only they referred to each other. They are gone.
 
-**Tests:** `cargo test -p dixscript --test value_resolution_scaling`, and the whole suite.
+**Tests:** `cargo test -p dixscript --test value_resolver_enums_document`,
+`cargo test -p dixscript --test value_resolution_scaling`, and the whole suite.
+
+### `Compiler/Core/ValueResolution/enum_resolution.rs`
+
+**What it does:** Phase 1 of value resolution over the arena. `resolve_data_enums` walks a
+`DocData`, checks every enum reference against the symbol table and rewrites the references
+that must become integers, allocating the new nodes in the arena and replacing only the entries
+that changed.
+
+**Decisions:**
+- **Rewriting is by allocation, and unchanged nodes keep their ids.** A node whose children did
+  not change returns its own id, and a list of children is allocated again only from the first
+  element that changed. A data section without an enum expression therefore allocates nothing,
+  which a test checks by the arena's value count, expression count and byte count.
+- **The walk replaces the owned walker of about 890 lines** that rebuilt every entry with the
+  same shape repeated for each kind it entered. Sharing makes the rebuild decision one
+  comparison of ids, and one generic list walker serves the value and the expression lists.
+- **Two quirks of the owned walker are kept on purpose.** A bare enum value at a data position
+  is checked and left in place (later stages need the enum), while an enum access inside an
+  expression becomes an integer literal. And a nested array that held any enum reference comes
+  back as a plain array, as it always did, even when the reference itself was left in place; the
+  walk counts the references it sees to know this, because an unchanged element does not say it.
+- **Only the expression kinds that can lead to an enum access are entered:** value wrappers,
+  the three call kinds, the four binary operators, unary, conditional, parenthesized, property
+  and index access. Instance method calls, casts, built-in and static function calls, lambdas,
+  ranges and the rest are returned as they are, so a bad reference inside one is not reported.
+- **An object entry is only walked when its value is an object literal,** as before.
+- **The first bad reference ends the walk with its error and leaves the section as it was.**
+  Nodes allocated before the error stay in the arena, unreferenced.
+- The error messages and locations are exactly the original ones, for the two ways a value
+  reference is written and the two ways an expression reference is written.
+
+**Tests:** `cargo test -p dixscript --test value_resolver_enums_document`
+
+### `tests/value_resolver_enums_document.rs`
+
+**What it does:** Pins phase 1 of value resolution to the behavior of the owned walker it
+replaced, and checks the properties of the new one.
+
+**Decisions:**
+- **`RECORDING` and `HAND_RECORDING` hold a fingerprint of the whole result for each input,**
+  produced by running the original code (the original files were put back, the test built and run
+  with the one line that attaches a document turned into a no-op) and then required of the new
+  code through the document and through the owned entry point. The inputs are 13 crafted sources,
+  two corpus files, and 38 hand-built data sections run against two bases, so 15 and 76 results.
+- **The hand-built sections reach what the grammar cannot write.** `@DATA` has no arithmetic,
+  conditional, property access, interpolation or call-argument expressions, so every expression
+  kind, the kinds that are not entered, nested arrays of every depth, lists that change at the
+  first, a middle and the last position, an operator that changes on one side only, tables,
+  groups, object entries, wrapped values and 21 sections with a bad reference in different
+  positions are built by hand.
+  Each node gets a position of its own, so a rewrite that mixes positions up changes the result.
+- **The error messages are asserted in full** for all nine ways a reference can be wrong, through
+  both paths, and the first error in data order is the one reported.
+- **Which tree is read** is tested with an owned tree and a document that disagree, in both
+  directions, with a document that has no data, and with an owned tree that has none.
+- **Sharing is tested by the arena's counters:** data with nothing to resolve allocates nothing,
+  not even a list, and data with one change allocates the two values and one expression it
+  needs and leaves the entries around it on their old ids.
+- **A debug-log test** checks the counts and the merge message, since the counts also decide
+  what happens to a nested array. The message for a missing data section is emitted at debug
+  level and did not appear in either debug mode of the test's error manager, so it is not asserted.
+- Sources that call a function returning an object, or a random or clock builtin, are left out of
+  the recording, because their output cannot be fingerprinted. The `@CONFIG` entries, kept in a
+  hash map, are sorted before fingerprinting.
+- **Equality with the original is not argued from the tests alone.** The recording was made from
+  the original code. Of the 11 tests that are not recording checks, the 8 that do not need a
+  document were also run on the original and pass there; the 3 that need one cannot.
+
+**Tests:** `cargo test -p dixscript --test value_resolver_enums_document`. 15 tests and one
+ignored recorder (`print_recording`), all passing on Rust 1.75.
 
 ### `tests/value_resolution_scaling.rs`
 
@@ -1810,3 +1906,51 @@ requires the larger to take less than 7 times as long.
 - **Not done in this drop.** The owned `validate_script` has no wrapper over the arena form, on purpose;
   the language server uses it. The owned export, the value resolver, the runtime, the DLM auditor and
   the binary packer remain. CI on stable Rust has not been run.
+
+### Fixes and Problems: value resolution phase 1 (enum pre-resolution) reads the Document
+
+- **What changed.** `value_resolver.rs` (phase 1 and its owned walker), the new `enum_resolution.rs`,
+  `ValueResolution/mod.rs` and the loader. The owned walker (six functions, about 890 lines) is
+  replaced by an arena walk of about 510 lines with its docs, and `ValueResolver::with_document` is
+  new. Three private functions nothing called, `resolve_call_arguments`, `resolve_expr_to_dix` and
+  `resolve_value_to_dix` (about 240 lines), were removed. Library warnings went from 123 to 120 and
+  none comes from these files.
+- **How it was checked against the original.** A throwaway harness ran the loader's stages up to the
+  value resolver, with a temporary hook that stops the resolver after phase 1 and prints the whole
+  tree, in the original and in the changed code. It ran the 84 corpus files and 15 crafted files (13
+  sources and two import libraries), carrying on after semantic errors so the resolver's own error
+  paths were reached, and 30 hand-built data sections against two bases. The output was identical
+  byte for byte in the three ways the code can be reached (document attached, scratch arena, and the
+  owned path of the language server), with debug logging off, regular and verbose. With the hook off
+  and the whole resolver running, 92 of the 99 files are identical (74 byte for byte, 18 once the
+  order of object properties that function results carry, a hash map, is fixed). The other seven
+  differ from run to run in the original too: they use a clock, random or GUID builtin or list enum
+  names in hash order, so phase 1 is what was compared for them.
+- **81 bugs were injected afterwards and all 81 are noticed.** The first round caught 79. The two that
+  survived showed what the inputs lacked: an owned tree with no data and a document whose data has
+  nothing to resolve, and an expression that wraps a value whose contents change. Both inputs were
+  added and the recording was made again from the original. The bugs break each expression and value
+  arm, every count, the nested array rule, the list walker (prefix, suffix, sharing), table, group and
+  object entries, the choice between the document and the owned tree, the two exports, the merge into
+  `@ENUMS` and all error messages and locations. One of them (the merge's sort) depends on hash order
+  and was caught in 12 runs of 12. Two things were not injected because they cannot be seen: the
+  merge's check for an enum already merged, which only matters if `resolve` ran twice and it consumes
+  the resolver, and the loader passing the document, which changes allocation and not the result.
+- **Measured, not assumed.** Callgrind, debug build, the whole pipeline for one file, original against
+  changed: `EnumUsage.mdix` 36.74M against 36.49M instructions (0.7 percent fewer), `BigBoy.mdix`
+  82.78M against 82.50M (0.3), `Unholy.mdix` 487.7M against 466.3M (4.4), `basic/a_test.mdix`, which
+  has no enums, 24.21M against 23.84M (1.5) and `elements_database.mdix` 2,574M against 2,533M (1.6).
+  The gain is from data that no longer is rebuilt or exported when nothing changed. Release builds,
+  wall-clock time and peak memory were not measured. The document now lives through stage 7, so
+  its peak may be higher.
+- **Found while doing it, not changed.** An enum used only inside an expression is checked and
+  resolved but not recorded, so it is not merged into `@ENUMS`; only the dotted value form is. That
+  is how it was and it is pinned. The merge into `@ENUMS` and the order of a merged enum's fields
+  between equal values follow hash order. `ValueResolutionResult::original_ast` is still a clone of
+  the whole tree that nothing reads. The `@DATA` grammar has no arithmetic, conditional or
+  interpolation, so most expression arms of phase 1 can only be reached with a hand-built tree.
+- **Not done in this drop.** Phases 2 to 5 of the resolver (the call finder, the interpreter, the
+  remaining identifiers and the result) still read and rewrite the owned tree, and the document's
+  `@ENUMS` is left as it was. The runtime, the DLM auditor, the binary packer, the language server
+  (which has not been type-checked here) and the sibling crates remain. CI on stable Rust has not
+  been run.

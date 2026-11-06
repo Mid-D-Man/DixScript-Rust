@@ -791,9 +791,8 @@ impl DixLoader {
         .with_document(&mut document);
         let enhancement_result = enhancer.enhance(&ast, Some(&semantic_result));
 
-        // Nothing after stage 6 reads the arena yet, so release it before the later stages
-        // build their own trees.
-        drop(document);
+        // Stage 7's first phase (enum pre-resolution) reads the arena, so the document lives
+        // until that stage is done.
 
         if !enhancement_result.is_success {
             self.error_manager.log_warning(&format!(
@@ -824,7 +823,7 @@ impl DixLoader {
         // EnumValue node.
         //
         // The actual fix was in Phase 1 itself (see resolve_enums_in_value's
-        // Value::EnumValue arm, Compiler/Core/ValueResolution/value_resolver.rs):
+        // Value::EnumValue arm, Compiler/Core/ValueResolution/enum_resolution.rs):
         // it now validates the enum+field reference but leaves the node
         // untouched at leaf/data positions (a bare `Enum.FIELD` sitting as a
         // field's value) -- only genuine computation contexts (QuickFunc call
@@ -861,7 +860,8 @@ impl DixLoader {
                 semantic_result.symbol_table.as_ref().unwrap(),
                 operational_settings.debug_mode,
                 self.error_manager.clone(),
-            );
+            )
+            .with_document(&mut document);
 
             let resolution_result = value_resolver.resolve();
 
@@ -883,6 +883,10 @@ impl DixLoader {
                 "Skipping value resolution (no functions, no enums, or no data)"
             );
         }
+
+        // Nothing after stage 7 reads the arena yet, so release it before the later stages
+        // build their own trees.
+        drop(document);
 
         // Stage 8: numeric array homogenization.
         //

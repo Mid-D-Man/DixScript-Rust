@@ -86,6 +86,11 @@ Breaking release.
   the same result as `validate_script` for it; the orchestrator's version phase calls it when a document is
   attached. `TypeSystemManager::validate_doc_quick_function_signature` is the arena form of the signature
   check.
+- **`ValueResolver::with_document(&mut Document)`** gives the first phase of value resolution (enum
+  pre-resolution) the document the file was parsed into. The phase then reads and rewrites the
+  document's `@DATA` in its arena instead of copying the owned data section, and the loader passes
+  the document it already holds. Without one, `ValueResolver::new` and the other constructors work as
+  before.
 
 ### Removed
 - `VersionConstraints::with_forward_compat`, `is_valid_value_type`, `is_valid_default_value`,
@@ -105,6 +110,8 @@ Breaking release.
   `features = [...]` list that names either one no longer resolves. Files
   written by 1.0.0 with these codecs can still be read with 1.0.0.
 - `binary_serialization_benchmark` compares gzip only.
+- Three private functions of `ValueResolver` that nothing called, `resolve_call_arguments`,
+  `resolve_expr_to_dix` and `resolve_value_to_dix` (about 240 lines).
 
 ### Performance
 
@@ -124,6 +131,12 @@ Breaking release.
 
 ### Changed
 
+- **Enum pre-resolution runs on the arena.** The first phase of value resolution, which checks every
+  enum reference in `@DATA` and turns the ones inside expressions into integers, has one
+  implementation over the arena (`ValueResolution/enum_resolution.rs`) in place of the owned walker of
+  about 890 lines. The result, the errors and the log lines are unchanged. Data with no enum
+  expression is no longer rebuilt, and a whole-pipeline instruction count is 0.3 to 4.4 percent
+  lower on the five files measured. The loader now keeps its `Document` until stage 7 is done.
 - **Language version 2.0.0.** `@CONFIG` `version -> "2.0.0"` is now a recognized
   language version. Before, the version manager accepted the string but treated the
   file as 1.0.0. 1.0.0 files still load. The two versions differ only in the DLM

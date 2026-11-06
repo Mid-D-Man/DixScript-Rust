@@ -20,6 +20,7 @@
 pub mod supporting_classes;
 pub mod execution_context;
 pub mod ast_walker;
+pub(crate) mod enum_resolution;
 pub mod value_resolver;
 pub mod function_interpreter;
 

@@ -1306,8 +1306,9 @@ the allocator for, and fails above 20 MB.
 **What it does:** Resolves values at compile time in five phases: enum pre-resolution, the
 initial data context, discovery of quickfunction calls, iterative execution of those calls
 with the result written back into the AST (phase 4), and the remaining identifier
-references. Phase 1 is a thin layer over `enum_resolution.rs`; the other phases still read and
-rewrite the owned tree.
+references. Phases 1 to 3 are thin layers over `enum_resolution.rs`, `data_context.rs` and
+`ast_walker.rs` and read the arena; phases 4 and 5 and the interpreter still read and rewrite
+the owned tree.
 
 **Decisions:**
 - Phase 4 finds where every call sits in the data tree once, before its loop, as a path of
@@ -1318,11 +1319,14 @@ rewrite the owned tree.
   built is left alone, which is what the old search would also have done.
 - Only the positions of the calls being resolved are indexed, so the index costs one small
   vector per call and not one per node.
-- **Phase 1 runs on the arena and has one implementation.** `ValueResolver::with_document`
-  gives it the `Document` the file was parsed into, and it then reads and rewrites the
-  document's `@DATA` in the document's arena. Without a document it copies the owned data into
-  a scratch arena and walks that, which is what the language server and `ValueResolver::new`
-  callers get. Whether a data section exists is decided by the tree that is read.
+- **Phases 1 to 3 run on the arena and read one data source.** `ValueResolver::with_document`
+  gives them the `Document` the file was parsed into, and they then read the document's `@DATA`
+  in the document's arena (phase 1 rewrites it there). Without a document the resolver copies the
+  owned data into a scratch arena once, when it starts, and the three phases share that copy; this
+  is what the language server and `ValueResolver::new` callers get. The source is a private
+  `DataSource`, and whether a data section exists is decided by the tree that is read, so a
+  document without `@DATA` leaves phases 2 and 3 with nothing to find even when the owned tree has
+  data.
 - **The owned data is refreshed only when it has to be.** After the walk the owned section the
   later phases read is replaced by an export of the resolved section when the walk changed
   something, and also when the owned tree had no data of its own. A file with no enum
@@ -1339,8 +1343,13 @@ rewrite the owned tree.
 - **Dead code removed.** `resolve_call_arguments`, `resolve_expr_to_dix` and
   `resolve_value_to_dix` (about 240 lines, private) were never called; the compiler reported
   them as unused and only they referred to each other. They are gone.
+- **More removed with phase 2.** The owned `try_value_to_dix` (about 110 lines; phase 2 was its
+  only caller) is replaced by the arena version, the alias pass no longer clones the whole entries
+  vector to iterate it, and the conversion of an object literal no longer rebuilds its `HashMap` a
+  second time on the way into `DixValue::from_object`.
 
 **Tests:** `cargo test -p dixscript --test value_resolver_enums_document`,
+`cargo test -p dixscript --test value_resolver_context_document`,
 `cargo test -p dixscript --test value_resolution_scaling`, and the whole suite.
 
 ### `Compiler/Core/ValueResolution/enum_resolution.rs`
@@ -1412,6 +1421,102 @@ replaced, and checks the properties of the new one.
 
 **Tests:** `cargo test -p dixscript --test value_resolver_enums_document`. 15 tests and one
 ignored recorder (`print_recording`), all passing on Rust 1.75.
+
+### `Compiler/Core/ValueResolution/data_context.rs`
+
+**What it does:** Phase 2 of value resolution over the arena. It builds the data context, the
+map from the path of every literal in `@DATA` (`DATA.server.port`, `DATA.items[2]`) to its runtime
+value, and then resolves the aliases (`tax = base_price`) against it. `populate_entry` and
+`resolve_aliases_in_entry` read one `DocDataEntry` and an `Arena`; `try_value_to_dix` converts one
+literal.
+
+**Decisions:**
+- **Insertion order is the order of the data section, depth first.** The context is a hash map whose
+  iteration order decides which key `lookup_by_name_or_suffix` finds first when a name matches the
+  end of several paths, so the order of insertion is part of the behavior and is kept.
+- **A container is in the context next to its parts, but only whole when every part converted.** An
+  array with a call in it has its other elements in the context and is not there itself; an empty
+  array is not inserted and an empty object is; an object is inserted after its members.
+- **What converts.** The scalar literals, an enum value as the integer 0 (the enum pass has
+  checked it), the template of an interpolated string as text, and a date or timestamp that does not
+  parse as the time of the run. A prefixed constructor converts only for `b` (blob, empty without a
+  string argument), `r` (regex, `.*` without one) and `t` (tuple, at most six elements), whatever
+  the case of the prefix, and a call, an expression or an unresolved identifier does not convert.
+- **Aliases resolve in up to eight passes.** A property whose value is a plain identifier is
+  looked up by its exact key, then by the end of a path (`".name"`, the first match). It is skipped
+  once its own path is in the context. A chain declared backwards needs one pass per link, so the
+  ninth link of a chain does not resolve; a cycle and a self reference never do; with two
+  properties of one name the last wins, and an alias to it follows.
+- **The alias pass does not copy the data section.** The owned version cloned the whole entries
+  vector to get past the borrow of the tree; the arena is only read, so there is nothing to
+  clone.
+
+**Tests:** `cargo test -p dixscript --test value_resolver_context_document`
+
+### `Compiler/Core/ValueResolution/ast_walker.rs`
+
+**What it does:** Phase 3 of value resolution: finds every quickfunction call in `@DATA`, with its
+place (location, scope and the variables in scope), and hands each to the interpreter as a
+`FunctionCallInfo`. `find_all_in(&Arena, &DocData)` is the implementation; the owned
+`find_all(&DataSection)` copies the section into a scratch arena and calls it.
+
+**Decisions:**
+- **Only the arguments of a found call are copied out of the arena,** once each, into the owned
+  `Expression`s the interpreter takes. The rest of the walk only reads.
+- **What the walk enters is part of the contract and is pinned by tests.** In a value, a call is
+  found together with the calls in its arguments; arrays and nested arrays, objects, interpolated
+  strings, constructor arguments, both ends of a range and a lambda body are entered. In an
+  expression, the binary operators except the bitwise ones, unary, conditional, property and index
+  access, static and instance method calls, and the arguments of an imported function call are
+  entered. A call inside the arguments of a call that is itself in an expression is not found, and
+  neither is anything under a bitwise operator, parentheses, a cast, a built-in, static or plain
+  function call, a qualified identifier or a value wrapped in an expression.
+- **A name is split only for an imported namespace and one dot** (`Base.scaledValue`); an unknown
+  namespace and a name with two dots stay whole, and a trailing dot gives an empty function name
+  in the imported namespace.
+- **Scope is reset at the start of each entry,** so an unbalanced exit inside an entry cannot reach
+  the next one. That is also why the table's own `clear_scope_variables` call was redundant, and
+  it was removed.
+- The file had no NOTICE header, and its variant-name function matched `BitwiseOp` twice (the
+  compiler's unreachable pattern warning). Both are fixed.
+
+**Tests:** `cargo test -p dixscript --test value_resolver_context_document`
+
+### `tests/value_resolver_context_document.rs`
+
+**What it does:** Pins phases 2 and 3 of value resolution to the behavior of the owned versions
+they replaced, and checks the properties of the new ones.
+
+**Decisions:**
+- **Four recordings, all produced by running the original code** (the original files were put back
+  and the test built and run, with the one line that calls the arena finder turned into a no-op),
+  then required of the new code. `RECORDING` fingerprints the whole result of the resolver,
+  history of calls included, for five crafted sources and four corpus files; `HAND_RECORDING`,
+  `CONTEXT_RECORDING` and `WALK_RECORDING` do the same for the result, the data context and the
+  found calls of 15 hand-built data sections. The results are required through the document and
+  through the owned entry point.
+- **The hand-built sections reach what the grammar cannot write:** every value kind the context
+  converts, constructors, containers, tables and groups, alias chains past the pass limit, and
+  every expression kind the call finder enters or does not, with the quickfunctions they call
+  defined in the base.
+- **The data context is read from the verbose log,** which prints every path and value sorted.
+  Objects print their entries in hash-map order, so they are sorted before fingerprinting, and the
+  value of a date or timestamp that did not parse is replaced by a marker, since it is the time of
+  the run.
+- **The rules are asserted outright as well:** what converts and what does not, how aliases resolve
+  and stop (in tables, groups, by full key, by the end of a path against decoys that only end the
+  same way), which expressions the finder enters and which it does not, how names split, the
+  locations in tables, groups, arrays and objects, and what the log says about each pass and each
+  count.
+- **Which tree is read** is tested with an owned tree and a document that disagree, with a document
+  that has no data, and with an owned tree that has none. The owned `find_all` is compared with the
+  arena `find_all_in` for every case, and phases 2 and 3 are shown to allocate nothing in the
+  document's arena.
+- Of the 16 tests that are not recording checks, 14 were also run on the original and pass there;
+  the two that need the arena finder or a document to be read in phases 2 and 3 cannot.
+
+**Tests:** `cargo test -p dixscript --test value_resolver_context_document`. 23 tests and three
+ignored helpers (`print_recording`, `print_contexts`, `print_logs`), all passing on Rust 1.75.
 
 ### `tests/value_resolution_scaling.rs`
 
@@ -1954,3 +2059,51 @@ requires the larger to take less than 7 times as long.
   `@ENUMS` is left as it was. The runtime, the DLM auditor, the binary packer, the language server
   (which has not been type-checked here) and the sibling crates remain. CI on stable Rust has not
   been run.
+
+### Fixes and Problems: value resolution phases 2 and 3 (data context and call finder) read the Document
+
+- **What changed.** `value_resolver.rs` (phases 2 and 3, and a private `DataSource` that phases 1 to
+  3 read from), the new `data_context.rs`, `ast_walker.rs` (rewritten over the arena, `find_all_in`
+  added, `find_all` kept as a wrapper) and `ValueResolution/mod.rs`. `ValueResolver::with_document`
+  now covers phases 1 to 3, and without a document the owned data is copied into a scratch arena
+  once for all three. Removed: the owned `try_value_to_dix` (about 110 lines), the clone of the
+  whole entries vector in the alias pass, a second `HashMap` rebuild in the object conversion, a
+  `clear_scope_variables` call that the reset at the start of each entry made redundant, and a
+  duplicate `BitwiseOp` match arm. Library warnings went from 120 to 119 and none comes from these
+  files.
+- **How it was checked against the original.** The throwaway harness of the previous drop was
+  extended with a hook that stops the resolver after phase 3 and prints the sorted data context
+  and every found call in full, in the original and in the changed code. It ran the 84 corpus
+  files and 22 crafted files (18 sources and four copies of import libraries), carrying on after
+  semantic errors, and the 30 hand-built sections of the previous drop plus 12 new ones for these
+  phases, each against two bases. The output was identical byte for byte through the three ways
+  the code can be reached (document attached, scratch arena, and the owned path of the language
+  server), with debug logging off, regular and verbose. With the hook off and the whole resolver
+  running, 99 of the 106 files are identical (81 byte for byte and 18 once the order of object
+  properties that function results carry, a hash map, is fixed); the other seven differ from run to
+  run in the original too, and phases 2 and 3 are what was compared for them.
+- **85 bugs were injected afterwards and 83 are noticed.** The first round caught 71 of 86. Of the 15
+  that survived, 12 were gaps in the inputs: an alias in the first entry, chains inside a table and a
+  group, decoy keys that only end like a name, an alias that names a full key, and the log lines of
+  the alias passes, the count and the call finder's verbose output. Those inputs and a test of the
+  log were added and the recording made again from the original. One survivor was a call that the
+  reset at the start of each entry makes redundant, and it was removed. The two that remain are
+  equivalent: an exit from a table's or a group's scope that is skipped cannot be seen, because the
+  next entry starts from the root.
+- **Measured, not assumed.** Callgrind, debug build, the whole pipeline for one file, V1 against
+  V2: `EnumUsage.mdix` 36.48M against 36.32M instructions (0.4 percent fewer), `BigBoy.mdix`
+  82.52M against 82.37M (0.2), `Unholy.mdix` 466.3M against 463.8M (0.5), `basic/a_test.mdix`
+  23.85M against 23.71M (0.6) and `elements_database.mdix` 2,533M against 2,515M (0.7). On that
+  last file phase 2 went from 104.6M to 81.7M (22 percent fewer; the alias pass 65.9M to 42.2M) and
+  phase 3 from 165.5M to 170.1M (3 percent more: copying a call's arguments out of the arena costs a
+  little more than cloning owned ones). The gain is from the alias pass no longer copying the data
+  section. Release builds, wall-clock time and peak memory were not measured.
+- **Found while doing it, not changed.** `ScopeTracker::clear_scope_variables` has no caller now but
+  is public and stays. The text of the call finder's per-entry log lines and the context dump are
+  in hash order for objects. A value that does not parse as a date or timestamp becomes the time
+  of the run, so the context is not reproducible for such a source.
+- **Not done in this drop.** The write-back of results and phase 5 still read and rewrite the owned
+  tree, and the interpreter (about 2,800 lines, 14.7 percent of the pipeline on the largest file)
+  still takes owned arguments and owned function bodies. The runtime, the DLM auditor, the binary
+  packer, the language server (not type-checked here) and the sibling crates remain. CI on stable
+  Rust has not been run.

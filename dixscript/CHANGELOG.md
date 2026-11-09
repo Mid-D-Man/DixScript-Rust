@@ -86,11 +86,13 @@ Breaking release.
   the same result as `validate_script` for it; the orchestrator's version phase calls it when a document is
   attached. `TypeSystemManager::validate_doc_quick_function_signature` is the arena form of the signature
   check.
-- **`ValueResolver::with_document(&mut Document)`** gives the first phase of value resolution (enum
-  pre-resolution) the document the file was parsed into. The phase then reads and rewrites the
-  document's `@DATA` in its arena instead of copying the owned data section, and the loader passes
-  the document it already holds. Without one, `ValueResolver::new` and the other constructors work as
-  before.
+- **`ValueResolver::with_document(&mut Document)`** gives the first three phases of value
+  resolution (enum pre-resolution, the data context and the call finder) the document the file was
+  parsed into. They then read the document's `@DATA` in its arena instead of a copy of the owned data
+  section, and the loader passes the document it already holds. Without one, `ValueResolver::new` and
+  the other constructors work as before, and the owned data is copied once for the three phases.
+- **`ASTWalker::find_all_in(&Arena, &DocData)`** is the arena entry of the call finder.
+  `find_all(&DataSection)` stays and copies the section into a scratch arena.
 
 ### Removed
 - `VersionConstraints::with_forward_compat`, `is_valid_value_type`, `is_valid_default_value`,
@@ -112,6 +114,8 @@ Breaking release.
 - `binary_serialization_benchmark` compares gzip only.
 - Three private functions of `ValueResolver` that nothing called, `resolve_call_arguments`,
   `resolve_expr_to_dix` and `resolve_value_to_dix` (about 240 lines).
+- The owned `try_value_to_dix` of `ValueResolver` (private, about 110 lines), replaced by the arena
+  version in `data_context.rs`.
 
 ### Performance
 
@@ -137,6 +141,11 @@ Breaking release.
   about 890 lines. The result, the errors and the log lines are unchanged. Data with no enum
   expression is no longer rebuilt, and a whole-pipeline instruction count is 0.3 to 4.4 percent
   lower on the five files measured. The loader now keeps its `Document` until stage 7 is done.
+- **The data context and the call finder run on the arena.** The second and third phases of value
+  resolution read the arena (`ValueResolution/data_context.rs` and `ast_walker.rs`) in place of the
+  owned tree. The context, the calls found and every log line are unchanged. The alias pass no longer
+  clones the whole data section, and the whole-pipeline instruction count is a further 0.2 to 0.7
+  percent lower on the same five files.
 - **Language version 2.0.0.** `@CONFIG` `version -> "2.0.0"` is now a recognized
   language version. Before, the version manager accepted the string but treated the
   file as 1.0.0. 1.0.0 files still load. The two versions differ only in the DLM

@@ -1,5 +1,8 @@
-
-//! ASTWalker — discovers every QuickFunction call inside @DATA.
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/ValueResolution/ast_walker.rs"
+// ============================================================================
+//! ASTWalker: discovers every QuickFunction call inside @DATA.
 //!
 //! Responsibilities:
 //!   - Recursively visits all Values and Expressions in every DATA entry.
@@ -8,8 +11,13 @@
 //!   - Maintains accurate scope context via ScopeTracker.
 //!   - Resets scope between top-level entries to prevent state bleeding.
 //!
+//! The walk is over the arena AST: [`ASTWalker::find_all_in`] reads a [`DocData`] and its
+//! [`Arena`], and [`ASTWalker::find_all`] copies an owned `DataSection` into a scratch arena
+//! and calls it. Only the arguments of a found call are copied out of the arena, once each, into
+//! the owned `Expression`s of its [`FunctionCallInfo`].
+//!
 //! Improvements over C# version:
-//!   - All debug logging is gated by a cached `DebugConfig` — `format!(…)`
+//!   - All debug logging is gated by a cached `DebugConfig`; `format!(…)`
 //!     is never evaluated when debug mode is off.
 //!   - Handles Value variants the C# walker skipped: NestedArray, Range, Lambda.
 //!   - `ParentEntry` reference removed; `entry_path` is the sole stable
@@ -19,10 +27,11 @@
 
 use crate::Utilities::RustcHash::FxHashMap;
 
-use crate::Compiler::AST::{
-    DataEntry, DataSection, Expression, ObjectProperty, Position,
-    PropertyAssignment, TablePath, Value,
+use crate::Compiler::AST::arena::{
+    Arena, DocData, DocDataEntry, DocPropertyAssignment, ExprId, ExprList, ExprNode, PropList,
+    ValueId, ValueList, ValueNode,
 };
+use crate::Compiler::AST::{DataSection, Expression, Position, TablePath};
 use crate::Compiler::Core::DebugMode;
 use crate::Compiler::Utilities::SymbolTable;
 use crate::ErrorManager::{DebugConfig, ErrorManager};
@@ -59,21 +68,35 @@ impl<'a> ASTWalker<'a> {
         }
     }
 
-    /// Walk the entire DATA section and return all discovered function calls.
+    /// Walk an owned DATA section and return all discovered function calls.
     ///
-    /// The result vec is moved out via `mem::take` — zero-copy; `found_calls`
-    /// is left empty and ready for a subsequent call if needed.
+    /// The section is copied into a scratch arena and walked by [`find_all_in`](Self::find_all_in),
+    /// so a caller that already holds the arena form should call that instead.
     pub fn find_all(&mut self, data_section: &DataSection) -> Vec<FunctionCallInfo> {
+        let mut arena = Arena::new();
+        let data = DocData::from_owned(&mut arena, data_section);
+        self.find_all_in(&arena, &data)
+    }
+
+    /// Walk the entire DATA section of an arena and return all discovered function calls.
+    ///
+    /// `data` must be a section of `arena`. The result vec is moved out via `mem::take`,
+    /// zero-copy; `found_calls` is left empty and ready for a subsequent call if needed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an id in `data` is out of range for `arena`.
+    pub fn find_all_in(&mut self, arena: &Arena, data: &DocData) -> Vec<FunctionCallInfo> {
         self.found_calls.clear();
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
                 "Walking DATA section with {} entries",
-                data_section.entries.len()
+                data.entries.len()
             ));
         }
 
-        for (i, entry) in data_section.entries.iter().enumerate() {
+        for (i, entry) in data.entries.iter().enumerate() {
             self.scope_tracker.reset_to_root();
 
             if self.debug_config.is_verbose {
@@ -83,7 +106,7 @@ impl<'a> ASTWalker<'a> {
                 ));
             }
 
-            self.visit_data_entry(entry);
+            self.visit_data_entry(arena, entry);
         }
 
         if self.debug_config.is_enabled {
@@ -112,26 +135,26 @@ impl<'a> ASTWalker<'a> {
         std::mem::take(&mut self.found_calls)
     }
 
-    fn visit_data_entry(&mut self, entry: &DataEntry) {
+    fn visit_data_entry(&mut self, arena: &Arena, entry: &DocDataEntry) {
         self.current_entry_path = get_entry_path(entry);
 
         match entry {
-            DataEntry::SimpleProperty { name, value, .. } => {
-                self.visit_simple_property(name, value);
+            DocDataEntry::SimpleProperty { name, value, .. } => {
+                self.visit_simple_property(arena, name, *value);
             }
-            DataEntry::TableProperty { path, properties, .. } => {
-                self.visit_table_property(path, properties);
+            DocDataEntry::TableProperty { path, properties, .. } => {
+                self.visit_table_property(arena, path, properties);
             }
-            DataEntry::GroupArray { path, items, .. } => {
-                self.visit_group_array(path, items);
+            DocDataEntry::GroupArray { path, items, .. } => {
+                self.visit_group_array(arena, path, *items);
             }
-            DataEntry::ObjectProperty { name, object, .. } => {
-                self.visit_object_property(name, object);
+            DocDataEntry::ObjectProperty { name, object, .. } => {
+                self.visit_object_property(arena, name, *object);
             }
         }
     }
 
-    fn visit_simple_property(&mut self, name: &str, value: &Value) {
+    fn visit_simple_property(&mut self, arena: &Arena, name: &str, value: ValueId) {
         self.scope_tracker.enter_scope(name);
 
         let full_path = self.scope_tracker.get_current_path();
@@ -144,25 +167,26 @@ impl<'a> ASTWalker<'a> {
                 .log_debug(&format!("[ASTWalker]     Full path: {}", full_path));
             self.error_manager.log_debug(&format!(
                 "[ASTWalker]     Value type: {}",
-                value_variant_name(value)
+                value_variant_name(arena.value(value))
             ));
         }
 
-        self.visit_value(value);
+        self.visit_value(arena, value);
         self.scope_tracker.exit_scope();
     }
 
     fn visit_table_property(
         &mut self,
+        arena: &Arena,
         path: &TablePath,
-        properties: &[PropertyAssignment],
+        properties: &[DocPropertyAssignment],
     ) {
         for segment in &path.segments {
             self.scope_tracker.enter_scope(segment);
         }
 
-        self.scope_tracker.clear_scope_variables();
-
+        // The scope variables were cleared when the entry began (`reset_to_root`), so the properties
+        // registered below are the only ones in scope.
         let current_path = self.scope_tracker.get_current_path();
 
         // Pass 1: register all properties so they are visible during value visits.
@@ -190,7 +214,7 @@ impl<'a> ASTWalker<'a> {
                 ));
             }
 
-            self.visit_value(&assignment.value);
+            self.visit_value(arena, assignment.value);
             self.scope_tracker.exit_scope();
         }
 
@@ -199,12 +223,12 @@ impl<'a> ASTWalker<'a> {
         }
     }
 
-    fn visit_group_array(&mut self, path: &TablePath, items: &[Value]) {
+    fn visit_group_array(&mut self, arena: &Arena, path: &TablePath, items: ValueList) {
         for segment in &path.segments {
             self.scope_tracker.enter_scope(segment);
         }
 
-        for (i, item) in items.iter().enumerate() {
+        for (i, &item) in arena.value_list(items).iter().enumerate() {
             let index_seg = format!("[{}]", i);
             self.scope_tracker.enter_scope(&index_seg);
 
@@ -213,7 +237,7 @@ impl<'a> ASTWalker<'a> {
                     .log_debug(&format!("[GroupArray] Item[{}]", i));
             }
 
-            self.visit_value(item);
+            self.visit_value(arena, item);
             self.scope_tracker.exit_scope();
         }
 
@@ -222,7 +246,7 @@ impl<'a> ASTWalker<'a> {
         }
     }
 
-    fn visit_object_property(&mut self, name: &str, object: &Value) {
+    fn visit_object_property(&mut self, arena: &Arena, name: &str, object: ValueId) {
         self.scope_tracker.enter_scope(name);
 
         let full_path = self.scope_tracker.get_current_path();
@@ -235,107 +259,113 @@ impl<'a> ASTWalker<'a> {
                 .log_debug(&format!("[ASTWalker]     Full path: {}", full_path));
         }
 
-        self.visit_value(object);
+        self.visit_value(arena, object);
         self.scope_tracker.exit_scope();
     }
 
-    fn visit_value(&mut self, value: &Value) {
+    fn visit_value(&mut self, arena: &Arena, id: ValueId) {
+        let node = *arena.value(id);
+
         if self.debug_config.is_verbose {
             self.error_manager.log_debug(&format!(
                 "    [VisitValue] Type: {}",
-                value_variant_name(value)
+                value_variant_name(&node)
             ));
         }
 
-        match value {
-            Value::QuickFuncCall {
-                function_name,
-                arguments,
-                position,
-            } => {
-                self.handle_value_quick_func_call(function_name, arguments, *position);
+        match node {
+            ValueNode::QuickFuncCall { function_name, arguments, position } => {
+                self.handle_value_quick_func_call(
+                    arena,
+                    arena.text(function_name),
+                    arguments,
+                    position,
+                );
             }
 
-            Value::Expression { expr, .. } => {
+            ValueNode::Expression { expr, .. } => {
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "      Found Expression wrapping: {}",
-                        expr_variant_name(expr)
+                        expr_variant_name(arena.expr(expr))
                     ));
                 }
-                self.visit_expression(expr);
+                self.visit_expression(arena, expr);
             }
 
-            Value::Array { values, .. } => {
-                self.visit_array(values);
+            ValueNode::Array { values, .. } => {
+                self.visit_array(arena, values);
             }
 
-            Value::NestedArray { values, .. } => {
-                self.visit_array(values);
+            ValueNode::NestedArray { values, .. } => {
+                self.visit_array(arena, values);
             }
 
-            Value::Object { properties, .. } => {
-                self.visit_object_literal(properties);
+            ValueNode::Object { properties, .. } => {
+                self.visit_object_literal(arena, properties);
             }
 
-            Value::InterpolatedString { expressions, .. } => {
-                for expr in expressions {
-                    self.visit_expression(expr);
+            ValueNode::InterpolatedString { expressions, .. } => {
+                for &expr in arena.expr_list(expressions) {
+                    self.visit_expression(arena, expr);
                 }
             }
 
-            Value::PrefixedConstructor { prefix, arguments, .. } => {
+            ValueNode::PrefixedConstructor { prefix, arguments, .. } => {
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "      Found PrefixedConstructor: {}",
-                        prefix
+                        arena.text(prefix)
                     ));
                 }
-                for (i, arg) in arguments.iter().enumerate() {
+                for (i, &arg) in arena.value_list(arguments).iter().enumerate() {
                     if self.debug_config.is_verbose {
                         self.error_manager.log_debug(&format!(
                             "        [PrefixedConstructor] Arg[{}]: {}",
                             i,
-                            value_variant_name(arg)
+                            value_variant_name(arena.value(arg))
                         ));
                     }
-                    self.visit_value(arg);
+                    self.visit_value(arena, arg);
                 }
             }
 
-            Value::Range { start, end, .. } => {
-                self.visit_value(start);
-                self.visit_value(end);
+            ValueNode::Range { start, end, .. } => {
+                self.visit_value(arena, start);
+                self.visit_value(arena, end);
             }
 
-            Value::Lambda { body, .. } => {
-                self.visit_expression(body);
+            ValueNode::Lambda { body, .. } => {
+                self.visit_expression(arena, body);
             }
 
-            // Terminal values — no nested function calls possible.
-            Value::Integer { .. }
-            | Value::Long { .. }
-            | Value::Float { .. }
-            | Value::Double { .. }
-            | Value::ScientificNotation { .. }
-            | Value::String { .. }
-            | Value::Boolean { .. }
-            | Value::Null { .. }
-            | Value::Date { .. }
-            | Value::Timestamp { .. }
-            | Value::HexColor { .. }
-            | Value::EnumValue { .. }
-            | Value::Identifier { .. }
-            | Value::ParseError { .. }
-            | Value::Error { .. }
-            | Value::Unknown { .. } => {}
+            // Terminal values: no nested function calls possible.
+            ValueNode::Integer { .. }
+            | ValueNode::Long { .. }
+            | ValueNode::Float { .. }
+            | ValueNode::Double { .. }
+            | ValueNode::ScientificNotation { .. }
+            | ValueNode::String { .. }
+            | ValueNode::Boolean { .. }
+            | ValueNode::Null { .. }
+            | ValueNode::Date { .. }
+            | ValueNode::Timestamp { .. }
+            | ValueNode::HexColor { .. }
+            | ValueNode::EnumValue { .. }
+            | ValueNode::Identifier { .. }
+            | ValueNode::ParseError { .. }
+            | ValueNode::Error { .. }
+            | ValueNode::Unknown { .. } => {}
         }
     }
 
+    /// Records a call that is a value of its own (`x = f(1)`) and visits its arguments, so a call
+    /// nested in an argument is found too.
     fn handle_value_quick_func_call(
         &mut self,
+        arena: &Arena,
         raw_name: &str,
-        arguments: &[Expression],
+        arguments: ExprList,
         position: Position,
     ) {
         if self.debug_config.is_verbose {
@@ -354,23 +384,16 @@ impl<'a> ASTWalker<'a> {
             }
         }
 
-        self.found_calls.push(FunctionCallInfo {
-            function_name: func_name,
-            namespace_name,
-            arguments: arguments.to_vec(),
-            location: self.scope_tracker.get_current_path(),
-            scope: self.scope_tracker.get_current_scope(),
-            entry_path: self.current_entry_path.clone(),
-            position,
-            scope_context: self.scope_tracker.get_scope_variables_snapshot(),
-        });
+        self.push_call(arena, func_name, namespace_name, arguments, position);
 
-        for arg in arguments {
-            self.visit_expression(arg);
+        for &arg in arena.expr_list(arguments) {
+            self.visit_expression(arena, arg);
         }
     }
 
-    fn visit_array(&mut self, values: &[Value]) {
+    fn visit_array(&mut self, arena: &Arena, values: ValueList) {
+        let values = arena.value_list(values);
+
         if self.debug_config.is_verbose {
             self.error_manager.log_debug(&format!(
                 "        [VisitArray] Processing {} items",
@@ -378,7 +401,7 @@ impl<'a> ASTWalker<'a> {
             ));
         }
 
-        for (i, value) in values.iter().enumerate() {
+        for (i, &value) in values.iter().enumerate() {
             let index_seg = format!("[{}]", i);
             self.scope_tracker.enter_scope(&index_seg);
 
@@ -386,43 +409,48 @@ impl<'a> ASTWalker<'a> {
                 self.error_manager.log_debug(&format!(
                     "        [VisitArray]   Item[{}]: {}",
                     i,
-                    value_variant_name(value)
+                    value_variant_name(arena.value(value))
                 ));
             }
 
-            self.visit_value(value);
+            self.visit_value(arena, value);
             self.scope_tracker.exit_scope();
         }
     }
 
-    fn visit_object_literal(&mut self, properties: &[ObjectProperty]) {
+    fn visit_object_literal(&mut self, arena: &Arena, properties: PropList) {
+        let properties = arena.prop_list(properties);
         let current_path = self.scope_tracker.get_current_path();
 
-        // Pass 1: register all properties.
+        // Register every key first so a value can name its siblings.
         for prop in properties {
-            let full_path = format!("{}.{}", current_path, prop.key);
-            self.scope_tracker
-                .register_variable(&prop.key, &full_path);
+            let key = arena.text(prop.key);
+            let full_path = format!("{}.{}", current_path, key);
+            self.scope_tracker.register_variable(key, &full_path);
         }
 
-        // Pass 2: visit values.
         for prop in properties {
-            self.scope_tracker.enter_scope(&prop.key);
-            self.visit_value(&prop.value);
+            self.scope_tracker.enter_scope(arena.text(prop.key));
+            self.visit_value(arena, prop.value);
             self.scope_tracker.exit_scope();
         }
     }
 
-    fn visit_expression(&mut self, expr: &Expression) {
+    fn visit_expression(&mut self, arena: &Arena, id: ExprId) {
+        let node = *arena.expr(id);
+
         if self.debug_config.is_verbose {
             self.error_manager.log_debug(&format!(
                 "      [VisitExpression] Type: {}",
-                expr_variant_name(expr)
+                expr_variant_name(&node)
             ));
         }
 
-        match expr {
-            Expression::QuickFuncCall { name, arguments, position } => {
+        match node {
+            // The arguments of a call inside an expression are not visited: a call nested
+            // there is not found, as it never was.
+            ExprNode::QuickFuncCall { name, arguments, position } => {
+                let name = arena.text(name);
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "        Found QuickFuncCall in expression: {}",
@@ -441,26 +469,12 @@ impl<'a> ASTWalker<'a> {
                     }
                 }
 
-                self.found_calls.push(FunctionCallInfo {
-                    function_name: func_name,
-                    namespace_name,
-                    arguments: arguments.clone(),
-                    location: self.scope_tracker.get_current_path(),
-                    scope: self.scope_tracker.get_current_scope(),
-                    entry_path: self.current_entry_path.clone(),
-                    position: *position,
-                    scope_context: self.scope_tracker.get_scope_variables_snapshot(),
-                });
-                // NOTE: arguments are not recursed here — preserved from C# original.
-                // ImportedFunctionCall below does recurse; the asymmetry is intentional.
+                self.push_call(arena, func_name, namespace_name, arguments, position);
             }
 
-            Expression::ImportedFunctionCall {
-                namespace_name,
-                function_name,
-                arguments,
-                position,
-            } => {
+            ExprNode::ImportedFunctionCall { namespace_name, function_name, arguments, position } => {
+                let (namespace_name, function_name) =
+                    (arena.text(namespace_name), arena.text(function_name));
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "        Found ImportedFunctionCall: {}.{}",
@@ -468,88 +482,101 @@ impl<'a> ASTWalker<'a> {
                     ));
                 }
 
-                self.found_calls.push(FunctionCallInfo {
-                    function_name: function_name.clone(),
-                    namespace_name: Some(namespace_name.clone()),
-                    arguments: arguments.clone(),
-                    location: self.scope_tracker.get_current_path(),
-                    scope: self.scope_tracker.get_current_scope(),
-                    entry_path: self.current_entry_path.clone(),
-                    position: *position,
-                    scope_context: self.scope_tracker.get_scope_variables_snapshot(),
-                });
+                self.push_call(
+                    arena,
+                    function_name.to_string(),
+                    Some(namespace_name.to_string()),
+                    arguments,
+                    position,
+                );
 
-                for arg in arguments {
-                    self.visit_expression(arg);
+                for &arg in arena.expr_list(arguments) {
+                    self.visit_expression(arena, arg);
                 }
             }
 
-            Expression::ArithmeticOp { left, right, .. } => {
-                self.visit_expression(left);
-                self.visit_expression(right);
+            ExprNode::ArithmeticOp { left, right, .. }
+            | ExprNode::ComparisonOp { left, right, .. }
+            | ExprNode::LogicalOp { left, right, .. } => {
+                self.visit_expression(arena, left);
+                self.visit_expression(arena, right);
             }
 
-            Expression::ComparisonOp { left, right, .. } => {
-                self.visit_expression(left);
-                self.visit_expression(right);
+            ExprNode::UnaryOp { operand, .. } => {
+                self.visit_expression(arena, operand);
             }
 
-            Expression::LogicalOp { left, right, .. } => {
-                self.visit_expression(left);
-                self.visit_expression(right);
+            ExprNode::Conditional { condition, true_value, false_value, .. } => {
+                self.visit_expression(arena, condition);
+                self.visit_expression(arena, true_value);
+                self.visit_expression(arena, false_value);
             }
 
-            Expression::UnaryOp { operand, .. } => {
-                self.visit_expression(operand);
+            ExprNode::PropertyAccess { object, .. } => {
+                self.visit_expression(arena, object);
             }
 
-            Expression::Conditional { condition, true_value, false_value, .. } => {
-                self.visit_expression(condition);
-                self.visit_expression(true_value);
-                self.visit_expression(false_value);
+            ExprNode::IndexAccess { object, index, .. } => {
+                self.visit_expression(arena, object);
+                self.visit_expression(arena, index);
             }
 
-            Expression::PropertyAccess { object, .. } => {
-                self.visit_expression(object);
-            }
-
-            Expression::IndexAccess { object, index, .. } => {
-                self.visit_expression(object);
-                self.visit_expression(index);
-            }
-
-            Expression::StaticMethodCall { arguments, .. } => {
-                for arg in arguments {
-                    self.visit_expression(arg);
+            ExprNode::StaticMethodCall { arguments, .. } => {
+                for &arg in arena.expr_list(arguments) {
+                    self.visit_expression(arena, arg);
                 }
             }
 
-            Expression::InstanceMethodCall { instance, arguments, .. } => {
-                self.visit_expression(instance);
-                for arg in arguments {
-                    self.visit_expression(arg);
+            ExprNode::InstanceMethodCall { instance, arguments, .. } => {
+                self.visit_expression(arena, instance);
+                for &arg in arena.expr_list(arguments) {
+                    self.visit_expression(arena, arg);
                 }
             }
 
-            Expression::Identifier { .. }
-            | Expression::Value { .. }
-            | Expression::EnumAccess { .. }
-            | Expression::ConfigAccess { .. } => {}
+            ExprNode::Identifier { .. }
+            | ExprNode::Value { .. }
+            | ExprNode::EnumAccess { .. }
+            | ExprNode::ConfigAccess { .. } => {}
 
             other => {
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "        Unhandled Expression type: {}",
-                        expr_variant_name(other)
+                        expr_variant_name(&other)
                     ));
                 }
             }
         }
     }
 
-    /// If `raw_name` is `"ns.func"` and `ns` is a known imported namespace,
-    /// return `("func", Some("ns"))`. Otherwise return `(raw_name, None)`.
-    /// Uses a single `find('.')` rather than allocating a split array.
+    /// Records a found call at the current scope, with its arguments copied out of the arena.
+    fn push_call(
+        &mut self,
+        arena: &Arena,
+        function_name: String,
+        namespace_name: Option<String>,
+        arguments: ExprList,
+        position: Position,
+    ) {
+        let arguments: Vec<Expression> =
+            arena.expr_list(arguments).iter().map(|&a| arena.export_expr(a)).collect();
+        self.found_calls.push(FunctionCallInfo {
+            function_name,
+            namespace_name,
+            arguments,
+            location: self.scope_tracker.get_current_path(),
+            scope: self.scope_tracker.get_current_scope(),
+            entry_path: self.current_entry_path.clone(),
+            position,
+            scope_context: self.scope_tracker.get_scope_variables_snapshot(),
+        });
+    }
+
+    // ── Name splitting ────────────────────────────────────────────────────
+
+    /// Split `raw_name` into `(function, Some(namespace))` when it is exactly `namespace.function`
+    /// and `namespace` is an imported one; otherwise the name is returned whole.
     fn split_namespace(&self, raw_name: &str) -> (String, Option<String>) {
         if let Some(dot_pos) = raw_name.find('.') {
             let prefix = &raw_name[..dot_pos];
@@ -566,74 +593,72 @@ impl<'a> ASTWalker<'a> {
     }
 }
 
-fn get_entry_path(entry: &DataEntry) -> String {
+fn get_entry_path(entry: &DocDataEntry) -> String {
     match entry {
-        DataEntry::SimpleProperty { name, .. } => name.clone(),
-        DataEntry::TableProperty { path, .. } => path.to_string(),
-        DataEntry::GroupArray { path, .. } => path.to_string(),
-        DataEntry::ObjectProperty { name, .. } => name.clone(),
+        DocDataEntry::SimpleProperty { name, .. } => name.clone(),
+        DocDataEntry::TableProperty { path, .. } => path.to_string(),
+        DocDataEntry::GroupArray { path, .. } => path.to_string(),
+        DocDataEntry::ObjectProperty { name, .. } => name.clone(),
     }
 }
 
-/// Human-readable variant name for a Value — used exclusively in debug logs.
-/// The compiler turns this into a jump table; zero runtime allocation.
-fn value_variant_name(value: &Value) -> &'static str {
+// ── Debug helpers ─────────────────────────────────────────────────────────
+
+fn value_variant_name(value: &ValueNode) -> &'static str {
     match value {
-        Value::Integer { .. } => "Integer",
-        Value::Long { .. } => "Long",
-        Value::Float { .. } => "Float",
-        Value::Double { .. } => "Double",
-        Value::ScientificNotation { .. } => "ScientificNotation",
-        Value::String { .. } => "String",
-        Value::Boolean { .. } => "Boolean",
-        Value::InterpolatedString { .. } => "InterpolatedString",
-        Value::HexColor { .. } => "HexColor",
-        Value::Date { .. } => "Date",
-        Value::Timestamp { .. } => "Timestamp",
-        Value::Null { .. } => "Null",
-        Value::Array { .. } => "Array",
-        Value::NestedArray { .. } => "NestedArray",
-        Value::Object { .. } => "Object",
-        Value::PrefixedConstructor { .. } => "PrefixedConstructor",
-        Value::EnumValue { .. } => "EnumValue",
-        Value::Identifier { .. } => "Identifier",
-        Value::QuickFuncCall { .. } => "QuickFuncCall",
-        Value::Expression { .. } => "Expression",
-        Value::Range { .. } => "Range",
-        Value::Lambda { .. } => "Lambda",
-        Value::ParseError { .. } => "ParseError",
-        Value::Error { .. } => "Error",
-        Value::Unknown { .. } => "Unknown",
+        ValueNode::Integer { .. } => "Integer",
+        ValueNode::Long { .. } => "Long",
+        ValueNode::Float { .. } => "Float",
+        ValueNode::Double { .. } => "Double",
+        ValueNode::ScientificNotation { .. } => "ScientificNotation",
+        ValueNode::String { .. } => "String",
+        ValueNode::Boolean { .. } => "Boolean",
+        ValueNode::InterpolatedString { .. } => "InterpolatedString",
+        ValueNode::HexColor { .. } => "HexColor",
+        ValueNode::Date { .. } => "Date",
+        ValueNode::Timestamp { .. } => "Timestamp",
+        ValueNode::Null { .. } => "Null",
+        ValueNode::Array { .. } => "Array",
+        ValueNode::NestedArray { .. } => "NestedArray",
+        ValueNode::Object { .. } => "Object",
+        ValueNode::PrefixedConstructor { .. } => "PrefixedConstructor",
+        ValueNode::EnumValue { .. } => "EnumValue",
+        ValueNode::Identifier { .. } => "Identifier",
+        ValueNode::QuickFuncCall { .. } => "QuickFuncCall",
+        ValueNode::Expression { .. } => "Expression",
+        ValueNode::Range { .. } => "Range",
+        ValueNode::Lambda { .. } => "Lambda",
+        ValueNode::ParseError { .. } => "ParseError",
+        ValueNode::Error { .. } => "Error",
+        ValueNode::Unknown { .. } => "Unknown",
     }
 }
 
-/// Human-readable variant name for an Expression — used exclusively in debug logs.
-fn expr_variant_name(expr: &Expression) -> &'static str {
+fn expr_variant_name(expr: &ExprNode) -> &'static str {
     match expr {
-        Expression::Identifier { .. } => "Identifier",
-        Expression::QualifiedIdentifier { .. } => "QualifiedIdentifier",
-        Expression::FunctionCall { .. } => "FunctionCall",
-        Expression::QuickFuncCall { .. } => "QuickFuncCall",
-        Expression::DixFunctionCall { .. } => "DixFunctionCall",
-        Expression::StaticMethodCall { .. } => "StaticMethodCall",
-        Expression::InstanceMethodCall { .. } => "InstanceMethodCall",
-        Expression::BuiltinFunction { .. } => "BuiltinFunction",
-        Expression::StaticFunction { .. } => "StaticFunction",
-        Expression::ImportedFunctionCall { .. } => "ImportedFunctionCall",
-        Expression::ArithmeticOp { .. } => "ArithmeticOp",
-        Expression::BitwiseOp { .. } => "BitwiseOp",
-        Expression::ComparisonOp { .. } => "ComparisonOp",
-        Expression::LogicalOp { .. } => "LogicalOp",
-        Expression::UnaryOp { .. } => "UnaryOp",
-        Expression::ConfigAccess { .. } => "ConfigAccess",
-        Expression::EnumAccess { .. } => "EnumAccess",
-        Expression::ObjectAccess { .. } => "ObjectAccess",
-        Expression::PropertyAccess { .. } => "PropertyAccess",
-        Expression::IndexAccess { .. } => "IndexAccess",
-        Expression::Value { .. } => "Value",
-        Expression::Parenthesized { .. } => "Parenthesized",
-        Expression::Conditional { .. } => "Conditional",
-        Expression::TypeCast { .. } => "TypeCast",
-        Expression::BitwiseOp { .. } => "BitwiseOp",
+        ExprNode::Identifier { .. } => "Identifier",
+        ExprNode::QualifiedIdentifier { .. } => "QualifiedIdentifier",
+        ExprNode::FunctionCall { .. } => "FunctionCall",
+        ExprNode::QuickFuncCall { .. } => "QuickFuncCall",
+        ExprNode::DixFunctionCall { .. } => "DixFunctionCall",
+        ExprNode::StaticMethodCall { .. } => "StaticMethodCall",
+        ExprNode::InstanceMethodCall { .. } => "InstanceMethodCall",
+        ExprNode::BuiltinFunction { .. } => "BuiltinFunction",
+        ExprNode::StaticFunction { .. } => "StaticFunction",
+        ExprNode::ImportedFunctionCall { .. } => "ImportedFunctionCall",
+        ExprNode::ArithmeticOp { .. } => "ArithmeticOp",
+        ExprNode::BitwiseOp { .. } => "BitwiseOp",
+        ExprNode::ComparisonOp { .. } => "ComparisonOp",
+        ExprNode::LogicalOp { .. } => "LogicalOp",
+        ExprNode::UnaryOp { .. } => "UnaryOp",
+        ExprNode::ConfigAccess { .. } => "ConfigAccess",
+        ExprNode::EnumAccess { .. } => "EnumAccess",
+        ExprNode::ObjectAccess { .. } => "ObjectAccess",
+        ExprNode::PropertyAccess { .. } => "PropertyAccess",
+        ExprNode::IndexAccess { .. } => "IndexAccess",
+        ExprNode::Value { .. } => "Value",
+        ExprNode::Parenthesized { .. } => "Parenthesized",
+        ExprNode::Conditional { .. } => "Conditional",
+        ExprNode::TypeCast { .. } => "TypeCast",
     }
 }

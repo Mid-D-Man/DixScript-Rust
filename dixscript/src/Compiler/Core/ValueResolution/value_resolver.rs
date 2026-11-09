@@ -30,13 +30,14 @@ use crate::Compiler::Utilities::{PathBuilder, SymbolTable, ImportedNamespace};
 use crate::ErrorManager::{DebugConfig, ErrorManager};
 
 use super::ast_walker::ASTWalker;
+use super::data_context;
 use super::enum_resolution::{resolve_data_enums, EnumPass};
 use super::execution_context::ExecutionContext;
 use super::function_interpreter::{FunctionInterpreter, InterpreterError};
 use super::supporting_classes::{FunctionCallInfo, ResolutionRecord, ValueResolutionResult};
 
 const MAX_RESOLUTION_ITERATIONS: usize = 10_000;
-const MIN_CAPACITY: usize = 8;
+pub(super) const MIN_CAPACITY: usize = 8;
 
 // ==================== RESOLVER ERROR ====================
 
@@ -124,6 +125,33 @@ impl std::fmt::Display for ResolverError {
 
 impl std::error::Error for ResolverError {}
 
+// ==================== DATA SOURCE ====================
+
+/// Where the arena phases (1 to 3) of a resolver read the data section from.
+enum DataSource<'a> {
+    /// Nothing attached; `resolve` makes this a [`Scratch`](DataSource::Scratch) when the owned
+    /// tree has a data section.
+    None,
+    /// The caller's document; its `data` decides whether there is a data section.
+    Document(&'a mut Document),
+    /// A copy of the owned data section, made once for the run.
+    Scratch { arena: Arena, data: DocData },
+}
+
+impl DataSource<'_> {
+    /// The arena and the data section in it, or `None` when there is no data section.
+    fn parts(&mut self) -> Option<(&mut Arena, &mut DocData)> {
+        match self {
+            DataSource::None => None,
+            DataSource::Document(document) => {
+                let Document { arena, data, .. } = &mut **document;
+                data.as_mut().map(|data| (arena, data))
+            }
+            DataSource::Scratch { arena, data } => Some((arena, data)),
+        }
+    }
+}
+
 // ==================== VALUE RESOLVER ====================
 
 pub struct ValueResolver<'a> {
@@ -137,11 +165,9 @@ pub struct ValueResolver<'a> {
     resolution_history: Vec<ResolutionRecord>,
     start_time: Instant,
     error_manager: ErrorManager,
-    /// The document whose arena phase 1 reads and rewrites, when the caller has one.
-    ///
-    /// Set by [`with_document`](ValueResolver::with_document). Without it phase 1 copies the
-    /// owned data section into a scratch arena instead.
-    document: Option<&'a mut Document>,
+    /// Where phases 1 to 3 read the data section from: the document the caller attached, or a
+    /// scratch copy of the owned data made when the resolver starts.
+    data: DataSource<'a>,
 }
 
 impl<'a> ValueResolver<'a> {
@@ -216,17 +242,18 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             resolution_history: Vec::new(),
             start_time: Instant::now(),
             error_manager,
-            document: None,
+            data: DataSource::None,
         }
     }
-    /// Gives phase 1 the document the data section was parsed into.
+    /// Gives phases 1 to 3 (enum pre-resolution, the data context and the call finder) the
+    /// document the data section was parsed into.
     ///
-    /// Phase 1 then reads and rewrites the document's `@DATA` in its arena instead of copying
-    /// the owned data section, and whether a data section exists is decided by the document.
-    /// The owned tree passed to the constructor is still the one the later phases read and the
-    /// result is built from.
+    /// They then read the document's `@DATA` from its arena instead of from a scratch copy of the
+    /// owned data section, phase 1 rewrites it there, and whether a data section exists is decided
+    /// by the document. The owned tree passed to the constructor is still the one the later
+    /// phases read and the result is built from.
     pub fn with_document(mut self, document: &'a mut Document) -> Self {
-        self.document = Some(document);
+        self.data = DataSource::Document(document);
         self
     }
 
@@ -238,6 +265,8 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
         }
 
         let original_ast = self.ast.clone();
+
+        self.attach_scratch_data();
 
         if let Err(e) = self.resolve_all_enum_values() {
             return self.create_failed_result(vec![e.to_string()], original_ast);
@@ -313,6 +342,18 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
         }
     }
 
+    /// Without an attached document, copies the owned data section into a scratch arena once,
+    /// for phases 1 to 3 to share.
+    fn attach_scratch_data(&mut self) {
+        if matches!(self.data, DataSource::None) {
+            if let Some(owned) = self.ast.data.as_ref() {
+                let mut arena = Arena::new();
+                let data = DocData::from_owned(&mut arena, owned);
+                self.data = DataSource::Scratch { arena, data };
+            }
+        }
+    }
+
     // ==================== PHASE 1: ENUM PRE-RESOLUTION ====================
 
     /// Resolves the enum references of the data section (phase 1).
@@ -342,40 +383,20 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
 
     /// Runs the enum walk over the data section, or returns `None` when there is none.
     ///
-    /// With a document attached the walk reads and rewrites the document's data in its arena, so
-    /// whether a data section exists is decided by the document. Without one the owned data is
-    /// copied into a scratch arena first. Either way the owned data the later phases read is
-    /// replaced only when the walk changed something, or when it has no data of its own.
+    /// The walk reads and rewrites the data in the arena it lives in (see [`DataSource`]). The
+    /// owned data the later phases read is replaced by an export of the result only when the walk
+    /// changed something, or when the owned tree had no data of its own.
     fn run_enum_pass(&mut self) -> Result<Option<EnumPass>, ResolverError> {
-        let debug = self.debug_config.is_enabled;
-        match self.document.as_deref_mut() {
-            Some(Document { arena, data, .. }) => {
-                let Some(data) = data.as_mut() else { return Ok(None) };
-                if debug {
-                    self.error_manager
-                        .log_info("Pre-processing: resolving all enum values to integers");
-                }
-                let pass = resolve_data_enums(arena, data, self.symbol_table)?;
-                if pass.changed || self.ast.data.is_none() {
-                    self.ast.data = Some(data.export(arena));
-                }
-                Ok(Some(pass))
-            }
-            None => {
-                let Some(owned) = self.ast.data.as_ref() else { return Ok(None) };
-                if debug {
-                    self.error_manager
-                        .log_info("Pre-processing: resolving all enum values to integers");
-                }
-                let mut arena = Arena::new();
-                let mut data = DocData::from_owned(&mut arena, owned);
-                let pass = resolve_data_enums(&mut arena, &mut data, self.symbol_table)?;
-                if pass.changed {
-                    self.ast.data = Some(data.export(&arena));
-                }
-                Ok(Some(pass))
-            }
+        let Some((arena, data)) = self.data.parts() else { return Ok(None) };
+        if self.debug_config.is_enabled {
+            self.error_manager
+                .log_info("Pre-processing: resolving all enum values to integers");
         }
+        let pass = resolve_data_enums(arena, data, self.symbol_table)?;
+        if pass.changed || self.ast.data.is_none() {
+            self.ast.data = Some(data.export(arena));
+        }
+        Ok(Some(pass))
     }
 
     /// Merges the imported enums the walk referenced into this file's own `@ENUMS` section, so
@@ -429,21 +450,19 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
 
     // ==================== PHASE 2: DATA CONTEXT BUILD ====================
 
+    /// Builds the data context from the data section (see `data_context.rs`).
     fn build_initial_data_context(&mut self) {
-        let data_section = match &self.ast.data {
-            Some(d) => d,
-            None    => return,
-        };
+        let Some((arena, data)) = self.data.parts() else { return };
 
-        let estimated = (data_section.entries.len() * 4).max(MIN_CAPACITY);
-        self.data_context.borrow_mut().reserve(estimated);
-
+        let estimated = (data.entries.len() * 4).max(MIN_CAPACITY);
         let mut context = self.data_context.borrow_mut();
-        let mut total_inserted = 0usize;
+        context.reserve(estimated);
 
-        for entry in &data_section.entries {
-            total_inserted += Self::populate_context_from_entry(entry, &mut context);
-        }
+        let total_inserted: usize = data
+            .entries
+            .iter()
+            .map(|entry| data_context::populate_entry(arena, entry, &mut context))
+            .sum();
 
         drop(context);
 
@@ -464,18 +483,15 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
     }
 
     fn resolve_identifier_aliases_in_context(&mut self) {
-        let entries = match &self.ast.data {
-            Some(d) => d.entries.clone(),
-            None    => return,
-        };
+        let Some((arena, data)) = self.data.parts() else { return };
 
         // Up to 8 passes handles chains like a=b, b=c, c=1 that resolve in order.
         for pass in 0..8usize {
             let mut changed = false;
             let mut ctx = self.data_context.borrow_mut();
 
-            for entry in &entries {
-                changed |= Self::try_resolve_identifier_aliases_in_entry(entry, &mut ctx);
+            for entry in &data.entries {
+                changed |= data_context::resolve_aliases_in_entry(arena, entry, &mut ctx);
             }
 
             drop(ctx);
@@ -493,188 +509,11 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             }
         }
     }
-    fn try_resolve_identifier_aliases_in_entry(
-        entry:   &DataEntry,
-        context: &mut FxHashMap<String, DixValue>,
-    ) -> bool {
-        match entry {
-            DataEntry::SimpleProperty { name, value, .. } => {
-                let path = PathBuilder::build(&[name.as_str()]);
-                if context.contains_key(&path) {
-                    return false; // already resolved
-                }
-                if let Value::Identifier { value: id, .. } = value {
-                    if let Some(dix) = Self::lookup_by_name_or_suffix(id, context) {
-                        context.insert(path, dix);
-                        return true;
-                    }
-                }
-                false
-            }
-
-            DataEntry::TableProperty { path: tp, properties, .. } => {
-                let segments: Vec<&str> = tp.segments.iter().map(|s| s.as_str()).collect();
-                let mut changed = false;
-
-                for prop in properties {
-                    let mut segs = segments.clone();
-                    segs.push(prop.name.as_str());
-                    let full = PathBuilder::build(&segs);
-
-                    if context.contains_key(&full) {
-                        continue; // already resolved
-                    }
-
-                    if let Value::Identifier { value: id, .. } = &prop.value {
-                        if let Some(dix) = Self::lookup_by_name_or_suffix(id, context) {
-                            context.insert(full, dix);
-                            changed = true;
-                        }
-                    }
-                }
-
-                changed
-            }
-
-            DataEntry::GroupArray { path: gp, items, .. } => {
-                let segments: Vec<&str> = gp.segments.iter().map(|s| s.as_str()).collect();
-                let base = PathBuilder::build(&segments);
-                let mut changed = false;
-
-                for (i, item) in items.iter().enumerate() {
-                    let indexed = format!("{}[{}]", base, i);
-                    if context.contains_key(&indexed) {
-                        continue;
-                    }
-                    if let Value::Identifier { value: id, .. } = item {
-                        if let Some(dix) = Self::lookup_by_name_or_suffix(id, context) {
-                            context.insert(indexed, dix);
-                            changed = true;
-                        }
-                    }
-                }
-
-                changed
-            }
-
-            DataEntry::ObjectProperty { .. } => false,
-        }
-    }
-    /// Look up `name` in `context` by exact key first, then by path-suffix
-    /// (e.g. `"port"` matches `"DATA.server.config.port"`).
-    /// Returns a clone of the first match, or `None`.
-    fn lookup_by_name_or_suffix(
-        name:    &str,
-        context: &FxHashMap<String, DixValue>,
-    ) -> Option<DixValue> {
-        // Exact match (flat property at DATA root)
-        if let Some(v) = context.get(name) {
-            return Some(v.clone());
-        }
-        // Suffix match (nested property)
-        let suffix = format!(".{}", name);
-        context
-            .iter()
-            .find(|(k, _)| k.ends_with(&suffix))
-            .map(|(_, v)| v.clone())
-    }
-    fn populate_context_from_entry(
-        entry: &DataEntry,
-        context: &mut FxHashMap<String, DixValue>,
-    ) -> usize {
-        match entry {
-            DataEntry::SimpleProperty { name, value, .. } => {
-                let path = PathBuilder::build(&[name.as_str()]);
-                Self::insert_value_recursive(value, &path, context)
-            }
-
-            DataEntry::TableProperty { path: tp, properties, .. } => {
-                let segments: Vec<&str> = tp.segments.iter().map(|s| s.as_str()).collect();
-                let mut count = 0usize;
-                for prop in properties {
-                    let mut segs = segments.clone();
-                    segs.push(prop.name.as_str());
-                    let full = PathBuilder::build(&segs);
-                    count += Self::insert_value_recursive(&prop.value, &full, context);
-                }
-                count
-            }
-
-            DataEntry::GroupArray { path: gp, items, .. } => {
-                let segments: Vec<&str> = gp.segments.iter().map(|s| s.as_str()).collect();
-                let base = PathBuilder::build(&segments);
-                let mut count = 0usize;
-                for (i, item) in items.iter().enumerate() {
-                    let indexed = format!("{}[{}]", base, i);
-                    count += Self::insert_value_recursive(item, &indexed, context);
-                }
-                count
-            }
-
-            DataEntry::ObjectProperty { name, object, .. } => {
-                let base = PathBuilder::build(&[name.as_str()]);
-                Self::insert_value_recursive(object, &base, context)
-            }
-        }
-    }
-
-    fn insert_value_recursive(
-        value: &Value,
-        path: &str,
-        context: &mut FxHashMap<String, DixValue>,
-    ) -> usize {
-        match value {
-            Value::Object { properties, .. } => {
-                let mut count = 0usize;
-                for prop in properties {
-                    let child = format!("{}.{}", path, prop.key);
-                    count += Self::insert_value_recursive(&prop.value, &child, context);
-                }
-                if let Some(dix) = Self::try_value_to_dix(value) {
-                    context.insert(path.to_string(), dix);
-                    count += 1;
-                }
-                count
-            }
-
-            Value::Array { values, .. } | Value::NestedArray { values, .. } => {
-                let mut count = 0usize;
-                let mut all_ok = true;
-                for (i, item) in values.iter().enumerate() {
-                    let idx = format!("{}[{}]", path, i);
-                    let inserted = Self::insert_value_recursive(item, &idx, context);
-                    if inserted == 0 {
-                        all_ok = false;
-                    }
-                    count += inserted;
-                }
-                if all_ok && !values.is_empty() {
-                    if let Some(dix) = Self::try_value_to_dix(value) {
-                        context.insert(path.to_string(), dix);
-                        count += 1;
-                    }
-                }
-                count
-            }
-
-            _ => {
-                if let Some(dix) = Self::try_value_to_dix(value) {
-                    context.insert(path.to_string(), dix);
-                    1
-                } else {
-                    0
-                }
-            }
-        }
-    }
 
     // ==================== PHASE 3: FUNCTION CALL DISCOVERY ====================
 
-    fn find_all_function_calls(&self) -> Vec<FunctionCallInfo> {
-        let data_section = match &self.ast.data {
-            Some(d) => d,
-            None => return Vec::new(),
-        };
+    fn find_all_function_calls(&mut self) -> Vec<FunctionCallInfo> {
+        let Some((arena, data)) = self.data.parts() else { return Vec::new() };
 
         let debug_mode = if self.debug_config.is_verbose {
             DebugMode::Verbose
@@ -690,7 +529,7 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             debug_mode,
         );
 
-        walker.find_all(data_section)
+        walker.find_all_in(arena, data)
     }
 
 
@@ -1686,117 +1525,6 @@ fn execute_iterative_resolution(
     }
 
     // ==================== VALUE ↔ DIX CONVERSIONS ====================
-// value_resolver.rs — fn try_value_to_dix
-// (Builtins::Core::DixValue, used in Phase 2 data-context build)
-
-fn try_value_to_dix(value: &Value) -> Option<DixValue> {
-    match value {
-        // ── Primitives ────────────────────────────────────────────────────────
-        Value::Integer { value, .. }            => Some(DixValue::from_int(*value)),
-        Value::Long { value, .. }               => Some(DixValue::from_long(*value)),
-        Value::Float { value, .. }              => Some(DixValue::from_float(*value)),
-        Value::Double { value, .. }             => Some(DixValue::from_double(*value)),
-        Value::ScientificNotation { value, .. } => Some(DixValue::from_double(*value)),
-        Value::String { value, .. }             => Some(DixValue::from_string(value.clone())),
-        Value::Boolean { value, .. }            => Some(DixValue::from_bool(*value)),
-        Value::Null { .. }                      => Some(DixValue::null()),
-        Value::HexColor { value, .. }           => Some(DixValue::from_hex(value.clone())),
-
-        // Date/Timestamp: parse string → DateTime<Utc> for Builtins::DixValue.
-        Value::Date { value: d, .. } => {
-            let dt = chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-                .ok()
-                .and_then(|nd| nd.and_hms_opt(0, 0, 0))
-                .map(|ndt| ndt.and_utc())
-                .or_else(|| d.parse::<chrono::DateTime<chrono::Utc>>().ok())
-                .unwrap_or_else(chrono::Utc::now);
-            Some(DixValue::from_date(dt))
-        }
-        Value::Timestamp { value: t, .. } => {
-            let dt = t.parse::<chrono::DateTime<chrono::Utc>>()
-                .unwrap_or_else(|_| chrono::Utc::now());
-            Some(DixValue::from_timestamp(dt))
-        }
-
-        // InterpolatedString: expressions are compile-time; use template text.
-        Value::InterpolatedString { template, .. } => {
-            Some(DixValue::from_string(template.clone()))
-        }
-
-        // EnumValue: Phase 1 should have converted all enums to Integer.
-        // This arm is a safety-net for any that slip through.
-        Value::EnumValue { .. } => Some(DixValue::from_int(0)),
-
-        // ── Collections ───────────────────────────────────────────────────────
-        Value::PrefixedConstructor { prefix, arguments, .. } => {
-            match prefix.to_lowercase().as_str() {
-                "b" => {
-                    let data = arguments
-                        .first()
-                        .and_then(|a| {
-                            if let Value::String { value, .. } = a {
-                                Some(value.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or_default();
-                    DixValue::from_blob(data).ok()
-                }
-                "r" => {
-                    let pattern = arguments
-                        .first()
-                        .and_then(|a| {
-                            if let Value::String { value, .. } = a {
-                                Some(value.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or_else(|| ".*".to_string());
-                    DixValue::from_regex(pattern).ok()
-                }
-                // "t" recurses, so nested tuples like t:(t:(1,2), t:(3,4)) work correctly.
-                "t" => {
-                    let items: Option<Vec<DixValue>> = arguments
-                        .iter()
-                        .take(6)
-                        .map(Self::try_value_to_dix)
-                        .collect();
-                    items.map(DixValue::from_tuple)
-                }
-                _ => None,
-            }
-        }
-
-        Value::Array { values, .. } => {
-            let items: Option<Vec<DixValue>> =
-                values.iter().map(Self::try_value_to_dix).collect();
-            items.map(DixValue::from_array)
-        }
-
-        // NestedArray ([[1,2],[3,4]]) — same treatment as Array.
-        Value::NestedArray { values, .. } => {
-            let items: Option<Vec<DixValue>> =
-                values.iter().map(Self::try_value_to_dix).collect();
-            items.map(DixValue::from_array)
-        }
-
-        Value::Object { properties, .. } => {
-            let mut map = std::collections::HashMap::with_capacity(
-                properties.len().max(MIN_CAPACITY),
-            );
-            for prop in properties {
-                map.insert(prop.key.clone(), Self::try_value_to_dix(&prop.value)?);
-            }
-            Some(DixValue::from_object(map.into_iter().collect()))
-        }
-
-        // Everything else (Identifier, Expression, Lambda, Range, errors) is
-        // not representable as a static data-context value.
-        _ => None,
-    }
-}
 
  // value_resolver.rs — fn convert_dix_value_to_value
 // (Builtins::Core::DixValue → AST Value, used after Phase 4 to write results back)

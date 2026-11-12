@@ -1,4 +1,7 @@
-
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/ValueResolution/mod.rs"
+// ============================================================================
 //! # Value Resolution — compile-time QuickFunction execution
 //!
 //! ## Pipeline phases
@@ -7,7 +10,7 @@
 //! | 1     | `value_resolver`     | Enum pre-resolution (EnumValue → Integer)                 |
 //! | 2     | `value_resolver`     | Initial data context build from literal DATA entries      |
 //! | 3     | `ast_walker`         | Discover all QuickFunction call sites in @DATA            |
-//! | 4     | `value_resolver`     | Iterative execution and AST replacement                   |
+//! | 4     | `value_resolver`, `write_back` | Iterative execution; results written into the arena |
 //! | 5     | `value_resolver`     | Resolve remaining Identifier references                   |
 //!
 //! ## Supporting modules
@@ -24,6 +27,7 @@ pub(crate) mod data_context;
 pub(crate) mod enum_resolution;
 pub mod value_resolver;
 pub mod function_interpreter;
+pub(crate) mod write_back;
 
 pub use supporting_classes::{
     ValueResolutionResult,

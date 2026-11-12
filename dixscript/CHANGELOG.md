@@ -116,6 +116,11 @@ Breaking release.
   `resolve_expr_to_dix` and `resolve_value_to_dix` (about 240 lines).
 - The owned `try_value_to_dix` of `ValueResolver` (private, about 110 lines), replaced by the arena
   version in `data_context.rs`.
+- `ValueResolutionResult::original_ast` (a public field, so a breaking change): the clone of the whole
+  AST that `ValueResolver::resolve` took before it started. Nothing in the workspace read it.
+- The owned write-back of `ValueResolver` (nine private functions, 250 lines: the index of call
+  positions, the path and search helpers and `value_position`), replaced by the arena version in
+  `write_back.rs`.
 
 ### Performance
 
@@ -146,6 +151,17 @@ Breaking release.
   owned tree. The context, the calls found and every log line are unchanged. The alias pass no longer
   clones the whole data section, and the whole-pipeline instruction count is a further 0.2 to 0.7
   percent lower on the same five files.
+- **The write-back of results runs on the arena.** The fourth phase of value resolution writes each
+  call's result into the data section in the arena (`ValueResolution/write_back.rs`): it allocates
+  the result and a copy of each array, object and constructor on the way to it, and shares the rest.
+  With a document attached the results go to the document's data, which holds them afterwards; the
+  owned data section is replaced by an export of it only when a result was written, because
+  phase 5 and the result still read the owned tree. Results, errors, the history of calls and every
+  log line are unchanged, quirks included (a node that shares a position with a call takes its
+  result, a call whose position no node has is not written). The whole-pipeline instruction count is
+  0.5 percent lower on one of five files, level on one and 0.6 to 1.3 percent higher on three: the
+  export after phase 4 costs more than the clone of the AST that was removed, until the phases
+  after it read the arena.
 - **Language version 2.0.0.** `@CONFIG` `version -> "2.0.0"` is now a recognized
   language version. Before, the version manager accepted the string but treated the
   file as 1.0.0. 1.0.0 files still load. The two versions differ only in the DLM

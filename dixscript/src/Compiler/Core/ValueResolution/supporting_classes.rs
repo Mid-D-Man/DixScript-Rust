@@ -1,4 +1,7 @@
-
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/ValueResolution/supporting_classes.rs"
+// ============================================================================
 //! Shared types for the value resolution pipeline.
 
 use std::fmt;
@@ -12,8 +15,6 @@ use crate::Compiler::AST::{Expression, QuickFunction};
 
 pub struct ValueResolutionResult {
     pub is_success: bool,
-    /// Original AST before resolution was attempted.
-    pub original_ast: Option<crate::Compiler::AST::DixScript>,
     /// AST after successful resolution (`None` on failure).
     pub resolved_ast: Option<crate::Compiler::AST::DixScript>,
     pub function_calls_resolved: usize,
@@ -29,7 +30,6 @@ impl ValueResolutionResult {
     pub fn new() -> Self {
         ValueResolutionResult {
             is_success: false,
-            original_ast: None,
             resolved_ast: None,
             function_calls_resolved: 0,
             errors: Vec::new(),

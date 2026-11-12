@@ -35,6 +35,7 @@ use super::enum_resolution::{resolve_data_enums, EnumPass};
 use super::execution_context::ExecutionContext;
 use super::function_interpreter::{FunctionInterpreter, InterpreterError};
 use super::supporting_classes::{FunctionCallInfo, ResolutionRecord, ValueResolutionResult};
+use super::write_back;
 
 const MAX_RESOLUTION_ITERATIONS: usize = 10_000;
 pub(super) const MIN_CAPACITY: usize = 8;
@@ -245,13 +246,13 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             data: DataSource::None,
         }
     }
-    /// Gives phases 1 to 3 (enum pre-resolution, the data context and the call finder) the
-    /// document the data section was parsed into.
+    /// Gives phases 1 to 4 (enum pre-resolution, the data context, the call finder and the
+    /// write-back of results) the document the data section was parsed into.
     ///
     /// They then read the document's `@DATA` from its arena instead of from a scratch copy of the
-    /// owned data section, phase 1 rewrites it there, and whether a data section exists is decided
-    /// by the document. The owned tree passed to the constructor is still the one the later
-    /// phases read and the result is built from.
+    /// owned data section, phases 1 and 4 rewrite it there, and whether a data section exists is
+    /// decided by the document. The owned tree passed to the constructor is still the one phase 5
+    /// reads and the result is built from.
     pub fn with_document(mut self, document: &'a mut Document) -> Self {
         self.data = DataSource::Document(document);
         self
@@ -264,12 +265,10 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             self.error_manager.log_info("[Phase 4.1] Starting value resolution");
         }
 
-        let original_ast = self.ast.clone();
-
         self.attach_scratch_data();
 
         if let Err(e) = self.resolve_all_enum_values() {
-            return self.create_failed_result(vec![e.to_string()], original_ast);
+            return self.create_failed_result(vec![e.to_string()]);
         }
 
         self.build_initial_data_context();
@@ -299,7 +298,6 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             let duration = self.start_time.elapsed();
             return ValueResolutionResult {
                 is_success: true,
-                original_ast: Some(original_ast),
                 resolved_ast: Some(self.ast),
                 function_calls_resolved: 0,
                 errors: Vec::new(),
@@ -332,7 +330,6 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
 
         ValueResolutionResult {
             is_success: errors.is_empty(),
-            original_ast: Some(original_ast),
             resolved_ast: Some(self.ast),
             function_calls_resolved: success_count,
             errors,
@@ -535,6 +532,12 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
 
 
     // ==================== PHASE 4: ITERATIVE RESOLUTION ====================
+/// Runs every call whose arguments are known, repeatedly, and writes each result into the data
+/// section at the call's position (see `write_back`). Returns the number of calls resolved and
+/// the errors of the ones that failed.
+///
+/// If any result was written, the owned data section is replaced by an export of the arena's,
+/// because phase 5 and the result still read the owned tree.
 fn execute_iterative_resolution(
     &mut self,
     function_calls: Vec<FunctionCallInfo>,
@@ -544,7 +547,11 @@ fn execute_iterative_resolution(
     // Where each call sits in the data tree, found once. Replacing a resolved call then costs
     // the depth of its node instead of a search of the whole tree.
     let target_positions: HashSet<Position> = function_calls.iter().map(|c| c.position).collect();
-    let replace_index = self.index_call_targets(&target_positions);
+    let replace_index = match self.data.parts() {
+        Some((arena, data)) => write_back::index_call_targets(arena, data, &target_positions),
+        None => HashMap::new(),
+    };
+    let mut data_changed = false;
 
     let dynamic_limit = (total * 3).max(MIN_CAPACITY * 4);
     let max_iterations = dynamic_limit.min(MAX_RESOLUTION_ITERATIONS);
@@ -610,8 +617,10 @@ fn execute_iterative_resolution(
                         .map(|a| format!("{:?}", a))
                         .collect();
 
-                    let new_value = Self::convert_dix_value_to_value(&dix_value, pos);
-                    self.replace_value_at(&replace_index, pos, new_value);
+                    if let Some((arena, data)) = self.data.parts() {
+                        data_changed |=
+                            write_back::replace_value_at(arena, data, &replace_index, pos, &dix_value);
+                    }
                     self.data_context
                         .borrow_mut()
                         .insert(location.clone(), dix_value.clone());
@@ -698,6 +707,13 @@ fn execute_iterative_resolution(
             "[Phase 4] done — {}/{} resolved, {} iterations used (limit: {})",
             resolved_count, total, iteration, max_iterations
         ));
+    }
+
+    // Phase 5 still reads the owned tree, so it gets the results the calls were replaced by.
+    if data_changed {
+        if let Some((arena, data)) = self.data.parts() {
+            self.ast.data = Some(data.export(arena));
+        }
     }
 
     (resolved_count, errors)
@@ -938,256 +954,6 @@ fn execute_iterative_resolution(
                 Ok(())
             }
         }
-    }
-
-    // ==================== AST REPLACEMENT ====================
-
-    /// Path to the first node (depth first, the order the search below uses) at each target
-    /// position: the entry index, then at every level the index of the child to step into
-    /// (property, item, array element or constructor argument).
-    fn index_call_targets(&self, targets: &HashSet<Position>) -> HashMap<Position, Vec<u32>> {
-        let mut found = HashMap::with_capacity(targets.len());
-        let Some(data) = self.ast.data.as_ref() else {
-            return found;
-        };
-        let mut path: Vec<u32> = Vec::with_capacity(16);
-        for (i, entry) in data.entries.iter().enumerate() {
-            if found.len() == targets.len() {
-                break;
-            }
-            path.push(i as u32);
-            Self::index_entry(entry, targets, &mut path, &mut found);
-            path.pop();
-        }
-        found
-    }
-
-    fn index_entry(
-        entry: &DataEntry,
-        targets: &HashSet<Position>,
-        path: &mut Vec<u32>,
-        found: &mut HashMap<Position, Vec<u32>>,
-    ) {
-        match entry {
-            DataEntry::SimpleProperty { value, .. } => Self::index_value(value, targets, path, found),
-            DataEntry::TableProperty { properties, .. } => {
-                for (i, prop) in properties.iter().enumerate() {
-                    path.push(i as u32);
-                    Self::index_value(&prop.value, targets, path, found);
-                    path.pop();
-                }
-            }
-            DataEntry::GroupArray { items, .. } => {
-                for (i, item) in items.iter().enumerate() {
-                    path.push(i as u32);
-                    Self::index_value(item, targets, path, found);
-                    path.pop();
-                }
-            }
-            DataEntry::ObjectProperty { object, .. } => Self::index_value(object, targets, path, found),
-        }
-    }
-
-    fn index_value(
-        value: &Value,
-        targets: &HashSet<Position>,
-        path: &mut Vec<u32>,
-        found: &mut HashMap<Position, Vec<u32>>,
-    ) {
-        if let Some(pos) = Self::value_position(value) {
-            if targets.contains(&pos) && !found.contains_key(&pos) {
-                found.insert(pos, path.clone());
-            }
-        }
-        match value {
-            Value::Array { values, .. } | Value::NestedArray { values, .. } => {
-                for (i, item) in values.iter().enumerate() {
-                    path.push(i as u32);
-                    Self::index_value(item, targets, path, found);
-                    path.pop();
-                }
-            }
-            Value::Object { properties, .. } => {
-                for (i, prop) in properties.iter().enumerate() {
-                    path.push(i as u32);
-                    Self::index_value(&prop.value, targets, path, found);
-                    path.pop();
-                }
-            }
-            Value::PrefixedConstructor { arguments, .. } => {
-                for (i, arg) in arguments.iter().enumerate() {
-                    path.push(i as u32);
-                    Self::index_value(arg, targets, path, found);
-                    path.pop();
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// The node a path from `index_call_targets` points at, or `None` if the tree no longer has
-    /// that shape.
-    fn slot_at_path<'s>(entries: &'s mut [DataEntry], path: &[u32]) -> Option<&'s mut Value> {
-        let (&first, rest) = path.split_first()?;
-        let entry = entries.get_mut(first as usize)?;
-        let (mut value, rest): (&mut Value, &[u32]) = match entry {
-            DataEntry::SimpleProperty { value, .. } => (value, rest),
-            DataEntry::ObjectProperty { object, .. } => (object, rest),
-            DataEntry::TableProperty { properties, .. } => {
-                let (&i, rest) = rest.split_first()?;
-                (&mut properties.get_mut(i as usize)?.value, rest)
-            }
-            DataEntry::GroupArray { items, .. } => {
-                let (&i, rest) = rest.split_first()?;
-                (items.get_mut(i as usize)?, rest)
-            }
-        };
-        for &i in rest {
-            value = match value {
-                Value::Array { values, .. } | Value::NestedArray { values, .. } => {
-                    values.get_mut(i as usize)?
-                }
-                Value::Object { properties, .. } => &mut properties.get_mut(i as usize)?.value,
-                Value::PrefixedConstructor { arguments, .. } => arguments.get_mut(i as usize)?,
-                _ => return None,
-            };
-        }
-        Some(value)
-    }
-
-    /// Replace the node at `target`. Uses the indexed path and checks that the node there still
-    /// has the target position. If an earlier replacement changed the tree under the index, it
-    /// falls back to the search, so the result is the same as searching every time.
-    fn replace_value_at(
-        &mut self,
-        index: &HashMap<Position, Vec<u32>>,
-        target: Position,
-        new_value: Value,
-    ) {
-        let Some(path) = index.get(&target) else {
-            // Not in the tree when the index was built, so a search would not find it either.
-            return;
-        };
-        if let Some(data) = self.ast.data.as_mut() {
-            if let Some(slot) = Self::slot_at_path(&mut data.entries, path) {
-                if Self::value_position(slot) == Some(target) {
-                    *slot = new_value;
-                    return;
-                }
-            }
-        }
-        self.replace_value_in_ast_by_location("", target, new_value);
-    }
-
-    fn replace_value_in_ast_by_location(
-        &mut self,
-        _location: &str,
-        target_position: Position,
-        new_value: Value,
-    ) {
-        let data = match self.ast.data.as_mut() {
-            Some(d) => d,
-            None => return,
-        };
-        for entry in &mut data.entries {
-            if Self::replace_in_entry(entry, target_position, &new_value) {
-                return;
-            }
-        }
-    }
-
-    fn replace_in_entry(
-        entry: &mut DataEntry,
-        target: Position,
-        new_value: &Value,
-    ) -> bool {
-        match entry {
-            DataEntry::SimpleProperty { value, .. } => {
-                Self::replace_in_value(value, target, new_value)
-            }
-            DataEntry::TableProperty { properties, .. } => {
-                for prop in properties.iter_mut() {
-                    if Self::replace_in_value(&mut prop.value, target, new_value) {
-                        return true;
-                    }
-                }
-                false
-            }
-            DataEntry::GroupArray { items, .. } => {
-                for item in items.iter_mut() {
-                    if Self::replace_in_value(item, target, new_value) {
-                        return true;
-                    }
-                }
-                false
-            }
-            DataEntry::ObjectProperty { object, .. } => {
-                Self::replace_in_value(object, target, new_value)
-            }
-        }
-    }
-
-    fn replace_in_value(value: &mut Value, target: Position, new_value: &Value) -> bool {
-        if Self::value_position(value) == Some(target) {
-            *value = new_value.clone();
-            return true;
-        }
-        match value {
-            Value::Array { values, .. } | Value::NestedArray { values, .. } => {
-                for item in values.iter_mut() {
-                    if Self::replace_in_value(item, target, new_value) {
-                        return true;
-                    }
-                }
-            }
-            Value::Object { properties, .. } => {
-                for prop in properties.iter_mut() {
-                    if Self::replace_in_value(&mut prop.value, target, new_value) {
-                        return true;
-                    }
-                }
-            }
-            Value::PrefixedConstructor { arguments, .. } => {
-                for arg in arguments.iter_mut() {
-                    if Self::replace_in_value(arg, target, new_value) {
-                        return true;
-                    }
-                }
-            }
-            _ => {}
-        }
-        false
-    }
-
-    #[inline]
-    fn value_position(value: &Value) -> Option<Position> {
-        Some(match value {
-            Value::Integer { position, .. }
-            | Value::Long { position, .. }
-            | Value::Float { position, .. }
-            | Value::Double { position, .. }
-            | Value::ScientificNotation { position, .. }
-            | Value::String { position, .. }
-            | Value::Boolean { position, .. }
-            | Value::Null { position, .. }
-            | Value::Array { position, .. }
-            | Value::NestedArray { position, .. }
-            | Value::Object { position, .. }
-            | Value::Expression { position, .. }
-            | Value::Identifier { position, .. }
-            | Value::EnumValue { position, .. }
-            | Value::PrefixedConstructor { position, .. }
-            | Value::HexColor { position, .. }
-            | Value::Date { position, .. }
-            | Value::Timestamp { position, .. }
-            | Value::QuickFuncCall { position, .. }
-            | Value::InterpolatedString { position, .. }
-            | Value::Range { position, .. }
-            | Value::Lambda { position, .. }
-            | Value::ParseError { position, .. }
-            | Value::Error { position, .. }
-            | Value::Unknown { position, .. } => *position,
-        })
     }
 
     // ==================== PHASE 5: IDENTIFIER RESOLUTION ====================
@@ -1648,14 +1414,9 @@ pub fn convert_dix_value_to_value(dix: &DixValue, position: Position) -> Value {
         }
     }
 
-    fn create_failed_result(
-        &self,
-        errors: Vec<String>,
-        original_ast: DixScript,
-    ) -> ValueResolutionResult {
+    fn create_failed_result(&self, errors: Vec<String>) -> ValueResolutionResult {
         ValueResolutionResult {
             is_success: false,
-            original_ast: Some(original_ast),
             resolved_ast: Some(self.ast.clone()),
             function_calls_resolved: 0,
             errors,

@@ -1306,35 +1306,48 @@ the allocator for, and fails above 20 MB.
 **What it does:** Resolves values at compile time in five phases: enum pre-resolution, the
 initial data context, discovery of quickfunction calls, iterative execution of those calls
 with the result written back into the AST (phase 4), and the remaining identifier
-references. Phases 1 to 3 are thin layers over `enum_resolution.rs`, `data_context.rs` and
-`ast_walker.rs` and read the arena; phases 4 and 5 and the interpreter still read and rewrite
-the owned tree.
+references. Phases 1 to 4 are thin layers over `enum_resolution.rs`, `data_context.rs`,
+`ast_walker.rs` and `write_back.rs` and read and rewrite the arena; phase 5 and the interpreter
+still read and rewrite the owned tree.
 
 **Decisions:**
 - Phase 4 finds where every call sits in the data tree once, before its loop, as a path of
   child indices per call position. Writing a result back then costs the depth of the node.
   The path is checked against the node's position before it is used, and if an earlier
-  write-back changed the tree under the index the old search runs instead, so the result is
-  the same as searching every time. A position that was not in the tree when the index was
-  built is left alone, which is what the old search would also have done.
+  write-back changed the tree under the index a search runs instead, so the result is the same
+  as searching every time. A position that was not in the tree when the index was built is left
+  alone, which is what the search would also have done. All of it is `write_back.rs`.
 - Only the positions of the calls being resolved are indexed, so the index costs one small
   vector per call and not one per node.
-- **Phases 1 to 3 run on the arena and read one data source.** `ValueResolver::with_document`
+- **Phases 1 to 4 run on the arena and read one data source.** `ValueResolver::with_document`
   gives them the `Document` the file was parsed into, and they then read the document's `@DATA`
-  in the document's arena (phase 1 rewrites it there). Without a document the resolver copies the
-  owned data into a scratch arena once, when it starts, and the three phases share that copy; this
-  is what the language server and `ValueResolver::new` callers get. The source is a private
-  `DataSource`, and whether a data section exists is decided by the tree that is read, so a
-  document without `@DATA` leaves phases 2 and 3 with nothing to find even when the owned tree has
+  in the document's arena (phases 1 and 4 rewrite it there). Without a document the resolver
+  copies the owned data into a scratch arena once, when it starts, and the four phases share that
+  copy; this is what the language server and `ValueResolver::new` callers get. The source is a
+  private `DataSource`, and whether a data section exists is decided by the tree that is read, so
+  a document without `@DATA` leaves phases 2 to 4 with nothing to find even when the owned tree has
   data.
-- **The owned data is refreshed only when it has to be.** After the walk the owned section the
-  later phases read is replaced by an export of the resolved section when the walk changed
-  something, and also when the owned tree had no data of its own. A file with no enum
-  expression in its data, which is most files, is neither rebuilt nor exported.
-- **The document is updated too.** When the walk changed something the document's `@DATA`
-  holds the resolved section afterwards, so a later phase that moves to the arena finds it
-  there. `@ENUMS` is not updated in the document: the merge of imported enums below goes to the
-  owned tree, which is the one the result is built from.
+- **The owned data is refreshed only when it has to be.** After phase 1 the owned section that
+  phase 5 and the result read is replaced by an export of the resolved section when the walk
+  changed something, and also when the owned tree had no data of its own. After phase 4 it is
+  replaced again when at least one result was written, by an export of the whole arena section
+  (which holds phase 1's result too). A file with no enum expression and no call in its data is
+  neither rebuilt nor exported, and a run in which no call found its node leaves the owned data
+  alone.
+- **The document is updated too.** When phase 1 or phase 4 changed something the document's
+  `@DATA` holds the section as of that phase, so after phase 4 it holds every result and a later
+  phase that moves to the arena finds it there. `@ENUMS` is not updated in the document: the
+  merge of imported enums below goes to the owned tree, which is the one the result is built
+  from.
+- **With a document attached the results go to the document's data.** Phase 4 used to write into
+  the owned tree by position even then. A document and an owned tree that disagree (the loader
+  never makes that) now give the results to the document's data, and the owned data is replaced
+  by its export only when something was written; when nothing was, the owned data is untouched.
+  Two tests pin that.
+- **`original_ast` is gone.** `resolve()` cloned the whole AST before it started, for the
+  `original_ast` field of `ValueResolutionResult`. Nothing in the workspace read it (the
+  language server, the sibling crates, the tests and the benchmark were searched), so the clone
+  and the public field are removed.
 - **Imported enums are merged into the owned `@ENUMS` only through the dotted value form.** A
   data value written `Types.Priority.HIGH` is checked and recorded, and the whole enum is added
   to `@ENUMS` under its qualified name (the section is created when the file has none). An enum
@@ -1347,9 +1360,15 @@ the owned tree.
   only caller) is replaced by the arena version, the alias pass no longer clones the whole entries
   vector to iterate it, and the conversion of an object literal no longer rebuilds its `HashMap` a
   second time on the way into `DixValue::from_object`.
+- **More removed with phase 4.** The owned write-back (250 lines, nine private functions:
+  `index_call_targets`, `index_entry`, `index_value`, `slot_at_path`, `replace_value_at`,
+  `replace_value_in_ast_by_location`, `replace_in_entry`, `replace_in_value` and
+  `value_position`) is replaced by `write_back.rs`. `convert_dix_value_to_value` stays: the
+  interpreter's argument wrapping and phase 5 still call it.
 
 **Tests:** `cargo test -p dixscript --test value_resolver_enums_document`,
 `cargo test -p dixscript --test value_resolver_context_document`,
+`cargo test -p dixscript --test value_resolver_writeback_document`,
 `cargo test -p dixscript --test value_resolution_scaling`, and the whole suite.
 
 ### `Compiler/Core/ValueResolution/enum_resolution.rs`
@@ -1511,12 +1530,120 @@ they replaced, and checks the properties of the new ones.
 - **Which tree is read** is tested with an owned tree and a document that disagree, with a document
   that has no data, and with an owned tree that has none. The owned `find_all` is compared with the
   arena `find_all_in` for every case, and phases 2 and 3 are shown to allocate nothing in the
-  document's arena.
+  document's arena (the nodes a run adds are the write-back of phase 4, counted exactly).
 - Of the 16 tests that are not recording checks, 14 were also run on the original and pass there;
   the two that need the arena finder or a document to be read in phases 2 and 3 cannot.
 
 **Tests:** `cargo test -p dixscript --test value_resolver_context_document`. 23 tests and three
 ignored helpers (`print_recording`, `print_contexts`, `print_logs`), all passing on Rust 1.75.
+
+### `Compiler/Core/ValueResolution/supporting_classes.rs`
+
+**What it does:** The data types the resolver, the call finder and the interpreter share:
+`ValueResolutionResult` (verdict, the resolved tree, the number of calls resolved, errors, log
+statements, duration and the history of every attempt), `FunctionCallInfo` (one found call: its
+name, optional namespace, arguments, location, scope, entry path and position), `ResolutionRecord` (one entry of the history),
+`ScopeTracker` (the path and variables of the entry being walked), `FunctionRegistry` and the two
+error types `ExecutionError` and `FunctionExecutionError`.
+
+**Decisions:**
+- **`ValueResolutionResult` has no `original_ast`.** The field held a clone of the whole AST taken
+  before resolution; nothing in the workspace read it, so it and the clone are gone (a public field,
+  so listed under Removed for 2.0.0).
+- `FunctionCallInfo.arguments` stays a list of owned `Expression`s: the interpreter still takes
+  them, and only the arguments of a call that was found are copied out of the arena.
+- `ResolutionRecord.arguments` (a `Debug` string per argument, built for every call even with
+  debug off) is unchanged public output that nothing in the workspace reads; whether to drop it is
+  for the interpreter drop.
+
+**Tests:** exercised through `cargo test -p dixscript --test value_resolver_writeback_document`
+and the other resolver tests.
+
+### `Compiler/Core/ValueResolution/mod.rs`
+
+**What it does:** Declares the value resolution modules and re-exports their public types. The
+module table in its documentation lists the five phases and which module runs each:
+`enum_resolution`, `data_context` and `write_back` are `pub(crate)` and reached through
+`ValueResolver`.
+
+**Decisions:**
+- `write_back` is `pub(crate)`: its functions take the arena and the data section of a
+  `Document`, which are public types, but the write-back is not an entry point of its own.
+  Its unit tests live in the file for that reason.
+
+**Tests:** the whole suite.
+
+### `Compiler/Core/ValueResolution/write_back.rs`
+
+**What it does:** Writes the result of a resolved call into the data section in the arena
+(phase 4). `index_call_targets` finds, once, the path to the first node at each call position;
+`replace_value_at` follows that path, allocates the result and a copy of every array, nested array,
+object and constructor on the way down, and points the entry at the copy; `alloc_dix_value`
+turns a runtime value into the AST node it is written as. Everything off the path is shared with
+the old tree, which the arena's append-only rule needs and which keeps a write-back to the cost of
+the depth of the node. Table properties and the entry itself are replaced in place, as they are
+not shared nodes.
+
+**Decisions:**
+- **It does what the owned write-back did, quirks included,** because the result of every file
+  has to be the same. Positions are not unique: a node can share its position with a call inside
+  it or with a node in another entry. The first node in depth first order, parent before children,
+  takes the result; a replacement keeps the position it replaced, so a second call with the same
+  position writes over the first one's result; a call whose position no value has is not written.
+  `w_dup_array_call`, `w_dup_calls`, `w_dup_earlier` and `w_expr` in the test pin each of these.
+- **The path is checked, not trusted.** After an earlier replacement the path can lead nowhere
+  (the container was replaced by a scalar) or to a node with another position (it was replaced by
+  an array whose elements carry the call's position). Both cases search the tree for the first
+  node with the position, which is also what the owned code did, and a search that finds nothing
+  writes nothing. The stale and the fallback cases are `w_dup_stale_slot` and
+  `w_dup_fallback_everywhere` in the test.
+- **A rewritten container keeps its kind.** A nested array keeps its level, an object its
+  properties' keys, a constructor its prefix, and each copy its own position.
+- **Nothing is allocated for a write that finds no node,** and the function returns whether the
+  tree changed, which is what decides whether the owned data is exported afterwards.
+- **A runtime value becomes a node at the call's position, all of it.** Scalars become their
+  literal, a blob and a regex become `b:(...)` and `r:(...)`, a tuple becomes a `t:(...)`
+  constructor, an array stays an array, an object becomes an object literal with its properties in
+  the order the runtime map yields them, and a type with no literal form becomes a string.
+  `ValueResolver::convert_dix_value_to_value` (kept, see above) is the oracle the unit test checks
+  it against for every kind of value.
+- **Four unit tests live in the file** because the module is `pub(crate)`: the path to a node in
+  every kind of place (table, group, object property entry, array, nested array, object,
+  constructor) with the index, the slot and the search agreeing; paths and positions that lead
+  nowhere; a stale path; and the conversion against the owned one.
+
+**Tests:** `cargo test -p dixscript --lib write_back` and
+`cargo test -p dixscript --test value_resolver_writeback_document`.
+
+### `tests/value_resolver_writeback_document.rs`
+
+**What it does:** Pins phase 4 over the arena against the owned write-back it replaced, and checks
+the new way a result is written.
+
+**Decisions:**
+- **Two tables produced by running the original code** (the original files put back, the test
+  built and run twice with the ignored `print_recording` and `print_shapes`, the two runs identical),
+  then required of the new code, through the document and through the owned entry point.
+  `RECORDING` fingerprints the whole outcome (verdict, errors, resolved tree, history of calls) of
+  ten crafted sources and 25 hand-built data sections; `SHAPES` lists the resolved data of every
+  hand-built section value by value, so a failure names the value.
+- **The hand-built sections reach what the grammar cannot:** a result in every kind of place and
+  at depth, nested arrays and their levels, all 16 kinds of result a function can return (null
+  included), nodes that share a position with a call, a path made stale by an array result, the
+  fallback search in seven kinds of place, a call inside an expression, a failed call and a cycle,
+  and phase 5's identifiers in every position (phase 5 is pinned here too, for its own drop).
+- **The new behaviour is tested through the arena:** a replacement copies the path and shares
+  everything else (the ids of untouched values are unchanged, and exactly five nodes are added for
+  three results and the two arrays on the way to one of them), a call with no node allocates
+  nothing, and the document's data holds the result afterwards.
+- **Two tests give the resolver an owned tree and a document that disagree,** to show that a run
+  that writes nothing leaves the owned data alone. They also pass on the original.
+- Of the seven tests that run, five also pass on the original code (the recording, the shapes,
+  the two owned-tree tests and the one that counts allocations for a call with no node); the two
+  that read the document's arena for the new write-back fail there, as they should.
+
+**Tests:** `cargo test -p dixscript --test value_resolver_writeback_document`. Seven tests and two
+ignored helpers, all passing on Rust 1.75.
 
 ### `tests/value_resolution_scaling.rs`
 
@@ -2051,8 +2178,8 @@ requires the larger to take less than 7 times as long.
 - **Found while doing it, not changed.** An enum used only inside an expression is checked and
   resolved but not recorded, so it is not merged into `@ENUMS`; only the dotted value form is. That
   is how it was and it is pinned. The merge into `@ENUMS` and the order of a merged enum's fields
-  between equal values follow hash order. `ValueResolutionResult::original_ast` is still a clone of
-  the whole tree that nothing reads. The `@DATA` grammar has no arithmetic, conditional or
+  between equal values follow hash order. `ValueResolutionResult::original_ast` was still a clone of
+  the whole tree that nothing read (removed with phase 4). The `@DATA` grammar has no arithmetic, conditional or
   interpolation, so most expression arms of phase 1 can only be reached with a hand-built tree.
 - **Not done in this drop.** Phases 2 to 5 of the resolver (the call finder, the interpreter, the
   remaining identifiers and the result) still read and rewrite the owned tree, and the document's
@@ -2107,3 +2234,68 @@ requires the larger to take less than 7 times as long.
   still takes owned arguments and owned function bodies. The runtime, the DLM auditor, the binary
   packer, the language server (not type-checked here) and the sibling crates remain. CI on stable
   Rust has not been run.
+
+### Fixes and Problems: value resolution phase 4 (write-back of results) writes into the arena
+
+- **What changed.** The new `write_back.rs` (the index of call positions, the path and search
+  helpers, the rewrite that allocates along a path, and the conversion of a runtime value to an AST
+  node), `value_resolver.rs` (phase 4 calls it; the owned write-back is gone), `supporting_classes.rs`
+  (`original_ast` removed from `ValueResolutionResult`) and `ValueResolution/mod.rs`. With a document
+  attached the results go to the document's data, and the owned data section is replaced by an
+  export of it only when a result was written. Removed: the owned write-back (250 lines, nine private
+  functions, `value_resolver.rs` went from 1,667 lines to 1,428) and the clone of the whole AST that
+  `resolve()` took for `original_ast`. `supporting_classes.rs` and `mod.rs` had no NOTICE header or
+  section and now have both. Library warnings stay at 119 and rustdoc at 32, none from these files.
+- **How it was checked against the original.** The throwaway harness ran 137 inputs (all 84 corpus
+  files, the crafted sources and hand-built sections of the earlier drops, ten new crafted sources
+  and 25 new hand-built sections) through the four ways the code can be reached (document attached or
+  not, each with debug logging off and verbose), 548 outputs, before and after, each twice. A hook that
+  prints a hash of the owned data tree after phase 4 and after phase 5 was applied to both builds.
+  After the text of the output is normalized (colour codes, clock times, durations, and the order of
+  the properties of objects that function results carry, which is a hash map) 520 of the 548 outputs
+  are identical to the unchanged code. The other 28 are seven files (`FullFunctionTest`,
+  `datetime_static_test`, `enum_static_test`, `guid_static_test`, `object_builtins_test`,
+  `random_static_test`, `FullDataTestWithFunc`) that differ from run to run in the unchanged code too.
+  For them the tree shape and node kinds were compared with the scalar values masked: 12 outputs are
+  equal in all four runs, 8 are equal in shape, 6 of the 8 verbose logs are equal in the sequence of
+  messages, and the two verbose logs of `random_static_test` cannot be compared because a random
+  value picks the branch that runs. All 456 snapshot labels whose hash is stable between two runs of
+  the unchanged code are identical after the change, and the full text of the 64 whose hash is not
+  (16 inputs, objects sorted) is identical too.
+- **51 bugs were injected afterwards and all 51 are noticed.** The first round caught 37. Of the 14
+  that survived, three (a wrong path in the index or in the walk to a slot) are invisible in the
+  result because a mismatched path makes the search run, and only the unit tests of the path see
+  them; one accepted a slot without checking its position, which needed a stale path that still
+  leads to a node (an array result); seven made the fallback search skip a kind of place, which needed
+  a case that falls back into each kind; two exported the owned data when nothing was written, which
+  is visible only when the owned tree and the document disagree; and one converted a null result
+  wrongly, which needed a function that returns null. Those inputs, two tests with disagreeing trees
+  and four unit tests were added, the recording and shapes were made again from the original, and a
+  second round noticed all 51. There are no equivalent mutants left.
+- **Measured, not assumed, and not a gain.** Callgrind, debug build, one run of the harness (prepare
+  and resolve) per file, the original against this drop, instructions: `basic/EnumUsage.mdix` 35.12M
+  against 34.95M (0.5 percent fewer), `BigBoy.mdix` 76.49M against 77.47M (1.3 percent more),
+  `Unholy.mdix` 424.21M against 424.21M (level), `basic/a_test.mdix` 10.42M against 10.49M (0.6
+  more), `elements_database.mdix` 2,047M against 2,059M (0.6 more), and the same file through the
+  owned entry point 2,072M against 2,084M (0.6 more). The numbers are not comparable with the earlier
+  drops' because the harness is different. On the largest file `export_data` rose from 44.3M to 72.3M
+  inclusive, which is the export after phase 4, while the clones of the owned tree that the removed
+  `original_ast` caused saved less (`Value::clone` 74.3M to 64.7M). The export exists only because
+  phase 5 and the result still read the owned tree; it does not go away until they and the stages
+  after them read the arena. Release builds, wall-clock time and peak memory were not measured.
+- **A change to an existing test.** `phases_two_and_three_allocate_nothing_in_the_document` compared
+  the document's arena before and after a whole run. The run now adds the write-back's nodes, so it
+  requires exactly those (the three results and the copy of the array that holds the second) and
+  still shows that phases 2 and 3 add none.
+- **Found while doing it, not changed.** A position that more than one node has makes a result land
+  on the first of them, and a second call with the same position writes over the first one's result;
+  both are how it always behaved and are pinned. A document and an owned tree that disagree now give
+  their results to the document's data, where before they went to the owned tree by position; the
+  loader never produces that, and the two tests that cover the quiet cases also pass on the original.
+  `ResolutionRecord.arguments` still builds a `Debug` string per argument for every call and nothing
+  reads it.
+- **Not done in this drop.** Phase 5 (the remaining identifiers) and the interpreter still read and
+  rewrite the owned tree, so the owned export after phase 4 stays for now. The runtime, the DLM
+  auditor, the binary packer, the language server (not type-checked here, but it reads only
+  `resolved_ast` and calls `ValueResolver::new` with the same signature) and the sibling crates remain.
+  CI on stable Rust has not been run.

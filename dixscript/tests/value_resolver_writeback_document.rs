@@ -495,6 +495,34 @@ fn hand3_cases() -> Vec<(&'static str, Vec<DataEntry>)> {
         simple("z", ident("DATA.y")),
         simple("y", ident("DATA.x")),
     ]));
+    // Each identifier below resolves to `DATA.x`, and the one after it names the path the first
+    // sits at, which only exists in the context once the pass has put it there. So each reader
+    // resolves in the next pass if, and only if, the path was built exactly.
+    v.push(("p_paths", vec![
+        simple("x", call("f", 1)),
+        simple("arr", arr(vec![ident("DATA.x")])),
+        simple("r_arr", ident("DATA.arr[0]")),
+        objprop("o", obj(vec![("k", ident("DATA.x")), ("deep", obj(vec![("a", arr(vec![ident("DATA.x")]))]))])),
+        simple("r_o", ident("DATA.o.k")),
+        simple("r_deep", ident("DATA.o.deep.a[0]")),
+        simple("c", ctor("t", vec![ident("DATA.x")])),
+        simple("r_c", ident("DATA.c.__arg0")),
+        simple("ca", arr(vec![ctor("t", vec![ident("DATA.x")])])),
+        simple("r_ca", ident("DATA.ca[0].__arg0")),
+        simple("n", nest(vec![ident("DATA.x")], 1)),
+        simple("r_n", ident("DATA.n[0]")),
+        tbl(&["t"], vec![("k", ident("DATA.x"))]),
+        simple("r_t", ident("DATA.t.k")),
+        grp(&["rows"], vec![ident("DATA.x")]),
+        simple("r_rows", ident("DATA.rows[0]")),
+        tbl(&["a", "b"], vec![("k", ident("DATA.x"))]),
+        simple("r_ab", ident("DATA.a.b.k")),
+        grp(&["g", "h"], vec![ident("DATA.x")]),
+        simple("r_gh", ident("DATA.g.h[0]")),
+        tbl(&["t2"], vec![("a", ident("DATA.x")), ("b", ident("DATA.x"))]),
+        simple("r_t2a", ident("DATA.t2.a")),
+        simple("r_t2b", ident("DATA.t2.b")),
+    ]));
     v.push(("p_types", vec![
         simple("i", call("f", 1)),
         simple("l", call("mklong", 1)),
@@ -672,10 +700,11 @@ const RECORDING: &[(&str, bool, u64)] = &[
     ("hand3_w_cycle", false, 0xf6fbc0e8619e10ff),
     ("hand3_p_ids", true, 0x5f8333ba201134fc),
     ("hand3_p_chain", true, 0xef9669c6070df919),
-    ("hand3_p_types", true, 0x79288aeee645e935),
-    ("hand3_p_literals", true, 0xe771705505f7db91),
-    ("hand3_p_after_fail", false, 0x0ff8f0dac5bd8a84),
-    ("hand3_p_expr_ident", true, 0x68959013697df2f2),
+    ("hand3_p_paths", true, 0xec648236cf628544),
+    ("hand3_p_types", true, 0xff966ec9dba4b890),
+    ("hand3_p_literals", true, 0xcdaf4521dcdd4995),
+    ("hand3_p_after_fail", false, 0x13ba7a0bb8b7ada7),
+    ("hand3_p_expr_ident", true, 0xb0b36d569095e674),
 ];
 
 /// The resolved data section of every hand-built case, one line per value, produced by running
@@ -716,6 +745,7 @@ const SHAPES: &[(&str, &[&str])] = &[
     ("w_cycle", &["a = call f", "b = call g", "c = 4"]),
     ("p_ids", &["x = 2", "base = 5", "y = 2", "z = 5", "gone = id DATA.nothere", "arr = [2, 5, 3, id nope]", "nest = [2, 1]", "nest_none = N1[id nope]", "o = {p: 2, q: {r: 5}, s: id nope}", "c = t:(2, 2)", "t.k = 2", "t.m = 2", "t.n = 2", "rows[0] = 2", "rows[1] = 2", "rows[2] = {a: 5}"]),
     ("p_chain", &["x = 2", "w = 2", "z = 2", "y = 2"]),
+    ("p_paths", &["x = 2", "arr = [2]", "r_arr = 2", "o = {k: 2, deep: {a: [2]}}", "r_o = 2", "r_deep = 2", "c = t:(2)", "r_c = 2", "ca = [t:(2)]", "r_ca = 2", "n = [2]", "r_n = 2", "t.k = 2", "r_t = 2", "rows[0] = 2", "r_rows = 2", "a.b.k = 2", "r_ab = 2", "g.h[0] = 2", "r_gh = 2", "t2.a = 2", "t2.b = 2", "r_t2a = 2", "r_t2b = 2"]),
     ("p_types", &["i = 2", "l = 9000000001L", "fl = 1.5f", "d = 2.5d", "s = \"hi!\"", "b = true", "hx = #FF5733", "a = [1, 2, 3]", "t = t:(1, 2)", "o = {only: 1}", "dt = D(2025-12-31)", "ts = T(2025-12-31T23:59:59.000Z)", "bl = b:(\"QUJD\")", "re = r:(\"regex_pattern\")", "n = [[1], [2]]", "nl = null", "ri = 2", "rl = 9000000001L", "rfl = 1.5f", "rd = 2.5d", "rs = \"hi!\"", "rb = true", "rhx = #FF5733", "ra = [1, 2, 3]", "rt = t:(1, 2)", "ro = {only: 1}", "rdt = D(2025-12-31)", "rts = T(2025-12-31T23:59:59.000Z)", "rbl = b:(\"QUJD\")", "rre = r:(\"regex_pattern\")", "rn = [[1], [2]]", "rnl = null", "ra0 = id DATA.a[0]", "ro_only = id DATA.o.only"]),
     ("p_literals", &["base = 5", "s = \"text\"", "arr = [1, 2]", "y = 5", "ys = \"text\"", "ya = [1, 2]", "y1 = 2", "nest = [5]", "none = id DATA.none"]),
     ("p_after_fail", &["x = 2", "b = call boom", "y = id DATA.x"]),
@@ -777,6 +807,88 @@ fn print_shapes() {
     }
 }
 
+// ==================== phase 5: passes and log ====================
+
+/// `x` is a call and each of the 120 entries after it is an identifier naming the one before it,
+/// more links than the passes phase 5 may make.
+fn long_chain() -> Vec<DataEntry> {
+    POS.with(|p| p.set(8000));
+    let mut entries = vec![simple("x", qfv("f", vec![ie(1)]))];
+    for i in 0..120 {
+        let target = if i == 0 { "DATA.x".to_string() } else { format!("DATA.c{}", i - 1) };
+        entries.push(simple(&format!("c{i}"), ident(&target)));
+    }
+    entries
+}
+
+/// The lines phase 5 logs with verbose logging on, without colour codes or times.
+fn phase_five_log(entries: Vec<DataEntry>) -> Vec<String> {
+    let _guard = registry_lock();
+    let mut prepared = prepared_with3(entries);
+    let em = ErrorManager::new_isolated();
+    let mut verbose = prepared.settings.clone();
+    verbose.debug_mode = DebugMode::Verbose;
+    em.update_settings(verbose);
+    let resolver = ValueResolver::new_with_error_manager(prepared.enhanced, &prepared.symbols, DebugMode::Verbose, em.clone());
+    let _ = with_doc(resolver, &mut prepared.document).resolve();
+    em.get_log_contents()
+        .lines()
+        .filter_map(|line| {
+            let at = line.find("[Phase 5").or_else(|| line.find("Identifier resolution"))?;
+            Some(line[at..].split('\x1b').next().unwrap_or("").to_string())
+        })
+        .collect()
+}
+
+/// The phase 5 log of some of the cases, produced by running the original code.
+const PHASE_FIVE_LOG: &[(&str, &[&str])] = &[
+    ("p_ids", &["[Phase 5, pass 1/18] resolved 11, 6 pending", "[Phase 5, pass 2/18] resolved 2, 4 pending", "[Phase 5, pass 3/18] resolved 0, 4 pending", "Identifier resolution: 13 resolved, 4 external/runtime"]),
+    ("p_chain", &["[Phase 5, pass 1/8] resolved 1, 2 pending", "[Phase 5, pass 2/8] resolved 1, 1 pending", "[Phase 5, pass 3/8] resolved 1, 0 pending", "[Phase 5, pass 4/8] resolved 0, 0 pending", "Identifier resolution: 3 resolved, 0 external/runtime"]),
+    ("p_paths", &["[Phase 5, pass 1/34] resolved 12, 12 pending", "[Phase 5, pass 2/34] resolved 12, 0 pending", "[Phase 5, pass 3/34] resolved 0, 0 pending", "Identifier resolution: 24 resolved, 0 external/runtime"]),
+    ("p_literals", &["[Phase 5, pass 1/13] resolved 5, 1 pending", "[Phase 5, pass 2/13] resolved 0, 1 pending", "Identifier resolution: 5 resolved, 1 external/runtime"]),
+    ("p_after_fail", &[]),
+    ("p_types", &["[Phase 5, pass 1/51] resolved 16, 2 pending", "[Phase 5, pass 2/51] resolved 0, 2 pending", "Identifier resolution: 16 resolved, 2 external/runtime"]),
+];
+
+#[test]
+fn phase_five_logs_each_pass_as_it_always_did() {
+    for (case, want) in PHASE_FIVE_LOG {
+        assert_eq!(&phase_five_log(case_entries(case)), want, "{case}");
+    }
+}
+
+#[test]
+fn a_chain_longer_than_the_passes_is_cut_off() {
+    let outcome = resolve_hand3(long_chain(), THROUGH_DOCUMENT);
+    assert!(outcome.ok, "{:?}", outcome.errors);
+    let left = shapes(&outcome).iter().filter(|line| line.contains("= id ")).count();
+    assert_eq!(left, CHAIN_LEFT, "identifiers left in a chain of 120 (print_phase_five regenerates it)");
+    let log = phase_five_log(long_chain());
+    assert_eq!(log.last().map(String::as_str), Some(CHAIN_LAST_LOG), "{log:?}");
+    assert_eq!(log.len(), CHAIN_LOG_LINES, "{log:?}");
+}
+
+/// Identifiers left, last log line and number of log lines for `long_chain`, from the original.
+const CHAIN_LEFT: usize = 56;
+const CHAIN_LAST_LOG: &str = "Identifier resolution: 64 resolved, 56 external/runtime";
+const CHAIN_LOG_LINES: usize = 65;
+
+#[test]
+#[ignore = "prints the phase 5 tables; run on the original code with --ignored --nocapture"]
+fn print_phase_five() {
+    println!();
+    for case in ["p_ids", "p_chain", "p_paths", "p_literals", "p_after_fail", "p_types"] {
+        let lines: Vec<String> = phase_five_log(case_entries(case)).iter().map(|l| format!("{l:?}")).collect();
+        println!("    ({case:?}, &[{}]),", lines.join(", "));
+    }
+    let outcome = resolve_hand3(long_chain(), PLAIN);
+    let left = shapes(&outcome).iter().filter(|line| line.contains("= id ")).count();
+    let log = phase_five_log(long_chain());
+    println!("CHAIN_LEFT {left}");
+    println!("CHAIN_LAST {}", log.last().cloned().unwrap_or_default());
+    println!("CHAIN_LINES {}", log.len());
+}
+
 // ==================== which tree the result is built from ====================
 
 /// A resolver given an owned tree and a document that disagree (the loader never does this).
@@ -802,6 +914,84 @@ fn a_call_with_no_position_in_the_tree_leaves_the_owned_data_alone() {
     assert!(outcome.ok, "{:?}", outcome.errors);
     assert_eq!(outcome.history.len(), 1, "the call is made");
     assert_eq!(shapes(&outcome), ["o = 1"]);
+}
+
+#[test]
+fn phase_five_reads_and_rewrites_the_document() {
+    POS.with(|p| p.set(7200));
+    let document = vec![simple("x", qfv("f", vec![ie(1)])), simple("y", ident("DATA.x"))];
+    let outcome = disagreeing(document, vec![simple("o", int(1))]);
+    assert!(outcome.ok, "{:?}", outcome.errors);
+    assert_eq!(shapes(&outcome), ["x = 2", "y = 2"]);
+}
+
+#[test]
+fn a_resolved_identifier_copies_its_path_and_shares_the_rest() {
+    let _guard = registry_lock();
+    POS.with(|p| p.set(9000));
+    let entries = vec![
+        simple("x", qfv("f", vec![ie(1)])),
+        simple("keep", int(5)),
+        simple("arr", arr(vec![int(1), arr(vec![ident("DATA.x"), int(3)]), int(4)])),
+        tbl(&["t"], vec![("a", int(1)), ("b", ident("DATA.x")), ("c", int(2))]),
+        grp(&["rows"], vec![int(7), ident("DATA.x"), int(8)]),
+    ];
+    let prepared = prepared_with3(entries);
+    let before = &prepared.document;
+    let keep = simple_value(before, "keep");
+    let arr_outer = simple_value(before, "arr");
+    let arr_items = children(before, arr_outer);
+    let arr_inner_items = children(before, arr_items[1]);
+    let rows = group_items(before, "rows");
+    let table = table_values(before, "t");
+    let sizes = arena_sizes(before);
+
+    let outcome = resolve(prepared.enhanced, &prepared.symbols, &prepared.settings, Some(prepared.document));
+    assert!(outcome.ok, "{:?}", outcome.errors);
+    assert_eq!(
+        shapes(&outcome),
+        ["x = 2", "keep = 5", "arr = [1, [2, 3], 4]", "t.a = 1", "t.b = 2", "t.c = 2", "rows[0] = 7", "rows[1] = 2", "rows[2] = 8"]
+    );
+    let after = outcome.document.as_ref().expect("the document comes back");
+
+    assert_eq!(simple_value(after, "keep"), keep);
+    let new_outer = simple_value(after, "arr");
+    assert_ne!(new_outer, arr_outer);
+    let new_items = children(after, new_outer);
+    assert_eq!((new_items[0], new_items[2]), (arr_items[0], arr_items[2]));
+    assert_ne!(new_items[1], arr_items[1]);
+    let new_inner = children(after, new_items[1]);
+    assert_ne!(new_inner[0], arr_inner_items[0]);
+    assert_eq!(new_inner[1], arr_inner_items[1]);
+    let new_rows = group_items(after, "rows");
+    assert_eq!((new_rows[0], new_rows[2]), (rows[0], rows[2]));
+    assert_ne!(new_rows[1], rows[1]);
+    let new_table = table_values(after, "t");
+    assert_eq!((new_table[0], new_table[2]), (table[0], table[2]));
+    assert_ne!(new_table[1], table[1]);
+
+    // The call's result, three identifiers resolved to it, and the two arrays on the way to one.
+    let grown = arena_sizes(after);
+    assert_eq!((grown.0 - sizes.0, grown.1), (6, sizes.1));
+}
+
+#[test]
+fn a_run_that_resolves_nothing_allocates_nothing() {
+    let _guard = registry_lock();
+    POS.with(|p| p.set(9500));
+    let entries = vec![
+        simple("arr", arr(vec![ident("nope"), int(1), arr(vec![ident("gone")])])),
+        objprop("o", obj(vec![("k", ident("none"))])),
+        simple("c", ctor("t", vec![ident("no")])),
+        tbl(&["t"], vec![("k", ident("nothing"))]),
+        grp(&["rows"], vec![ident("zip")]),
+    ];
+    let prepared = prepared_with3(entries);
+    let sizes = arena_sizes(&prepared.document);
+    let outcome = resolve(prepared.enhanced, &prepared.symbols, &prepared.settings, Some(prepared.document));
+    assert!(outcome.ok, "{:?}", outcome.errors);
+    assert_eq!(shapes(&outcome).iter().filter(|l| l.contains("id ")).count(), 5, "all five entries still hold an identifier");
+    assert_eq!(arena_sizes(outcome.document.as_ref().expect("the document comes back")), sizes);
 }
 
 // ==================== writing along the path ====================

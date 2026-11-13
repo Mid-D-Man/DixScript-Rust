@@ -22,11 +22,10 @@ use crate::Builtins::Core::{DixType, DixValue};
 use crate::Builtins::Resolver;
 use crate::Compiler::AST::arena::{Arena, DocData, Document};
 use crate::Compiler::AST::{
-    DataEntry, DataSection, DixScript, EnumDeclaration, EnumField, EnumsSection, Expression,
-    ObjectProperty, Position, PropertyAssignment, Value,
+    DixScript, EnumDeclaration, EnumField, EnumsSection, Expression, ObjectProperty, Position, Value,
 };
 use crate::Compiler::Core::DebugMode;
-use crate::Compiler::Utilities::{PathBuilder, SymbolTable, ImportedNamespace};
+use crate::Compiler::Utilities::{SymbolTable, ImportedNamespace};
 use crate::ErrorManager::{DebugConfig, ErrorManager};
 
 use super::ast_walker::ASTWalker;
@@ -34,6 +33,7 @@ use super::data_context;
 use super::enum_resolution::{resolve_data_enums, EnumPass};
 use super::execution_context::ExecutionContext;
 use super::function_interpreter::{FunctionInterpreter, InterpreterError};
+use super::identifier_resolution;
 use super::supporting_classes::{FunctionCallInfo, ResolutionRecord, ValueResolutionResult};
 use super::write_back;
 
@@ -166,9 +166,12 @@ pub struct ValueResolver<'a> {
     resolution_history: Vec<ResolutionRecord>,
     start_time: Instant,
     error_manager: ErrorManager,
-    /// Where phases 1 to 3 read the data section from: the document the caller attached, or a
+    /// Where the phases read the data section from: the document the caller attached, or a
     /// scratch copy of the owned data made when the resolver starts.
     data: DataSource<'a>,
+    /// Whether any phase has changed the data section in the arena, so that the owned section
+    /// the result is built from has to be replaced by an export of it.
+    data_changed: bool,
 }
 
 impl<'a> ValueResolver<'a> {
@@ -244,15 +247,18 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             start_time: Instant::now(),
             error_manager,
             data: DataSource::None,
+            data_changed: false,
         }
     }
-    /// Gives phases 1 to 4 (enum pre-resolution, the data context, the call finder and the
-    /// write-back of results) the document the data section was parsed into.
+    /// Gives the five phases (enum pre-resolution, the data context, the call finder, the
+    /// write-back of results and the remaining identifiers) the document the data section was
+    /// parsed into.
     ///
     /// They then read the document's `@DATA` from its arena instead of from a scratch copy of the
-    /// owned data section, phases 1 and 4 rewrite it there, and whether a data section exists is
-    /// decided by the document. The owned tree passed to the constructor is still the one phase 5
-    /// reads and the result is built from.
+    /// owned data section, phases 1, 4 and 5 rewrite it there, and whether a data section exists
+    /// is decided by the document. The owned tree passed to the constructor is still the one the
+    /// result is built from: its data section is replaced by an export of the arena's when any
+    /// phase changed it, or when it had none.
     pub fn with_document(mut self, document: &'a mut Document) -> Self {
         self.data = DataSource::Document(document);
         self
@@ -293,6 +299,7 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
                     .log_warning("[DIAGNOSTIC] No function calls found in DATA section");
             }
             self.resolve_remaining_identifiers();
+            self.sync_owned_data();
             let logs = self.interpreter.take_logs();
             self.log_statements.extend(logs);
             let duration = self.start_time.elapsed();
@@ -315,6 +322,7 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
         if errors.is_empty() && success_count > 0 {
             self.resolve_remaining_identifiers();
         }
+        self.sync_owned_data();
 
         let duration = self.start_time.elapsed();
 
@@ -339,8 +347,20 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
         }
     }
 
+    /// Replaces the owned data section the result is built from by an export of the arena's,
+    /// when any phase changed it or the owned tree had none of its own. A run that changed
+    /// nothing leaves the owned section as it was.
+    fn sync_owned_data(&mut self) {
+        if !(self.data_changed || self.ast.data.is_none()) {
+            return;
+        }
+        if let Some((arena, data)) = self.data.parts() {
+            self.ast.data = Some(data.export(arena));
+        }
+    }
+
     /// Without an attached document, copies the owned data section into a scratch arena once,
-    /// for phases 1 to 3 to share.
+    /// for the phases to share.
     fn attach_scratch_data(&mut self) {
         if matches!(self.data, DataSource::None) {
             if let Some(owned) = self.ast.data.as_ref() {
@@ -380,9 +400,8 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
 
     /// Runs the enum walk over the data section, or returns `None` when there is none.
     ///
-    /// The walk reads and rewrites the data in the arena it lives in (see [`DataSource`]). The
-    /// owned data the later phases read is replaced by an export of the result only when the walk
-    /// changed something, or when the owned tree had no data of its own.
+    /// The walk reads and rewrites the data in the arena it lives in (see [`DataSource`]) and
+    /// records whether it changed anything.
     fn run_enum_pass(&mut self) -> Result<Option<EnumPass>, ResolverError> {
         let Some((arena, data)) = self.data.parts() else { return Ok(None) };
         if self.debug_config.is_enabled {
@@ -390,9 +409,7 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
                 .log_info("Pre-processing: resolving all enum values to integers");
         }
         let pass = resolve_data_enums(arena, data, self.symbol_table)?;
-        if pass.changed || self.ast.data.is_none() {
-            self.ast.data = Some(data.export(arena));
-        }
+        self.data_changed |= pass.changed;
         Ok(Some(pass))
     }
 
@@ -536,8 +553,8 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
 /// section at the call's position (see `write_back`). Returns the number of calls resolved and
 /// the errors of the ones that failed.
 ///
-/// If any result was written, the owned data section is replaced by an export of the arena's,
-/// because phase 5 and the result still read the owned tree.
+/// Whether any result was written is remembered, so that the owned data section the result is
+/// built from is replaced by an export of the arena's at the end.
 fn execute_iterative_resolution(
     &mut self,
     function_calls: Vec<FunctionCallInfo>,
@@ -709,12 +726,7 @@ fn execute_iterative_resolution(
         ));
     }
 
-    // Phase 5 still reads the owned tree, so it gets the results the calls were replaced by.
-    if data_changed {
-        if let Some((arena, data)) = self.data.parts() {
-            self.ast.data = Some(data.export(arena));
-        }
-    }
+    self.data_changed |= data_changed;
 
     (resolved_count, errors)
 }
@@ -958,43 +970,26 @@ fn execute_iterative_resolution(
 
     // ==================== PHASE 5: IDENTIFIER RESOLUTION ====================
 
+    /// Resolves the identifiers left in the data section (phase 5), pass by pass, until a pass
+    /// resolves none. The walk of one pass is `identifier_resolution::resolve_pass`; this method
+    /// keeps the context in step between passes and logs.
     fn resolve_remaining_identifiers(&mut self) {
-        let node_estimate = self
-            .ast
-            .data
-            .as_ref()
-            .map(|d| d.entries.len() * 6)
-            .unwrap_or(0);
+        let node_estimate = self.data.parts().map(|(_, data)| data.entries.len() * 6).unwrap_or(0);
         let max_passes = (node_estimate / 4).max(8).min(64);
 
         let mut total_resolved = 0usize;
         let mut final_skipped = 0usize;
 
         for pass in 1..=max_passes {
-            let data = match self.ast.data.as_ref() {
-                Some(d) => d,
-                None => break,
-            };
-            let ctx = self.data_context.borrow();
-
+            let Some((arena, data)) = self.data.parts() else { break };
             let mut newly_resolved: Vec<(String, DixValue)> = Vec::new();
-            let mut resolved_this_pass = 0usize;
-            let mut skipped_this_pass = 0usize;
-            let mut new_entries = Vec::with_capacity(data.entries.len());
-
-            for entry in &data.entries {
-                let (new_entry, res, skip) =
-                    Self::resolve_identifiers_in_entry(entry, &ctx, &mut newly_resolved);
-                new_entries.push(new_entry);
-                resolved_this_pass += res;
-                skipped_this_pass += skip;
-            }
-
-            drop(ctx);
+            let (resolved_this_pass, skipped_this_pass) = {
+                let ctx = self.data_context.borrow();
+                identifier_resolution::resolve_pass(arena, data, &ctx, &mut newly_resolved)
+            };
 
             if resolved_this_pass > 0 {
-                let pos = self.ast.data.as_ref().unwrap().position;
-                self.ast.data = Some(DataSection { entries: new_entries, position: pos });
+                self.data_changed = true;
                 let mut ctx = self.data_context.borrow_mut();
                 for (path, dix) in newly_resolved {
                     ctx.insert(path, dix);
@@ -1024,276 +1019,10 @@ fn execute_iterative_resolution(
         }
     }
 
-    fn resolve_identifiers_in_entry(
-        entry: &DataEntry,
-        ctx: &FxHashMap<String, DixValue>,
-        newly_resolved: &mut Vec<(String, DixValue)>,
-    ) -> (DataEntry, usize, usize) {
-        match entry {
-            DataEntry::SimpleProperty { name, data_type, value, position } => {
-                let base = PathBuilder::build(&[name.as_str()]);
-                let (new_value, res, skip) =
-                    Self::resolve_identifiers_in_value(value, &base, ctx, newly_resolved);
-                if res > 0 {
-                    (
-                        DataEntry::SimpleProperty {
-                            name: name.clone(),
-                            data_type: *data_type,
-                            value: new_value,
-                            position: *position,
-                        },
-                        res,
-                        skip,
-                    )
-                } else {
-                    (entry.clone(), 0, skip)
-                }
-            }
-
-            DataEntry::TableProperty { path: tp, properties, position } => {
-                let segs: Vec<&str> = tp.segments.iter().map(|s| s.as_str()).collect();
-                let mut new_props = Vec::with_capacity(properties.len().max(MIN_CAPACITY));
-                let mut total_res = 0usize;
-                let mut total_skip = 0usize;
-                let mut any_changed = false;
-
-                for prop in properties {
-                    let mut full_segs = segs.clone();
-                    full_segs.push(prop.name.as_str());
-                    let full = PathBuilder::build(&full_segs);
-                    let (nv, res, skip) = Self::resolve_identifiers_in_value(
-                        &prop.value,
-                        &full,
-                        ctx,
-                        newly_resolved,
-                    );
-                    total_res += res;
-                    total_skip += skip;
-                    if res > 0 {
-                        new_props.push(PropertyAssignment {
-                            name: prop.name.clone(),
-                            data_type: prop.data_type,
-                            value: nv,
-                            position: prop.position,
-                        });
-                        any_changed = true;
-                    } else {
-                        new_props.push(prop.clone());
-                    }
-                }
-
-                if any_changed {
-                    (
-                        DataEntry::TableProperty {
-                            path: tp.clone(),
-                            properties: new_props,
-                            position: *position,
-                        },
-                        total_res,
-                        total_skip,
-                    )
-                } else {
-                    (entry.clone(), 0, total_skip)
-                }
-            }
-
-            DataEntry::GroupArray { path: gp, items, position } => {
-                let segs: Vec<&str> = gp.segments.iter().map(|s| s.as_str()).collect();
-                let base = PathBuilder::build(&segs);
-                let mut new_items = Vec::with_capacity(items.len().max(MIN_CAPACITY));
-                let mut total_res = 0usize;
-                let mut total_skip = 0usize;
-                let mut any_changed = false;
-
-                for (i, item) in items.iter().enumerate() {
-                    let indexed = format!("{}[{}]", base, i);
-                    let (nv, res, skip) = Self::resolve_identifiers_in_value(
-                        item,
-                        &indexed,
-                        ctx,
-                        newly_resolved,
-                    );
-                    total_res += res;
-                    total_skip += skip;
-                    if res > 0 {
-                        new_items.push(nv);
-                        any_changed = true;
-                    } else {
-                        new_items.push(item.clone());
-                    }
-                }
-
-                if any_changed {
-                    (
-                        DataEntry::GroupArray {
-                            path: gp.clone(),
-                            items: new_items,
-                            position: *position,
-                        },
-                        total_res,
-                        total_skip,
-                    )
-                } else {
-                    (entry.clone(), 0, total_skip)
-                }
-            }
-
-            DataEntry::ObjectProperty { name, data_type, object, position } => {
-                let base = PathBuilder::build(&[name.as_str()]);
-                let (new_obj, res, skip) =
-                    Self::resolve_identifiers_in_value(object, &base, ctx, newly_resolved);
-                if res > 0 {
-                    (
-                        DataEntry::ObjectProperty {
-                            name: name.clone(),
-                            data_type: *data_type,
-                            object: Box::from(new_obj),
-                            position: *position,
-                        },
-                        res,
-                        skip,
-                    )
-                } else {
-                    (entry.clone(), 0, skip)
-                }
-            }
-        }
-    }
-
-    fn resolve_identifiers_in_value(
-        value: &Value,
-        path: &str,
-        ctx: &FxHashMap<String, DixValue>,
-        newly_resolved: &mut Vec<(String, DixValue)>,
-    ) -> (Value, usize, usize) {
-        match value {
-            Value::Identifier { value: id, position } => {
-                if let Some(dix) = ctx.get(id.as_str()) {
-                    let new_val = Self::convert_dix_value_to_value(dix, *position);
-                    newly_resolved.push((path.to_string(), dix.clone()));
-                    (new_val, 1, 0)
-                } else {
-                    (value.clone(), 0, 1)
-                }
-            }
-
-            Value::Array { values, position } | Value::NestedArray { values, position, .. } => {
-                let mut new_values = Vec::with_capacity(values.len().max(MIN_CAPACITY));
-                let mut total_res = 0usize;
-                let mut total_skip = 0usize;
-                let mut any_changed = false;
-
-                for (i, item) in values.iter().enumerate() {
-                    let idx = format!("{}[{}]", path, i);
-                    let (nv, res, skip) =
-                        Self::resolve_identifiers_in_value(item, &idx, ctx, newly_resolved);
-                    total_res += res;
-                    total_skip += skip;
-                    if res > 0 {
-                        any_changed = true;
-                        new_values.push(nv);
-                    } else {
-                        new_values.push(item.clone());
-                    }
-                }
-
-                if any_changed {
-                    (
-                        Value::Array { values: new_values, position: *position },
-                        total_res,
-                        total_skip,
-                    )
-                } else {
-                    (value.clone(), 0, total_skip)
-                }
-            }
-
-            Value::Object { properties, position } => {
-                let mut new_props = Vec::with_capacity(properties.len().max(MIN_CAPACITY));
-                let mut total_res = 0usize;
-                let mut total_skip = 0usize;
-                let mut any_changed = false;
-
-                for prop in properties {
-                    let child = format!("{}.{}", path, prop.key);
-                    let (nv, res, skip) = Self::resolve_identifiers_in_value(
-                        &prop.value,
-                        &child,
-                        ctx,
-                        newly_resolved,
-                    );
-                    total_res += res;
-                    total_skip += skip;
-                    if res > 0 {
-                        new_props.push(ObjectProperty {
-                            key: prop.key.clone(),
-                            value: nv,
-                            position: prop.position,
-                        });
-                        any_changed = true;
-                    } else {
-                        new_props.push(prop.clone());
-                    }
-                }
-
-                if any_changed {
-                    (
-                        Value::Object { properties: new_props, position: *position },
-                        total_res,
-                        total_skip,
-                    )
-                } else {
-                    (value.clone(), 0, total_skip)
-                }
-            }
-
-            Value::PrefixedConstructor { prefix, arguments, position } => {
-                let mut new_args = Vec::with_capacity(arguments.len().max(MIN_CAPACITY));
-                let mut total_res = 0usize;
-                let mut total_skip = 0usize;
-                let mut any_changed = false;
-
-                for (i, arg) in arguments.iter().enumerate() {
-                    let arg_path = format!("{}.__arg{}", path, i);
-                    let (nv, res, skip) = Self::resolve_identifiers_in_value(
-                        arg,
-                        &arg_path,
-                        ctx,
-                        newly_resolved,
-                    );
-                    total_res += res;
-                    total_skip += skip;
-                    if res > 0 {
-                        any_changed = true;
-                        new_args.push(nv);
-                    } else {
-                        new_args.push(arg.clone());
-                    }
-                }
-
-                if any_changed {
-                    (
-                        Value::PrefixedConstructor {
-                            prefix: prefix.clone(),
-                            arguments: new_args,
-                            position: *position,
-                        },
-                        total_res,
-                        total_skip,
-                    )
-                } else {
-                    (value.clone(), 0, total_skip)
-                }
-            }
-
-            _ => (value.clone(), 0, 0),
-        }
-    }
-
     // ==================== VALUE ↔ DIX CONVERSIONS ====================
 
  // value_resolver.rs — fn convert_dix_value_to_value
-// (Builtins::Core::DixValue → AST Value, used after Phase 4 to write results back)
+// (Builtins::Core::DixValue → AST Value, used when the interpreter's arguments are wrapped)
 
 pub fn convert_dix_value_to_value(dix: &DixValue, position: Position) -> Value {
     match dix.get_type() {

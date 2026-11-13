@@ -121,9 +121,15 @@ Breaking release.
 - The owned write-back of `ValueResolver` (nine private functions, 250 lines: the index of call
   positions, the path and search helpers and `value_position`), replaced by the arena version in
   `write_back.rs`.
+- The owned phase 5 of `ValueResolver` (334 lines: the identifier walk over entries and values),
+  replaced by the arena version in `identifier_resolution.rs`.
 
 ### Performance
 
+- Value resolution's remaining-identifier pass no longer builds a formatted path string and clones an
+  entry for every node it visits: on the largest corpus file its cost fell from about 146M to 16M
+  instructions, and the whole pipeline (debug build, prepare and resolve) is 2.3 to 9.8 percent
+  cheaper than before the arena migration of value resolution on the five files measured.
 - **Parser reservations are capped.** The section parsers sized the Vec for every nested
   call argument list, array, object and statement block from the length of the whole token
   stream. Those reservations are now capped at 16 elements; the one vector that holds a
@@ -151,17 +157,16 @@ Breaking release.
   owned tree. The context, the calls found and every log line are unchanged. The alias pass no longer
   clones the whole data section, and the whole-pipeline instruction count is a further 0.2 to 0.7
   percent lower on the same five files.
-- **The write-back of results runs on the arena.** The fourth phase of value resolution writes each
-  call's result into the data section in the arena (`ValueResolution/write_back.rs`): it allocates
-  the result and a copy of each array, object and constructor on the way to it, and shares the rest.
-  With a document attached the results go to the document's data, which holds them afterwards; the
-  owned data section is replaced by an export of it only when a result was written, because
-  phase 5 and the result still read the owned tree. Results, errors, the history of calls and every
-  log line are unchanged, quirks included (a node that shares a position with a call takes its
-  result, a call whose position no node has is not written). The whole-pipeline instruction count is
-  0.5 percent lower on one of five files, level on one and 0.6 to 1.3 percent higher on three: the
-  export after phase 4 costs more than the clone of the AST that was removed, until the phases
-  after it read the arena.
+- **The last two phases of value resolution run on the arena.** The write-back of results (phase 4,
+  `ValueResolution/write_back.rs`) allocates each result and a copy of each array, object and
+  constructor on the way to it, and shares the rest; the remaining identifiers (phase 5,
+  `ValueResolution/identifier_resolution.rs`) are resolved the same way, with the path of an
+  identifier built only when it resolves. With a document attached both read and rewrite the
+  document's data, which holds the results afterwards; the owned data section is replaced by one
+  export at the end, only when a phase changed the data or the owned tree had none. Results, errors,
+  the history of calls and every log line are unchanged, quirks included (a node that shares a
+  position with a call takes its result, a call whose position no node has is not written, a nested
+  array that held a resolved identifier comes back as a plain array).
 - **Language version 2.0.0.** `@CONFIG` `version -> "2.0.0"` is now a recognized
   language version. Before, the version manager accepted the string but treated the
   file as 1.0.0. 1.0.0 files still load. The two versions differ only in the DLM

@@ -1306,9 +1306,10 @@ the allocator for, and fails above 20 MB.
 **What it does:** Resolves values at compile time in five phases: enum pre-resolution, the
 initial data context, discovery of quickfunction calls, iterative execution of those calls
 with the result written back into the AST (phase 4), and the remaining identifier
-references. Phases 1 to 4 are thin layers over `enum_resolution.rs`, `data_context.rs`,
-`ast_walker.rs` and `write_back.rs` and read and rewrite the arena; phase 5 and the interpreter
-still read and rewrite the owned tree.
+references (phase 5). The five phases are thin layers over `enum_resolution.rs`,
+`data_context.rs`, `ast_walker.rs`, `write_back.rs` and `identifier_resolution.rs` and read and
+rewrite the arena; the interpreter still reads the owned quickfunction bodies and takes owned
+argument expressions.
 
 **Decisions:**
 - Phase 4 finds where every call sits in the data tree once, before its loop, as a path of
@@ -1319,31 +1320,32 @@ still read and rewrite the owned tree.
   alone, which is what the search would also have done. All of it is `write_back.rs`.
 - Only the positions of the calls being resolved are indexed, so the index costs one small
   vector per call and not one per node.
-- **Phases 1 to 4 run on the arena and read one data source.** `ValueResolver::with_document`
+- **The five phases run on the arena and read one data source.** `ValueResolver::with_document`
   gives them the `Document` the file was parsed into, and they then read the document's `@DATA`
-  in the document's arena (phases 1 and 4 rewrite it there). Without a document the resolver
-  copies the owned data into a scratch arena once, when it starts, and the four phases share that
+  in the document's arena (phases 1, 4 and 5 rewrite it there). Without a document the resolver
+  copies the owned data into a scratch arena once, when it starts, and the phases share that
   copy; this is what the language server and `ValueResolver::new` callers get. The source is a
   private `DataSource`, and whether a data section exists is decided by the tree that is read, so
-  a document without `@DATA` leaves phases 2 to 4 with nothing to find even when the owned tree has
+  a document without `@DATA` leaves phases 2 to 5 with nothing to find even when the owned tree has
   data.
-- **The owned data is refreshed only when it has to be.** After phase 1 the owned section that
-  phase 5 and the result read is replaced by an export of the resolved section when the walk
-  changed something, and also when the owned tree had no data of its own. After phase 4 it is
-  replaced again when at least one result was written, by an export of the whole arena section
-  (which holds phase 1's result too). A file with no enum expression and no call in its data is
-  neither rebuilt nor exported, and a run in which no call found its node leaves the owned data
-  alone.
-- **The document is updated too.** When phase 1 or phase 4 changed something the document's
-  `@DATA` holds the section as of that phase, so after phase 4 it holds every result and a later
-  phase that moves to the arena finds it there. `@ENUMS` is not updated in the document: the
+- **The owned data is exported once, at the end, and only when it has to be.** Each phase that
+  changes the arena section sets one flag (`data_changed`). Before the result is built
+  (`sync_owned_data`) the owned section is replaced by an export of the arena's when the flag is
+  set, and also when the owned tree had no data of its own. A file with no enum expression, no call
+  and no resolvable identifier in its data is neither rebuilt nor exported, and a run that changed
+  nothing leaves the owned data alone. Earlier drops exported after phase 1 and after phase 4,
+  because phases 4 and 5 still read the owned tree; with phase 5 on the arena nothing reads it
+  until the result.
+- **The document is updated too.** When any phase changed something the document's `@DATA` holds
+  the section as of that phase, so afterwards it holds every result and every resolved
+  identifier, and a later stage that moves to the arena finds it there. `@ENUMS` is not updated in the document: the
   merge of imported enums below goes to the owned tree, which is the one the result is built
   from.
-- **With a document attached the results go to the document's data.** Phase 4 used to write into
-  the owned tree by position even then. A document and an owned tree that disagree (the loader
-  never makes that) now give the results to the document's data, and the owned data is replaced
-  by its export only when something was written; when nothing was, the owned data is untouched.
-  Two tests pin that.
+- **With a document attached the results go to the document's data.** Phases 4 and 5 used to
+  write into the owned tree even then (phase 4 by position). A document and an owned tree that
+  disagree (the loader never makes that) now give the results to the document's data, and the
+  owned data is replaced by its export only when something was written; when nothing was, the
+  owned data is untouched. Three tests pin that.
 - **`original_ast` is gone.** `resolve()` cloned the whole AST before it started, for the
   `original_ast` field of `ValueResolutionResult`. Nothing in the workspace read it (the
   language server, the sibling crates, the tests and the benchmark were searched), so the clone
@@ -1363,8 +1365,12 @@ still read and rewrite the owned tree.
 - **More removed with phase 4.** The owned write-back (250 lines, nine private functions:
   `index_call_targets`, `index_entry`, `index_value`, `slot_at_path`, `replace_value_at`,
   `replace_value_in_ast_by_location`, `replace_in_entry`, `replace_in_value` and
-  `value_position`) is replaced by `write_back.rs`. `convert_dix_value_to_value` stays: the
-  interpreter's argument wrapping and phase 5 still call it.
+  `value_position`) is replaced by `write_back.rs`.
+- **More removed with phase 5.** The owned phase 5 (334 lines: the pass loop's walk, and
+  `resolve_identifiers_in_entry` and `resolve_identifiers_in_value` with the path strings built for
+  every node visited) is replaced by `identifier_resolution.rs`; the loop that keeps the context in
+  step between passes and logs stays in `value_resolver.rs`. `convert_dix_value_to_value` stays: the
+  interpreter's argument wrapping still calls it, and nothing else does.
 
 **Tests:** `cargo test -p dixscript --test value_resolver_enums_document`,
 `cargo test -p dixscript --test value_resolver_context_document`,
@@ -1563,15 +1569,47 @@ and the other resolver tests.
 
 **What it does:** Declares the value resolution modules and re-exports their public types. The
 module table in its documentation lists the five phases and which module runs each:
-`enum_resolution`, `data_context` and `write_back` are `pub(crate)` and reached through
-`ValueResolver`.
+`enum_resolution`, `data_context`, `write_back` and `identifier_resolution` are `pub(crate)` and
+reached through `ValueResolver`.
 
 **Decisions:**
-- `write_back` is `pub(crate)`: its functions take the arena and the data section of a
-  `Document`, which are public types, but the write-back is not an entry point of its own.
-  Its unit tests live in the file for that reason.
+- `write_back` and `identifier_resolution` are `pub(crate)`: their functions take the arena and the
+  data section of a `Document`, which are public types, but neither is an entry point of its own.
+  The unit tests of `write_back` live in the file for that reason.
+- The phase table names the module that does each phase's walk: `enum_resolution` and `data_context`
+  for phases 1 and 2, which it still named `value_resolver` after those moved.
 
 **Tests:** the whole suite.
+
+### `Compiler/Core/ValueResolution/identifier_resolution.rs`
+
+**What it does:** One pass of phase 5 over the data section in the arena. An identifier whose text
+is a key of the data context (a full path such as `DATA.x`) is replaced by the value stored under
+that key; `resolve_pass` returns how many identifiers it resolved and how many it left, and fills
+a list with the path and value of each one resolved. The caller (`resolve_remaining_identifiers`
+in `value_resolver.rs`) adds that list to the context after the pass and repeats until a pass
+resolves nothing, so a chain of identifiers resolves one link per pass.
+
+**Decisions:**
+- **It rewrites by allocation, like `enum_resolution.rs`.** A value that holds no resolved identifier
+  is the same id afterwards; an array, object or constructor that holds one is a new node over a new
+  list that shares the elements that did not change; a table property and an entry are replaced in
+  place. A nested array that holds a resolved identifier comes back as a plain array, as it always
+  did (pinned by `p_ids`).
+- **Every identifier of a pass sees the same context.** The paths of the identifiers a pass resolved
+  go into the context after the pass, in the order they were met, and the last insert of a path wins.
+- **The path is built only when an identifier resolves,** not for every node visited as the owned
+  walk did. The walk keeps the segments of the entry's own path and a stack of steps (`[i]`, `.key`,
+  `.__argN`), and renders them with `PathBuilder::build` at the moment of a hit, so the strings are
+  the ones the owned code made: `DATA.t.k`, `DATA.rows[1]`, `DATA.o.deep.a[0]`, `DATA.c.__arg0`,
+  `DATA.ca[0].__arg0`. The path of a table property is the table's segments and the property's name.
+  The strings are what the next pass looks identifiers up by, so `p_paths` has a reader for each form
+  that resolves only if the path was exact.
+- **The number of passes is the old one.** At most `max(8, min(64, entries * 6 / 4))`, and the
+  phase stops at the first pass that resolves nothing; a chain of 120 identifiers is cut off at 64.
+  The log lines of each pass are unchanged and pinned for six cases.
+
+**Tests:** `cargo test -p dixscript --test value_resolver_writeback_document`.
 
 ### `Compiler/Core/ValueResolution/write_back.rs`
 
@@ -1625,25 +1663,36 @@ the new way a result is written.
   built and run twice with the ignored `print_recording` and `print_shapes`, the two runs identical),
   then required of the new code, through the document and through the owned entry point.
   `RECORDING` fingerprints the whole outcome (verdict, errors, resolved tree, history of calls) of
-  ten crafted sources and 25 hand-built data sections; `SHAPES` lists the resolved data of every
+  ten crafted sources and 26 hand-built data sections; `SHAPES` lists the resolved data of every
   hand-built section value by value, so a failure names the value.
 - **The hand-built sections reach what the grammar cannot:** a result in every kind of place and
   at depth, nested arrays and their levels, all 16 kinds of result a function can return (null
   included), nodes that share a position with a call, a path made stale by an array result, the
   fallback search in seven kinds of place, a call inside an expression, a failed call and a cycle,
-  and phase 5's identifiers in every position (phase 5 is pinned here too, for its own drop).
+  and phase 5's identifiers in every position, including `p_paths`, where a reader of each form of
+  path (`DATA.o.deep.a[0]`, `DATA.c.__arg0`, `DATA.t2.b`, `DATA.rows[0]` and the rest) resolves only
+  if the path of the identifier before it was built exactly, and `p_types`, where every kind of
+  value is substituted for an identifier.
 - **The new behaviour is tested through the arena:** a replacement copies the path and shares
   everything else (the ids of untouched values are unchanged, and exactly five nodes are added for
   three results and the two arrays on the way to one of them), a call with no node allocates
   nothing, and the document's data holds the result afterwards.
-- **Two tests give the resolver an owned tree and a document that disagree,** to show that a run
-  that writes nothing leaves the owned data alone. They also pass on the original.
-- Of the seven tests that run, five also pass on the original code (the recording, the shapes,
-  the two owned-tree tests and the one that counts allocations for a call with no node); the two
-  that read the document's arena for the new write-back fail there, as they should.
+- **Three tests give the resolver an owned tree and a document that disagree,** to show that a run
+  that writes nothing leaves the owned data alone (two, which also pass on the original) and that
+  phase 5 reads the document (one, which does not).
+- **Phase 5 is pinned beyond the data:** the log of each pass for six cases, and a chain of 120
+  identifiers that is cut off at the 64th pass (64 resolved, 56 left, 65 log lines), both produced
+  by the original. A resolved identifier is shown to copy its path and share the rest (six nodes
+  added for the call's result, three resolved identifiers and two arrays), and a run that resolves
+  nothing is shown to allocate nothing.
+- Of the twelve tests that run, eight also pass on the original code (the recording, the shapes,
+  the phase 5 log, the chain of 120, the three that leave the owned data or the arena alone, and
+  the one that counts allocations for a call with no node); the four that read the document's arena
+  fail there, as they should.
 
-**Tests:** `cargo test -p dixscript --test value_resolver_writeback_document`. Seven tests and two
-ignored helpers, all passing on Rust 1.75.
+**Tests:** `cargo test -p dixscript --test value_resolver_writeback_document`. Twelve tests and
+three ignored helpers (`print_recording`, `print_shapes`, `print_phase_five`), all passing on
+Rust 1.75.
 
 ### `tests/value_resolution_scaling.rs`
 
@@ -2248,7 +2297,8 @@ requires the larger to take less than 7 times as long.
   section and now have both. Library warnings stay at 119 and rustdoc at 32, none from these files.
 - **How it was checked against the original.** The throwaway harness ran 137 inputs (all 84 corpus
   files, the crafted sources and hand-built sections of the earlier drops, ten new crafted sources
-  and 25 new hand-built sections) through the four ways the code can be reached (document attached or
+  and 23 new hand-built sections; two more were added afterwards, for bugs the first round found, and
+  are pinned by the recording made from the original) through the four ways the code can be reached (document attached or
   not, each with debug logging off and verbose), 548 outputs, before and after, each twice. A hook that
   prints a hash of the owned data tree after phase 4 and after phase 5 was applied to both builds.
   After the text of the output is normalized (colour codes, clock times, durations, and the order of
@@ -2272,7 +2322,7 @@ requires the larger to take less than 7 times as long.
   wrongly, which needed a function that returns null. Those inputs, two tests with disagreeing trees
   and four unit tests were added, the recording and shapes were made again from the original, and a
   second round noticed all 51. There are no equivalent mutants left.
-- **Measured, not assumed, and not a gain.** Callgrind, debug build, one run of the harness (prepare
+- **Measured on this half alone, and not a gain.** Callgrind, debug build, one run of the harness (prepare
   and resolve) per file, the original against this drop, instructions: `basic/EnumUsage.mdix` 35.12M
   against 34.95M (0.5 percent fewer), `BigBoy.mdix` 76.49M against 77.47M (1.3 percent more),
   `Unholy.mdix` 424.21M against 424.21M (level), `basic/a_test.mdix` 10.42M against 10.49M (0.6
@@ -2280,9 +2330,10 @@ requires the larger to take less than 7 times as long.
   owned entry point 2,072M against 2,084M (0.6 more). The numbers are not comparable with the earlier
   drops' because the harness is different. On the largest file `export_data` rose from 44.3M to 72.3M
   inclusive, which is the export after phase 4, while the clones of the owned tree that the removed
-  `original_ast` caused saved less (`Value::clone` 74.3M to 64.7M). The export exists only because
-  phase 5 and the result still read the owned tree; it does not go away until they and the stages
-  after them read the arena. Release builds, wall-clock time and peak memory were not measured.
+  `original_ast` caused saved less (`Value::clone` 74.3M to 64.7M). The export existed only because
+  phase 5 and the result still read the owned tree; the next subsection removes it, and the figures
+  of the two halves together are there. Release builds, wall-clock time and peak memory were not
+  measured.
 - **A change to an existing test.** `phases_two_and_three_allocate_nothing_in_the_document` compared
   the document's arena before and after a whole run. The run now adds the write-back's nodes, so it
   requires exactly those (the three results and the copy of the array that holds the second) and
@@ -2294,8 +2345,59 @@ requires the larger to take less than 7 times as long.
   loader never produces that, and the two tests that cover the quiet cases also pass on the original.
   `ResolutionRecord.arguments` still builds a `Debug` string per argument for every call and nothing
   reads it.
-- **Not done in this drop.** Phase 5 (the remaining identifiers) and the interpreter still read and
-  rewrite the owned tree, so the owned export after phase 4 stays for now. The runtime, the DLM
-  auditor, the binary packer, the language server (not type-checked here, but it reads only
-  `resolved_ast` and calls `ValueResolver::new` with the same signature) and the sibling crates remain.
-  CI on stable Rust has not been run.
+- **Not done in this half.** Phase 5 (the remaining identifiers) still read and rewrote the owned
+  tree, so the owned export after phase 4 stayed; it moves in the next subsection.
+
+### Fixes and Problems: value resolution phase 5 (remaining identifiers) on the arena
+
+- **What changed.** The new `identifier_resolution.rs` (one pass of phase 5 over the arena data
+  section), `value_resolver.rs` (the loop that keeps the context in step between passes calls it; the
+  owned phase 5 is gone, 334 lines; the exports after phase 1 and after phase 4 are replaced by one,
+  `sync_owned_data`, before the result is built, driven by a `data_changed` flag; the file is 1,157
+  lines, down from 1,428 at the end of the previous subsection and 1,667 at the start) and
+  `ValueResolution/mod.rs`. Four imports the removal left unused are gone. Library warnings stay at
+  119 and rustdoc at 32.
+- **How it was checked against the previous drop.** The harness ran 140 inputs (the 137 of the
+  previous subsection and three hand-built sections added for it) through the four ways the code can
+  be reached, 560 outputs, with the hooked previous drop and this one, each twice. After the same
+  normalization 532 outputs are identical. The other 28 are the same seven files that differ from
+  run to run in the unchanged code: 12 outputs are equal in all four runs, 8 are equal in tree shape
+  with scalar values masked, 6 of the 8 verbose logs are equal in the sequence of messages, and the
+  two verbose logs of `random_static_test` differ between runs of the same binary because a random
+  value picks the branch. All 468 snapshot labels with a stable hash are identical after phase 4 and
+  after phase 5 (896 snapshots), and the full text of the 64 whose hash is not (16 inputs, objects
+  sorted) is identical (128 snapshots). The tables the permanent tests compare against were produced
+  by running the code of origin before the migration, as before; eight of the twelve tests in
+  `value_resolver_writeback_document.rs` pass there, and the four that read the document's arena do
+  not.
+- **40 bug switches were injected afterwards and all 40 are noticed.** The first round caught 39. The
+  survivor made every property of a table after the first take the first property's name in its
+  path, which needed a table with two identifier properties whose paths other entries name; `p_paths`
+  now has one. Two bugs (the choice between the document and an owned tree without data, and the flag
+  set by phase 1) are noticed only by the tests of earlier drops.
+- **Measured, and a gain.** Callgrind, debug build, one run of the harness (prepare and resolve) per
+  file, instructions, the code before this migration against the previous half against this one:
+  `basic/EnumUsage.mdix` 35.06M, 34.89M, 34.17M (2.6 percent fewer than before the migration),
+  `BigBoy.mdix` 76.50M, 77.47M, 69.01M (9.8 fewer), `Unholy.mdix` 424.29M, 424.20M, 396.58M (6.5
+  fewer), `basic/a_test.mdix` 10.42M, 10.48M, 10.19M (2.3 fewer), `elements_database.mdix` 2,046.8M,
+  2,059.5M, 1,902.7M (7.0 fewer) and the same file through the owned entry point 2,072.0M, 2,084.1M,
+  1,928.6M (6.9 fewer). The same binary measured twice differs by up to 0.2 percent. On the largest
+  file the owned phase 5 cost about 146M inclusive, nearly all of it a formatted path string and a
+  clone of an entry for every node visited; `resolve_pass` costs about 16M. The one export at the end
+  costs 52M against 44M for the export after phase 1 that it replaces. Release builds, wall-clock time
+  and peak memory were not measured.
+- **Found while doing it, not changed.** From source text phase 5 resolves nothing: an identifier in
+  `@DATA` is a bare name, the context is keyed by full paths, and `DATA.x` in a source parses as an
+  enum access. Of the 140 inputs it changed the tree in six, all hand-built (`p_ids`, `p_chain`,
+  `p_paths`, `p_types`, `p_literals` and `hand_alias_forms`); no corpus file has an identifier it can
+  resolve. The phase is kept exactly as it was, with its passes and its log lines. A document and an
+  owned tree that disagree now give phase 5 the document's data (the loader never produces that; the
+  test `phase_five_reads_and_rewrites_the_document` fails on the original). The call list still carries owned
+  argument expressions and `ResolutionRecord.arguments` still builds a `Debug` string per argument.
+- **Not done in this drop.** The interpreter (14.8 percent of the largest file's pipeline when it was
+  last measured), the
+  runtime, the DLM auditor, the binary packer, the language server (not type-checked here, but it
+  reads only `resolved_ast` and calls `ValueResolver::new` with the same signature) and the sibling
+  crates still read the owned tree, and the owned data section is still exported once at the end of
+  value resolution. Stage 9 still copies the resolved `@DATA` into an arena, although the document now
+  holds it; the loader drops the document after stage 7. CI on stable Rust has not been run.

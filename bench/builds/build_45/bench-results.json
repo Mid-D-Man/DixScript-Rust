@@ -1,120 +1,145 @@
 {
   "build": "45",
   "branch": "master",
-  "commit": "85c781ed",
-  "date": "2026-02-27T18:18:35+01:00",
+  "commit": "8823ad39",
+  "date": "",
   "summary": {
-    "total": 10,
-    "suites": 2
+    "total": 13,
+    "suites": 1
   },
   "suites": [
     {
-      "name": "throughput_benchmark",
+      "name": "chemistry_db_comparison_benchmark",
       "benchmarks": [
         {
-          "suite": "throughput_benchmark",
-          "group": "lexer_throughput",
-          "name": "small_file",
-          "full_name": "throughput_benchmark/lexer_throughput/small_file",
-          "lower_ns": 90603.0,
-          "mean_ns": 90852.0,
-          "upper_ns": 91129.0,
-          "std_ns": 131.5
+          "suite": "chemistry_db_comparison_benchmark",
+          "group": "chemistry_db_real_file",
+          "name": "mdix_compile_with_real_imports",
+          "full_name": "chemistry_db_comparison_benchmark/chemistry_db_real_file/mdix_compile_with_real_imports",
+          "lower_ns": 62056000.0,
+          "mean_ns": 62367000.0,
+          "upper_ns": 62891000.0,
+          "std_ns": 208750.0
         },
         {
-          "suite": "throughput_benchmark",
-          "group": "lexer_throughput",
-          "name": "large_synthetic",
-          "full_name": "throughput_benchmark/lexer_throughput/large_synthetic",
-          "lower_ns": 2050900.0,
-          "mean_ns": 2052600.0,
-          "upper_ns": 2054800.0,
-          "std_ns": 975.0
-        }
-      ]
-    },
-    {
-      "name": "lexer_throughput",
-      "benchmarks": [
-        {
-          "suite": "lexer_throughput",
-          "group": "lexer_performance",
-          "name": "real_mdix_file",
-          "full_name": "lexer_throughput/lexer_performance/real_mdix_file",
-          "lower_ns": 91693.0,
-          "mean_ns": 91928.0,
-          "upper_ns": 92196.0,
-          "std_ns": 125.75
+          "suite": "chemistry_db_comparison_benchmark",
+          "group": "chemistry_db_scaled_vs_toml_json/mdix_compile",
+          "name": "5_elements",
+          "full_name": "chemistry_db_comparison_benchmark/chemistry_db_scaled_vs_toml_json/mdix_compile/5_elements",
+          "lower_ns": 6818100.0,
+          "mean_ns": 6845700.0,
+          "upper_ns": 6884800.0,
+          "std_ns": 16675.0
         },
         {
-          "suite": "lexer_throughput",
-          "group": "lexer_performance",
-          "name": "small_10kb",
-          "full_name": "lexer_throughput/lexer_performance/small_10kb",
-          "lower_ns": 92525.0,
-          "mean_ns": 92591.0,
-          "upper_ns": 92658.0,
-          "std_ns": 33.25
+          "suite": "chemistry_db_comparison_benchmark",
+          "group": "chemistry_db_scaled_vs_toml_json/json_parse",
+          "name": "5_elements",
+          "full_name": "chemistry_db_comparison_benchmark/chemistry_db_scaled_vs_toml_json/json_parse/5_elements",
+          "lower_ns": 103340.0,
+          "mean_ns": 103550.0,
+          "upper_ns": 103730.0,
+          "std_ns": 97.5
         },
         {
-          "suite": "lexer_throughput",
-          "group": "lexer_performance",
-          "name": "medium_100kb",
-          "full_name": "lexer_throughput/lexer_performance/medium_100kb",
-          "lower_ns": 924540.0,
-          "mean_ns": 925280.0,
-          "upper_ns": 926150.0,
-          "std_ns": 402.5
+          "suite": "chemistry_db_comparison_benchmark",
+          "group": "chemistry_db_scaled_vs_toml_json/toml_parse",
+          "name": "5_elements",
+          "full_name": "chemistry_db_comparison_benchmark/chemistry_db_scaled_vs_toml_json/toml_parse/5_elements",
+          "lower_ns": 790680.0,
+          "mean_ns": 791720.0,
+          "upper_ns": 792310.0,
+          "std_ns": 407.5
         },
         {
-          "suite": "lexer_throughput",
-          "group": "lexer_performance",
-          "name": "large_1mb",
-          "full_name": "lexer_throughput/lexer_performance/large_1mb",
-          "lower_ns": 9592500.0,
-          "mean_ns": 9615700.0,
-          "upper_ns": 9638800.0,
-          "std_ns": 11575.0
+          "suite": "chemistry_db_comparison_benchmark",
+          "group": "chemistry_db_scaled_vs_toml_json/mdix_compile",
+          "name": "10_elements",
+          "full_name": "chemistry_db_comparison_benchmark/chemistry_db_scaled_vs_toml_json/mdix_compile/10_elements",
+          "lower_ns": 10083000.0,
+          "mean_ns": 10139000.0,
+          "upper_ns": 10178000.0,
+          "std_ns": 23750.0
         },
         {
-          "suite": "lexer_throughput",
-          "group": "lexer_performance",
-          "name": "string_heavy",
-          "full_name": "lexer_throughput/lexer_performance/string_heavy",
-          "lower_ns": 604990.0,
-          "mean_ns": 605400.0,
-          "upper_ns": 605860.0,
-          "std_ns": 217.5
+          "suite": "chemistry_db_comparison_benchmark",
+          "group": "chemistry_db_scaled_vs_toml_json/json_parse",
+          "name": "10_elements",
+          "full_name": "chemistry_db_comparison_benchmark/chemistry_db_scaled_vs_toml_json/json_parse/10_elements",
+          "lower_ns": 226570.0,
+          "mean_ns": 226740.0,
+          "upper_ns": 226900.0,
+          "std_ns": 82.5
         },
         {
-          "suite": "lexer_throughput",
-          "group": "lexer_performance",
-          "name": "comment_heavy",
-          "full_name": "lexer_throughput/lexer_performance/comment_heavy",
-          "lower_ns": 590500.0,
-          "mean_ns": 590920.0,
-          "upper_ns": 591360.0,
-          "std_ns": 215.0
+          "suite": "chemistry_db_comparison_benchmark",
+          "group": "chemistry_db_scaled_vs_toml_json/toml_parse",
+          "name": "10_elements",
+          "full_name": "chemistry_db_comparison_benchmark/chemistry_db_scaled_vs_toml_json/toml_parse/10_elements",
+          "lower_ns": 1562500.0,
+          "mean_ns": 1564100.0,
+          "upper_ns": 1565800.0,
+          "std_ns": 825.0
         },
         {
-          "suite": "lexer_throughput",
-          "group": "lexer_performance/strategy_comparison",
-          "name": "halt",
-          "full_name": "lexer_throughput/lexer_performance/strategy_comparison/halt",
-          "lower_ns": 933040.0,
-          "mean_ns": 934690.0,
-          "upper_ns": 936750.0,
-          "std_ns": 927.5
+          "suite": "chemistry_db_comparison_benchmark",
+          "group": "chemistry_db_scaled_vs_toml_json/mdix_compile",
+          "name": "20_elements",
+          "full_name": "chemistry_db_comparison_benchmark/chemistry_db_scaled_vs_toml_json/mdix_compile/20_elements",
+          "lower_ns": 16433000.0,
+          "mean_ns": 16481000.0,
+          "upper_ns": 16581000.0,
+          "std_ns": 37000.0
         },
         {
-          "suite": "lexer_throughput",
-          "group": "lexer_performance/strategy_comparison",
-          "name": "continue",
-          "full_name": "lexer_throughput/lexer_performance/strategy_comparison/continue",
-          "lower_ns": 933170.0,
-          "mean_ns": 936340.0,
-          "upper_ns": 939090.0,
-          "std_ns": 1480.0
+          "suite": "chemistry_db_comparison_benchmark",
+          "group": "chemistry_db_scaled_vs_toml_json/json_parse",
+          "name": "20_elements",
+          "full_name": "chemistry_db_comparison_benchmark/chemistry_db_scaled_vs_toml_json/json_parse/20_elements",
+          "lower_ns": 468000.0,
+          "mean_ns": 470270.0,
+          "upper_ns": 473040.0,
+          "std_ns": 1260.0
+        },
+        {
+          "suite": "chemistry_db_comparison_benchmark",
+          "group": "chemistry_db_scaled_vs_toml_json/toml_parse",
+          "name": "20_elements",
+          "full_name": "chemistry_db_comparison_benchmark/chemistry_db_scaled_vs_toml_json/toml_parse/20_elements",
+          "lower_ns": 3136600.0,
+          "mean_ns": 3139500.0,
+          "upper_ns": 3141600.0,
+          "std_ns": 1250.0
+        },
+        {
+          "suite": "chemistry_db_comparison_benchmark",
+          "group": "chemistry_db_scaled_vs_toml_json/mdix_compile",
+          "name": "real_full_file",
+          "full_name": "chemistry_db_comparison_benchmark/chemistry_db_scaled_vs_toml_json/mdix_compile/real_full_file",
+          "lower_ns": 64771000.0,
+          "mean_ns": 64896000.0,
+          "upper_ns": 64979000.0,
+          "std_ns": 52000.0
+        },
+        {
+          "suite": "chemistry_db_comparison_benchmark",
+          "group": "chemistry_db_scaled_vs_toml_json/json_parse",
+          "name": "real_full_file",
+          "full_name": "chemistry_db_comparison_benchmark/chemistry_db_scaled_vs_toml_json/json_parse/real_full_file",
+          "lower_ns": 2519000.0,
+          "mean_ns": 2519800.0,
+          "upper_ns": 2520900.0,
+          "std_ns": 475.0
+        },
+        {
+          "suite": "chemistry_db_comparison_benchmark",
+          "group": "chemistry_db_scaled_vs_toml_json/toml_parse",
+          "name": "real_full_file",
+          "full_name": "chemistry_db_comparison_benchmark/chemistry_db_scaled_vs_toml_json/toml_parse/real_full_file",
+          "lower_ns": 17361000.0,
+          "mean_ns": 17371000.0,
+          "upper_ns": 17380000.0,
+          "std_ns": 4750.0
         }
       ]
     }

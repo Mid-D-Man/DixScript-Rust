@@ -627,12 +627,6 @@ fn execute_iterative_resolution(
                     let ns_name   = pending[i].0.namespace_name.clone();
                     let scope     = pending[i].0.scope.clone();
                     let pos       = pending[i].0.position;
-                    let arg_strs: Vec<String> = pending[i]
-                        .0
-                        .arguments
-                        .iter()
-                        .map(|a| format!("{:?}", a))
-                        .collect();
 
                     if let Some((arena, data)) = self.data.parts() {
                         data_changed |=
@@ -658,7 +652,6 @@ fn execute_iterative_resolution(
                         namespace_name: ns_name,
                         location,
                         scope,
-                        arguments:      arg_strs,
                         result:         Some(dix_value),
                         success:        true,
                         error_message:  String::new(),
@@ -675,12 +668,6 @@ fn execute_iterative_resolution(
                     let fn_name  = pending[i].0.function_name.clone();
                     let ns_name  = pending[i].0.namespace_name.clone();
                     let scope    = pending[i].0.scope.clone();
-                    let arg_strs: Vec<String> = pending[i]
-                        .0
-                        .arguments
-                        .iter()
-                        .map(|a| format!("{:?}", a))
-                        .collect();
 
                     let resolver_err = ResolverError::ExecutionFailed {
                         function: fn_name.clone(),
@@ -693,7 +680,6 @@ fn execute_iterative_resolution(
                         namespace_name: ns_name,
                         location,
                         scope,
-                        arguments:      arg_strs,
                         result:         None,
                         success:        false,
                         error_message:  resolver_err.to_string(),

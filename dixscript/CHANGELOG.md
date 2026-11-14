@@ -123,9 +123,14 @@ Breaking release.
   `write_back.rs`.
 - The owned phase 5 of `ValueResolver` (334 lines: the identifier walk over entries and values),
   replaced by the arena version in `identifier_resolution.rs`.
+- `ResolutionRecord::arguments` (a public field, so a breaking change): the `Debug` text of each
+  argument expression, built for every call attempt and read by nothing in the workspace.
 
 ### Performance
 
+- Value resolution no longer builds a `Debug` string for every argument of every call it records: the
+  whole pipeline (debug build, prepare and resolve) is 5.6 percent cheaper on the largest corpus file,
+  4.1 to 4.6 percent on two others, and unchanged on files with few calls.
 - Value resolution's remaining-identifier pass no longer builds a formatted path string and clones an
   entry for every node it visits: on the largest corpus file its cost fell from about 146M to 16M
   instructions, and the whole pipeline (debug build, prepare and resolve) is 2.3 to 9.8 percent

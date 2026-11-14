@@ -104,8 +104,6 @@ pub struct ResolutionRecord {
     pub namespace_name: Option<String>,
     pub location: String,
     pub scope: String,
-    /// String representations of arguments — for logging, not re-parsing.
-    pub arguments: Vec<String>,
     pub result: Option<DixValue>,
     pub success: bool,
     pub error_message: String,

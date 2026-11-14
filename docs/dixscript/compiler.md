@@ -1558,9 +1558,9 @@ error types `ExecutionError` and `FunctionExecutionError`.
   so listed under Removed for 2.0.0).
 - `FunctionCallInfo.arguments` stays a list of owned `Expression`s: the interpreter still takes
   them, and only the arguments of a call that was found are copied out of the arena.
-- `ResolutionRecord.arguments` (a `Debug` string per argument, built for every call even with
-  debug off) is unchanged public output that nothing in the workspace reads; whether to drop it is
-  for the interpreter drop.
+- `ResolutionRecord` has no `arguments` field any more. It held the `Debug` text of each argument
+  expression, built for every call attempt even with debug off; nothing in the workspace read it
+  (`Display` does not print it). Removed for 2.0.0, see the last subsection of this document.
 
 **Tests:** exercised through `cargo test -p dixscript --test value_resolver_writeback_document`
 and the other resolver tests.
@@ -2344,7 +2344,7 @@ requires the larger to take less than 7 times as long.
   their results to the document's data, where before they went to the owned tree by position; the
   loader never produces that, and the two tests that cover the quiet cases also pass on the original.
   `ResolutionRecord.arguments` still builds a `Debug` string per argument for every call and nothing
-  reads it.
+  reads it (removed in the last subsection).
 - **Not done in this half.** Phase 5 (the remaining identifiers) still read and rewrote the owned
   tree, so the owned export after phase 4 stayed; it moves in the next subsection.
 
@@ -2393,7 +2393,8 @@ requires the larger to take less than 7 times as long.
   resolve. The phase is kept exactly as it was, with its passes and its log lines. A document and an
   owned tree that disagree now give phase 5 the document's data (the loader never produces that; the
   test `phase_five_reads_and_rewrites_the_document` fails on the original). The call list still carries owned
-  argument expressions and `ResolutionRecord.arguments` still builds a `Debug` string per argument.
+  argument expressions and `ResolutionRecord.arguments` still builds a `Debug` string per argument
+  (removed in the last subsection).
 - **Not done in this drop.** The interpreter (14.8 percent of the largest file's pipeline when it was
   last measured), the
   runtime, the DLM auditor, the binary packer, the language server (not type-checked here, but it
@@ -2401,3 +2402,44 @@ requires the larger to take less than 7 times as long.
   crates still read the owned tree, and the owned data section is still exported once at the end of
   value resolution. Stage 9 still copies the resolved `@DATA` into an arena, although the document now
   holds it; the loader drops the document after stage 7. CI on stable Rust has not been run.
+
+### Fixes and Problems: `ResolutionRecord.arguments` removed
+
+- **What it was.** `ResolutionRecord`, one entry of `ValueResolutionResult::resolution_history`
+  for each call attempt, had a public `arguments: Vec<String>` that held `format!("{:?}", a)` of
+  every argument expression of the call, written in both places the record is built (a call that
+  succeeded and one that failed). The record's `Display` does not print it, no other crate in the
+  workspace (`mdix-lsp`, the wasm, python, ffi, java and lua crates) mentions the history, and the only
+  readers were two test helpers of this repository that printed it into a fingerprint. It was built
+  for every call even with debugging off.
+- **What changed.** The field and the two blocks that built the strings are removed from
+  `supporting_classes.rs` and `value_resolver.rs`: 16 lines deleted and none added. Library warnings
+  stay at 119. It is a public field, so it is listed under Removed for 2.0.0.
+- **The tests.** The history formatter of `value_resolver_context_document.rs` and of
+  `value_resolver_writeback_document.rs` no longer prints the arguments, which changes the text that
+  `RECORDING` and `HAND_RECORDING` (the first file) and `RECORDING` (the second) hash. Those three
+  tables were made again by running the unchanged code of origin with the new formatter (two runs
+  identical), and both files pass on that code and on the new code. `CONTEXT_RECORDING` and
+  `WALK_RECORDING`, which do not hash the history, came out identical to the tables already in the file,
+  which is the check that nothing else moved.
+- **How it was checked.** The harness ran 140 inputs through the four ways the code can be reached,
+  560 outputs, with the code of origin and the new code, each twice, the history lines printed without
+  the arguments on both sides. After the same normalization 533 outputs are identical; the other 27 are
+  the seven files that differ from run to run in the unchanged code (the 12 outputs of three of them
+  are equal in all four runs, the 8 quiet outputs of the other four are equal in shape, 6 of their 8
+  verbose logs are equal in the sequence of messages, and the two verbose logs of `random_static_test`
+  differ between runs of the same binary). There are no injected bugs for this drop because it adds no
+  logic; the compiler, the whole suite and the harness are the checks.
+- **Measured.** Callgrind, debug build, one run of the harness (prepare and resolve) per file, the
+  code of origin against the new code, with the same harness on both sides, instructions:
+  `basic/EnumUsage.mdix` 34.17M against 34.16M, `BigBoy.mdix` 61.63M against 59.13M (4.1 percent
+  fewer), `Unholy.mdix` 335.73M against 320.32M (4.6 fewer), `basic/a_test.mdix` 10.15M against 10.14M,
+  `elements_database.mdix` 1,596.7M against 1,506.7M (5.6 fewer), the same file through the owned
+  entry point 1,621.9M against 1,532.1M (5.5 fewer), and a generated input of 500 calls with lambdas
+  375.7M against 371.7M (1.1 fewer). The figure of about 3.6 percent noted earlier for the strings was
+  an estimate from a profile. These absolute numbers are lower than those of the two previous
+  subsections because the harness itself no longer formats the strings; the earlier comparisons had the
+  same shared cost on both sides, so their ratios stand, a little diluted. Release builds, wall-clock
+  time and peak memory were not measured.
+- **Not done in this drop.** The interpreter and the arena version of lambdas (see the next drop),
+  the runtime, the DLM auditor, the binary packer, the language server and the sibling crates.

@@ -474,8 +474,8 @@ fn resolve(
         .iter()
         .map(|r| {
             format!(
-                "{} {:?} {} {} {:?} {:?} {} {}",
-                r.function_name, r.namespace_name, r.location, r.scope, r.arguments, r.result,
+                "{} {:?} {} {} {:?} {} {}",
+                r.function_name, r.namespace_name, r.location, r.scope, r.result,
                 r.success, r.error_message
             )
         })
@@ -685,30 +685,30 @@ fn all_inputs() -> Vec<(String, String, String)> {
 /// `(name, ok, fingerprint)` of every source, produced by running the original code.
 const RECORDING: &[(&str, bool, u64)] = &[
     ("d01_aliases", true, 0xddcfb76f70f0afb7),
-    ("d02_calls_positions", true, 0xbc762735fd4823b1),
-    ("d03_imported_calls", true, 0x51b6d9290a693985),
+    ("d02_calls_positions", true, 0x5d84cd91f7f49ae7),
+    ("d03_imported_calls", true, 0x8ea53e65b96009c1),
     ("d04_literals_only", true, 0xbafcdf58f9387bef),
-    ("d05_mixed_scopes", false, 0xcac73e9b5e15236e),
-    ("../mdix_files/intermediate/FunctionScoping.mdix", true, 0x914524c2f6ae31c4),
-    ("../mdix_files/intermediate/CompleteFeature.mdix", true, 0x2561bf37d16957a2),
-    ("../mdix_files/advanced/data_variable_usage.mdix", true, 0xe6315e06366fd7a8),
-    ("../mdix_files/advanced/all_datatypes_test.mdix", true, 0xc63e697a49b62871),
+    ("d05_mixed_scopes", false, 0x064c5d68a1c3aed2),
+    ("../mdix_files/intermediate/FunctionScoping.mdix", true, 0x1b034805830ae6dc),
+    ("../mdix_files/intermediate/CompleteFeature.mdix", true, 0x842f94ca54180be7),
+    ("../mdix_files/advanced/data_variable_usage.mdix", true, 0x8d43af77bb20fedb),
+    ("../mdix_files/advanced/all_datatypes_test.mdix", true, 0x9385de2f1223bee3),
 ];
 
 /// `(case, ok, fingerprint)` of every hand-built case, produced by running the original code.
 const HAND_RECORDING: &[(&str, bool, u64)] = &[
     ("empty", true, 0x545e85d2a6e55ff9),
     ("no_calls", true, 0xc64dcb4aa19c61d8),
-    ("ctx_scalars", true, 0x3642bcd8894c2ba5),
-    ("ctx_ctor", true, 0xd772bc73dbb8b4ed),
-    ("ctx_containers", true, 0x903d9ac354b9b592),
-    ("ctx_tables_groups", true, 0x1d38949d2c5a18fc),
+    ("ctx_scalars", true, 0x429c9e7b3bf91616),
+    ("ctx_ctor", true, 0x5bca0c959eac3c3e),
+    ("ctx_containers", true, 0x31b61e8f5bea28db),
+    ("ctx_tables_groups", true, 0x1dd0ae6aed435631),
     ("alias_limit", true, 0x72e1cb7332973cfa),
-    ("walk_values", true, 0xcf771f96b3a4b6d9),
-    ("walk_exprs_entered", true, 0xef84035f3a1b0419),
+    ("walk_values", true, 0x9e1265c8f9b6d7fe),
+    ("walk_exprs_entered", true, 0xcf6c402da1927e57),
     ("walk_exprs_not_entered", true, 0xdbfc06ade2175705),
-    ("walk_names", false, 0x156b92b2fa6f37bb),
-    ("walk_scopes", true, 0xa37c5febbfd984a1),
+    ("walk_names", false, 0x573482a97b325f46),
+    ("walk_scopes", true, 0xf15b7446bcbb0fed),
     ("alias_forms", true, 0xc9e161e1db9d21a2),
     ("alias_table_only", true, 0x92475e1f107ca73b),
     ("alias_group_only", true, 0x85455ed7d310b2f3),

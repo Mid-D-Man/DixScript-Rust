@@ -321,6 +321,92 @@ const IMPORTS: &str = "@IMPORTS(\n  Base from \"base_types.mdix\"\n  Types from 
 
 const QF3: &str = "@QUICKFUNCS(\n  ~f<int> => global(x<int>) { return x + 1 }\n  ~g<int> => global(x<int>) { return x + 2 }\n  ~h<int> => global(x<int>) { return x + 3 }\n  ~i<int> => global(x<int>) { return x + 4 }\n  ~boom<int> => global(x<int>) { return x / 0 }\n  ~mklong<long> => global(x<int>) { return 9_000_000_000L + x }\n  ~mkfloat<float> => global(x<int>) { return 1.5f }\n  ~mkdouble<double> => global(x<int>) { return 2.5 }\n  ~mkstr<string> => global(s<string>) { return s + \"!\" }\n  ~mkbool<bool> => global(x<int>) { return x > 0 }\n  ~mkhex<hex> => global(x<int>) { return #FF5733 }\n  ~mkarr<array> => global(x<int>) { return [x, x + 1, x + 2] }\n  ~mktup<tuple> => global(x<int>) { return t:(x, x + 1) }\n  ~mkobj<object> => global(x<int>) { return { only = x } }\n  ~mkdate<date> => global(x<int>) { return 2025-12-31 }\n  ~mkts<timestamp> => global(x<int>) { return 2025-12-31T23:59:59Z }\n  ~mkblob<blob> => global(x<int>) { return b:(\"QUJD\") }\n  ~mkre<regex> => global(x<int>) { return r:(\"^a+$\") }\n  ~mknested<array> => global(x<int>) { return [[x], [x + 1]] }\n  ~mknull<object> => global(x<int>) { return null }\n)\n\n";
 
+/// Lambdas of every kind the interpreter supports: plain, typed, block-bodied, passed as an
+/// argument, returned from a lambda, closed over variables, nested three deep and called more than once.
+const LAMBDAS: &str = r#"@QUICKFUNCS(
+  ~simple<int> => global() {
+      let func = () => 42;
+      return func();
+  }
+  ~single<int> => global(x<int>) {
+      let d = (n) => n * 2;
+      return d(x);
+  }
+  ~multi<int> => global(a<int>, b<int>) {
+      let f = (x, y) => x + y;
+      return f(a, b);
+  }
+  ~block<int> => global(x<int>) {
+      let c = (n<int>) => {
+          let t = n * 2;
+          let r = t + 10;
+          return r;
+      };
+      return c(x);
+  }
+  ~passed<int> => global(x<int>) {
+      let apply = (n<int>, fn) => fn(n);
+      let result = apply(x, (v) => v * 2);
+      return result;
+  }
+  ~cond<int> => global(x<int>) {
+      let check = (n<int>) => n > 0 ? n : -n;
+      return check(x);
+  }
+  ~obj<object> => global(id<int>) {
+      let mk = (u<int>) => {
+          id = u,
+          active = true
+      };
+      return mk(id);
+  }
+  ~nest1<int> => global(x<int>) {
+      let outer = (a<int>) => {
+          let inner = (b<int>) => a + b;
+          return inner;
+      };
+      let add5 = outer(5);
+      return add5(x);
+  }
+  ~nest3<int> => global(x<int>) {
+      let l1 = (a<int>) => (b<int>) => (c<int>) => a + b * c;
+      let l2 = l1(10);
+      let l3 = l2(5);
+      return l3(x);
+  }
+  ~closure<int> => global(base<int>) {
+      let m = 3;
+      let outer = (x<int>) => {
+          let inner = (y<int>) => x * y * m;
+          return inner;
+      };
+      let f = outer(base);
+      return f(2) + f(3);
+  }
+  ~twice<int> => global(x<int>) {
+      let inc = (n<int>) => n + 1;
+      return inc(inc(x));
+  }
+)
+
+@DATA(
+  s1 = simple()
+  s2 = single(4)
+  s3 = single(9)
+  m1 = multi(3, 4)
+  b1 = block(5)
+  p1 = passed(6)
+  c1 = cond(-7)
+  c2 = cond(8)
+  o1 = obj(3)
+  n1 = nest1(10)
+  n2 = nest1(20)
+  n3 = nest3(2)
+  cl = closure(4)
+  tw = twice(1)
+)
+"#;
+
 fn sources3() -> Vec<(&'static str, String)> {
     let (h, i, e, q) = (HEADER, IMPORTS, ENUMS, QF3);
     let mut v: Vec<(&'static str, String)> = Vec::new();
@@ -333,6 +419,7 @@ fn sources3() -> Vec<(&'static str, String)> {
     v.push(("w07_enums", format!("{h}{e}{q}@DATA(\n  one = Color.RED\n  arr = [Color.RED, f(1)]\n  nest = [[Color.BLUE, f(2)], [Level.HIGH]]\n  rows::\n    f(1),\n    Color.GREEN\n)\n")));
     v.push(("w08_dups", format!("{h}{q}@DATA(\n  a = f(1)\n  b = f(1)\n  arr = [f(1), f(1)]\n  tbl.t:\n    k = f(1),\n    m = f(1)\n)\n")));
     v.push(("w09_imported", format!("{h}{i}{q}@DATA(\n  a = Base.scaledValue(10, Base.Rarity.RARE)\n  arr = [Base.scaledValue(1, Base.Rarity.COMMON), f(2)]\n  tbl.t:\n    k = Base.scaledValue(3, Base.Rarity.RARE)\n    m = mkarr(1)\n)\n")));
+    v.push(("w11_lambdas", format!("{h}{LAMBDAS}")));
     v.push(("w10_only_literals", format!("{h}{q}@DATA(\n  a = 1\n  b = [1, 2]\n  o = {{ x = 1 }}\n)\n")));
     v
 }
@@ -678,6 +765,7 @@ const RECORDING: &[(&str, bool, u64)] = &[
     ("w07_enums", true, 0xaf754f6ee6f825cb),
     ("w08_dups", true, 0xe19464aee831fb64),
     ("w09_imported", true, 0x92f44c3aab3fa574),
+    ("w11_lambdas", true, 0xadb6a68f6df8ac10),
     ("w10_only_literals", true, 0x4fc40277c07cf6d6),
     ("hand3_w_simple", true, 0xad514b4217d7c010),
     ("hand3_w_table", true, 0x3999cd49695a5f6f),

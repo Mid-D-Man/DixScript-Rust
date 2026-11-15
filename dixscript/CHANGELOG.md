@@ -128,6 +128,11 @@ Breaking release.
 
 ### Performance
 
+- Lambdas no longer copy their whole definition (body, statements and captured variables) every
+  time they are called or passed: the interpreter shares the registry entry. A generated script of
+  500 calls with block-bodied lambdas runs 18.7 percent fewer instructions and one of 3,000 calls with
+  larger lambdas 29.1 percent fewer (debug build, prepare and resolve); a script with a few lambdas
+  gains about 2 percent, and one with none is unchanged.
 - Value resolution no longer builds a `Debug` string for every argument of every call it records: the
   whole pipeline (debug build, prepare and resolve) is 5.6 percent cheaper on the largest corpus file,
   4.1 to 4.6 percent on two others, and unchanged on files with few calls.

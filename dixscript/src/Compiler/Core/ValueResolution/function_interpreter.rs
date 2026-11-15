@@ -1,4 +1,7 @@
-
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/ValueResolution/function_interpreter.rs"
+// ============================================================================
 //! Executes QuickFunction bodies at compile time.
 //!
 //! Parameter threading eliminates mutable field swapping. DebugConfig is
@@ -197,7 +200,11 @@ pub struct FunctionInterpreter<'a> {
     debug_config:             DebugConfig,
     recursion_depth:          u32,
     current_recursion_limit:  u32,
-    lambda_registry:          FxHashMap<String, LambdaAst>,
+    /// The lambdas defined so far, by reference key. Entries are shared (`Rc`) because every
+    /// invocation and every `let g = f` takes a copy of the entry, and a deep copy of the body, the
+    /// statements and the captured variables on each of them was a large part of the cost of a
+    /// lambda-heavy script. An entry is never changed after it is inserted.
+    lambda_registry:          FxHashMap<String, Rc<LambdaAst>>,
     /// Monotonically-increasing counter used to generate unique lambda reference
     /// keys of the form `"__lam_N"`.  These keys are stored as DixValue strings
     /// and allow lambdas to be passed as first-class values.
@@ -2504,12 +2511,12 @@ fn evaluate_enum_access(
                 let key = format!("__lam_{}", self.lambda_counter);
                 self.lambda_counter += 1;
 
-                self.lambda_registry.insert(key.clone(), LambdaAst {
+                self.lambda_registry.insert(key.clone(), Rc::new(LambdaAst {
                     params:       parameters.clone(),
                     body:         *body.clone(),
                     statements:   statements.clone(),
                     captured_env: if captured.is_empty() { None } else { Some(captured) },
-                });
+                }));
 
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!(

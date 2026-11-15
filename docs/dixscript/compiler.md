@@ -1663,7 +1663,7 @@ the new way a result is written.
   built and run twice with the ignored `print_recording` and `print_shapes`, the two runs identical),
   then required of the new code, through the document and through the owned entry point.
   `RECORDING` fingerprints the whole outcome (verdict, errors, resolved tree, history of calls) of
-  ten crafted sources and 26 hand-built data sections; `SHAPES` lists the resolved data of every
+  eleven crafted sources (the last has lambdas) and 26 hand-built data sections; `SHAPES` lists the resolved data of every
   hand-built section value by value, so a failure names the value.
 - **The hand-built sections reach what the grammar cannot:** a result in every kind of place and
   at depth, nested arrays and their levels, all 16 kinds of result a function can return (null
@@ -1693,6 +1693,38 @@ the new way a result is written.
 **Tests:** `cargo test -p dixscript --test value_resolver_writeback_document`. Twelve tests and
 three ignored helpers (`print_recording`, `print_shapes`, `print_phase_five`), all passing on
 Rust 1.75.
+
+### `Compiler/Core/ValueResolution/function_interpreter.rs`
+
+**What it does:** Runs the body of a quickfunction at compile time, for `ValueResolver` phase 4. It
+is one tree-walker over the owned AST, 51 functions in about 2,800 lines: `execute` binds the
+parameters and runs the statements of the body, `execute_statement` and its helpers handle the nine
+statement kinds, `evaluate_expression` (the largest function, about 260 lines) the expression kinds,
+and further functions make builtin calls, imported calls, instance method calls and lambda calls.
+Errors are typed `InterpreterError` variants, and recursion has a depth limit. It reads the owned
+`QuickFunction` bodies and `Expression` trees; it is not yet over the arena.
+
+**Decisions:**
+- **A lambda value is a string key.** Creating a lambda stores its definition (`LambdaAst`: the
+  parameter names, the body expression, the statements of a block body, and the captured variables)
+  in `lambda_registry` under a key `__lam_N` from a counter, and the value that flows through the
+  script is that key as a string. Calling or passing it looks the key up. So a lambda is never held
+  inside a runtime value, only a key is, and the registry belongs to the interpreter.
+- **Registry entries are shared (`Rc<LambdaAst>`).** Every invocation, every argument that is a lambda
+  and every `let g = f` took a deep copy of the entry (body, statements, parameter names and the
+  captured variables), and dropped it afterwards. They now copy a pointer. An entry is never changed
+  after it is inserted, so sharing cannot be seen from a script. The measured effect is in the last
+  subsection.
+- **The interpreter is not `Send`.** It holds the data context as an `Rc<RefCell<..>>` shared with the
+  resolver, so it cannot cross a thread today; the shared registry entries add nothing to that. This
+  is what a parallel execution of calls would first have to replace.
+- The arena version of the walker and of the lambda handles is a separate, larger drop; the numbers
+  of the last subsection are the baseline it has to beat.
+
+**Tests:** `cargo test -p dixscript --test value_resolver_writeback_document` (the source
+`w11_lambdas` has fourteen calls that use plain, typed, block-bodied, passed, returned, closed-over,
+nested and repeated lambdas, and its outcome is part of the recording made before the change), and
+the whole suite.
 
 ### `tests/value_resolution_scaling.rs`
 
@@ -2443,3 +2475,38 @@ requires the larger to take less than 7 times as long.
   time and peak memory were not measured.
 - **Not done in this drop.** The interpreter and the arena version of lambdas (see the next drop),
   the runtime, the DLM auditor, the binary packer, the language server and the sibling crates.
+
+### Fixes and Problems: the lambda registry shares its entries
+
+- **What it was.** The interpreter keeps every lambda it creates in `lambda_registry`, and a lambda
+  value is only the key (`__lam_N`). Each invocation, each argument that is a lambda and each
+  `let g = f` read the entry with `.get(key).cloned()`, a deep copy of the `LambdaAst` (parameter
+  names, body expression, statements and captured variables), and dropped it afterwards.
+- **What changed.** The registry holds `Rc<LambdaAst>`, so those copies are pointer copies. Two lines
+  of code changed in `function_interpreter.rs` (the field type and the one insert), plus a comment on
+  the field. Nothing writes to an entry after it is inserted, so the sharing cannot be seen from a
+  script. The file also got its NOTICE header and a section in this document, which it had not had.
+  The interpreter was not `Send` before (it holds the `Rc<RefCell<..>>` data context) and is not now.
+- **How it was checked.** A new crafted source in `value_resolver_writeback_document.rs`,
+  `w11_lambdas`, has fourteen calls using plain, typed, block-bodied, passed, returned, closed-over,
+  nested and repeated lambdas; its outcome is in `RECORDING`, which was made by running the code before
+  the change (two runs identical) and passes before and after. The harness ran 141 inputs through the
+  four ways the code can be reached, 564 outputs, before and after, each twice: 536 are identical and
+  the other 28 are the seven files that differ from run to run in the unchanged code (the corpus
+  file with lambdas, `FullFunctionTest`, is one of them; its 4 outputs are equal in all four runs in
+  structure). The three generated lambda inputs below and the new source, 16 outputs in all, are
+  byte-identical before and after, 187 million characters for the large one.
+  There are no injected bugs because the change adds no logic.
+- **Measured.** Callgrind, debug build, one run of the harness (prepare and resolve), before against
+  after, instructions. Generated inputs of 20, 500 and 3,000 calls whose lambda bodies have 1, 5 and
+  20 statements and are called 1, 3 and 5 times per call: 12.97M against 12.68M (2.3 percent fewer),
+  371.7M against 302.1M (18.7 fewer) and 9,018M against 6,396M (29.1 fewer). The new source
+  `w11_lambdas` 19.20M against 18.73M (2.5 fewer), `FullFunctionTest.mdix`, the one corpus file with
+  lambdas, 181.7M against 180.8M (0.5 fewer), and `elements_database.mdix`, which has none, 1,506.6M
+  against 1,506.6M (unchanged, as it should be). Before the change the clone of the entry was 1.2, 11.2
+  and 18.4 percent of the pipeline on the three generated inputs. The generated inputs are synthetic:
+  the corpus uses lambdas only in one file and never with a higher-order builtin. Release builds,
+  wall-clock time and peak memory were not measured.
+- **What is left.** Walking the body of a lambda is still over the owned tree. The arena version of
+  the interpreter and of the lambda handles is the next drop, and these figures are the baseline it
+  has to beat on the same three inputs.

@@ -23,13 +23,14 @@
 //! * phases 2 and 3 allocate nothing in the document's arena (what the run adds is the
 //!   write-back of phase 4).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::OnceLock;
 
-use dixscript::Compiler::AST::arena::Document;
+use dixscript::Compiler::AST::arena::{Arena, Document};
 use dixscript::Compiler::AST::data_types::{CompatibilityMode, ErrorHandlingStrategy};
 use dixscript::Compiler::AST::{
     DataEntry, DataSection, DataType, DebugMode, DixScript, Expression as E, ObjectProperty,
@@ -37,10 +38,11 @@ use dixscript::Compiler::AST::{
 };
 use dixscript::Compiler::Core::Config::{ConfigSectionHandler, OperationalSettings};
 use dixscript::Compiler::Core::Tokenizer::{split_config_tokens, Tokenizer};
-use dixscript::Compiler::Core::ValueResolution::{ASTWalker, FunctionCallInfo, ValueResolver};
+use dixscript::Compiler::Core::ValueResolution::{ASTWalker, FunctionCallInfo, FunctionInterpreter, ValueResolver};
 use dixscript::Compiler::Core::{GeneralAstEnhancer, GeneralParser, GeneralSemanticAnalyzer};
 use dixscript::Compiler::Utilities::SymbolTable;
 use dixscript::ErrorManager::ErrorManager;
+use dixscript::Utilities::RustcHash::FxHashMap;
 
 // ==================== helpers ====================
 
@@ -787,20 +789,47 @@ fn case_entries(case: &str) -> Vec<DataEntry> {
     hand_cases().into_iter().find(|(n, _)| *n == case).unwrap_or_else(|| panic!("no case {case}")).1
 }
 
-/// The calls the owned call finder finds in `entries`.
-fn walk_owned(entries: Vec<DataEntry>) -> Vec<FunctionCallInfo> {
+/// The calls the owned call finder finds in `entries`, with the scratch arena their arguments are in.
+fn walk_owned(entries: Vec<DataEntry>) -> (Vec<FunctionCallInfo>, Arena) {
     let _guard = registry_lock();
     let prepared = prepared_with(entries);
     let data = prepared.enhanced.data.as_ref().expect("a data section");
     ASTWalker::new(ErrorManager::new_isolated_silent(), &prepared.symbols, DebugMode::Off).find_all(data)
 }
 
-/// The calls the arena call finder finds in `entries`.
-fn walk_arena(entries: Vec<DataEntry>) -> Vec<FunctionCallInfo> {
+/// The calls the arena call finder finds in `entries`, with the arena their arguments are in.
+fn walk_arena(entries: Vec<DataEntry>) -> (Vec<FunctionCallInfo>, Arena) {
     let _guard = registry_lock();
     let prepared = prepared_with(entries);
-    let data = prepared.document.data.as_ref().expect("a data section");
-    find_in(&prepared.symbols, &prepared.document, data)
+    let calls = {
+        let data = prepared.document.data.as_ref().expect("a data section");
+        find_in(&prepared.symbols, &prepared.document, data)
+    };
+    (calls, prepared.document.arena)
+}
+
+/// One found call as text, its arguments exported out of `arena`. This is what the derived `Debug`
+/// of the call printed when the call finder still copied the arguments out of the arena itself,
+/// so the recorded fingerprints of the walk did not change when the arguments became a list.
+fn call_debug(call: &FunctionCallInfo, arena: &Arena) -> String {
+    let arguments: Vec<E> =
+        arena.expr_list(call.arguments).iter().map(|&a| arena.export_expr(a)).collect();
+    format!(
+        "FunctionCallInfo {{ function_name: {:?}, namespace_name: {:?}, arguments: {:?}, location: {:?}, scope: {:?}, entry_path: {:?}, position: {:?}, scope_context: {:?} }}",
+        call.function_name,
+        call.namespace_name,
+        arguments,
+        call.location,
+        call.scope,
+        call.entry_path,
+        call.position,
+        call.scope_context
+    )
+}
+
+/// The calls as the derived `Debug` of a list of them printed, see [`call_debug`].
+fn calls_debug(calls: &[FunctionCallInfo], arena: &Arena) -> String {
+    format!("[{}]", calls.iter().map(|c| call_debug(c, arena)).collect::<Vec<_>>().join(", "))
 }
 
 /// The one place the tests call the arena entry of the call finder.
@@ -849,8 +878,8 @@ fn walk_runs(arena: bool) -> Vec<(&'static str, String, u64)> {
     hand_cases()
         .into_iter()
         .map(|(case, entries)| {
-            let calls = if arena { walk_arena(entries) } else { walk_owned(entries) };
-            (case, walk_summary(&calls), fnv(&mask_times(&format!("{calls:?}"))))
+            let (calls, calls_arena) = if arena { walk_arena(entries) } else { walk_owned(entries) };
+            (case, walk_summary(&calls), fnv(&mask_times(&calls_debug(&calls, &calls_arena))))
         })
         .collect()
 }
@@ -1187,7 +1216,7 @@ fn the_phases_log_their_passes_and_counts() {
 // ==================== the call finder ====================
 
 fn found(case: &str) -> Vec<String> {
-    walk_summary(&walk_owned(case_entries(case))).split(',').filter(|s| !s.is_empty()).map(String::from).collect()
+    walk_summary(&walk_owned(case_entries(case)).0).split(',').filter(|s| !s.is_empty()).map(String::from).collect()
 }
 
 #[test]
@@ -1240,7 +1269,7 @@ fn a_name_is_split_only_for_an_imported_namespace() {
             "Zed.q@DATA.imp_node",
         ]
     );
-    let calls = walk_owned(case_entries("walk_names"));
+    let (calls, _) = walk_owned(case_entries("walk_names"));
     let namespaces: Vec<Option<&str>> = calls.iter().map(|c| c.namespace_name.as_deref()).collect();
     assert_eq!(
         namespaces,
@@ -1264,12 +1293,14 @@ fn locations_follow_tables_groups_arrays_and_objects() {
 
 #[test]
 fn a_found_call_carries_its_arguments() {
-    let calls = walk_owned(vec![simple("a", qfv("f", vec![ie(7), eqf("g", vec![ie(8)])]))]);
+    let (calls, arena) = walk_owned(vec![simple("a", qfv("f", vec![ie(7), eqf("g", vec![ie(8)])]))]);
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].function_name, "f");
-    assert_eq!(calls[0].arguments.len(), 2);
-    assert!(matches!(calls[0].arguments[0], E::Value { value: V::Integer { value: 7, .. }, .. }));
-    assert!(matches!(calls[0].arguments[1], E::QuickFuncCall { ref name, .. } if name == "g"));
+    let arguments: Vec<E> =
+        arena.expr_list(calls[0].arguments).iter().map(|&a| arena.export_expr(a)).collect();
+    assert_eq!(arguments.len(), 2);
+    assert!(matches!(arguments[0], E::Value { value: V::Integer { value: 7, .. }, .. }));
+    assert!(matches!(arguments[1], E::QuickFuncCall { ref name, .. } if name == "g"));
     assert_eq!(calls[1].function_name, "g");
     assert_eq!(calls[1].location, "DATA.a");
 }
@@ -1334,10 +1365,26 @@ fn value_of<'a>(outcome: &'a Outcome, name: &str) -> &'a V {
 #[test]
 fn the_owned_call_finder_is_the_arena_call_finder() {
     for (case, _) in hand_cases() {
-        let owned = walk_owned(case_entries(case));
-        let arena = walk_arena(case_entries(case));
-        assert_eq!(format!("{owned:?}"), format!("{arena:?}"), "{case}");
+        let (owned, owned_arena) = walk_owned(case_entries(case));
+        let (found, found_arena) = walk_arena(case_entries(case));
+        assert_eq!(calls_debug(&owned, &owned_arena), calls_debug(&found, &found_arena), "{case}");
     }
+}
+
+/// What the document's arena holds once the functions the interpreter can call are copied into it,
+/// which the resolver does before the first call. It is measured on a copy of the arena by the same
+/// call the resolver makes, so that a test of what a phase allocates can leave the functions out.
+fn sizes_with_functions(document: &Document, ast: &DixScript, symbols: &SymbolTable) -> (usize, usize, usize) {
+    let mut probe = document.arena.clone();
+    let mut interpreter = FunctionInterpreter::new_with_error_manager(
+        symbols,
+        Rc::new(RefCell::new(FxHashMap::default())),
+        DebugMode::Off,
+        ErrorManager::new_isolated_silent(),
+    );
+    let local = ast.quick_functions.as_ref().map(|q| q.functions.as_slice()).unwrap_or(&[]);
+    interpreter.register_functions(&mut probe, local);
+    (probe.value_count(), probe.expr_count(), probe.used_bytes())
 }
 
 #[test]
@@ -1355,12 +1402,13 @@ fn phases_two_and_three_allocate_nothing_in_the_document() {
         ],
     );
     let document = Document::from_owned(&ast);
-    let before = (document.arena.value_count(), document.arena.expr_count(), document.arena.used_bytes());
+    let before = sizes_with_functions(&document, &ast, &prepared.symbols);
     let outcome = resolve(ast, &prepared.symbols, &prepared.settings, Some(document), false);
     assert!(outcome.ok, "{:?}", outcome.errors);
     assert_eq!(history_names(&outcome).len(), 3, "the three calls were found and made");
-    // Phases 2 and 3 only read. Every node the run adds is the write-back of phase 4: the three
-    // results and the copy of array `c` that holds the second one.
+    // Phases 2 and 3 only read. Every node the run adds, beyond the functions the resolver copies in
+    // before its first call, is the write-back of phase 4: the three results and the copy of array
+    // `c` that holds the second one.
     let document = outcome.document.as_ref().unwrap();
     assert_eq!((document.arena.value_count(), document.arena.expr_count()), (before.0 + 4, before.1));
 }

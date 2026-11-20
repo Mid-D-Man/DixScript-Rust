@@ -241,7 +241,7 @@ sites in `src/` iterate an `FxHashMap`/`FxHashSet`; a looser second scan found
 no more that were real. Ten are order-independent (`.any()`, or collected into
 a standard `HashMap`, whose order is already randomized per process, or
 explicitly sorted first). One is a verbose debug log line
-(`ast_walker.rs`). One (`FunctionRegistry::function_names`) has no callers.
+(`ast_walker.rs`). One (`FunctionRegistry::function_names`, in a type that has since been removed) had no callers.
 So hash order does not reach user-visible output in `src/`. This was a static
 scan; it cannot see iteration through a returned value it couldn't type, which
 is one more reason to prefer the port, since identical hashes make the question

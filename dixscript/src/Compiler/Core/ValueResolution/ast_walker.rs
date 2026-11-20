@@ -13,8 +13,8 @@
 //!
 //! The walk is over the arena AST: [`ASTWalker::find_all_in`] reads a [`DocData`] and its
 //! [`Arena`], and [`ASTWalker::find_all`] copies an owned `DataSection` into a scratch arena
-//! and calls it. Only the arguments of a found call are copied out of the arena, once each, into
-//! the owned `Expression`s of its [`FunctionCallInfo`].
+//! and calls it. The arguments of a found call are not copied: its [`FunctionCallInfo`] holds
+//! them as a list of the arena the call was found in.
 //!
 //! Improvements over C# version:
 //!   - All debug logging is gated by a cached `DebugConfig`; `format!(…)`
@@ -31,7 +31,7 @@ use crate::Compiler::AST::arena::{
     Arena, DocData, DocDataEntry, DocPropertyAssignment, ExprId, ExprList, ExprNode, PropList,
     ValueId, ValueList, ValueNode,
 };
-use crate::Compiler::AST::{DataSection, Expression, Position, TablePath};
+use crate::Compiler::AST::{DataSection, Position, TablePath};
 use crate::Compiler::Core::DebugMode;
 use crate::Compiler::Utilities::SymbolTable;
 use crate::ErrorManager::{DebugConfig, ErrorManager};
@@ -68,14 +68,16 @@ impl<'a> ASTWalker<'a> {
         }
     }
 
-    /// Walk an owned DATA section and return all discovered function calls.
+    /// Walk an owned DATA section and return all discovered function calls, together with the
+    /// scratch arena the argument lists of the calls point into.
     ///
     /// The section is copied into a scratch arena and walked by [`find_all_in`](Self::find_all_in),
     /// so a caller that already holds the arena form should call that instead.
-    pub fn find_all(&mut self, data_section: &DataSection) -> Vec<FunctionCallInfo> {
+    pub fn find_all(&mut self, data_section: &DataSection) -> (Vec<FunctionCallInfo>, Arena) {
         let mut arena = Arena::new();
         let data = DocData::from_owned(&mut arena, data_section);
-        self.find_all_in(&arena, &data)
+        let calls = self.find_all_in(&arena, &data);
+        (calls, arena)
     }
 
     /// Walk the entire DATA section of an arena and return all discovered function calls.
@@ -384,7 +386,7 @@ impl<'a> ASTWalker<'a> {
             }
         }
 
-        self.push_call(arena, func_name, namespace_name, arguments, position);
+        self.push_call(func_name, namespace_name, arguments, position);
 
         for &arg in arena.expr_list(arguments) {
             self.visit_expression(arena, arg);
@@ -469,7 +471,7 @@ impl<'a> ASTWalker<'a> {
                     }
                 }
 
-                self.push_call(arena, func_name, namespace_name, arguments, position);
+                self.push_call(func_name, namespace_name, arguments, position);
             }
 
             ExprNode::ImportedFunctionCall { namespace_name, function_name, arguments, position } => {
@@ -483,7 +485,6 @@ impl<'a> ASTWalker<'a> {
                 }
 
                 self.push_call(
-                    arena,
                     function_name.to_string(),
                     Some(namespace_name.to_string()),
                     arguments,
@@ -550,17 +551,14 @@ impl<'a> ASTWalker<'a> {
         }
     }
 
-    /// Records a found call at the current scope, with its arguments copied out of the arena.
+    /// Records a found call at the current scope; its arguments stay in the arena as a list.
     fn push_call(
         &mut self,
-        arena: &Arena,
         function_name: String,
         namespace_name: Option<String>,
         arguments: ExprList,
         position: Position,
     ) {
-        let arguments: Vec<Expression> =
-            arena.expr_list(arguments).iter().map(|&a| arena.export_expr(a)).collect();
         self.found_calls.push(FunctionCallInfo {
             function_name,
             namespace_name,

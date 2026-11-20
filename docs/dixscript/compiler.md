@@ -1308,8 +1308,9 @@ initial data context, discovery of quickfunction calls, iterative execution of t
 with the result written back into the AST (phase 4), and the remaining identifier
 references (phase 5). The five phases are thin layers over `enum_resolution.rs`,
 `data_context.rs`, `ast_walker.rs`, `write_back.rs` and `identifier_resolution.rs` and read and
-rewrite the arena; the interpreter still reads the owned quickfunction bodies and takes owned
-argument expressions.
+rewrite the arena. Phase 4 runs each call through the interpreter, which also works on the arena:
+the resolver copies the functions the interpreter can call into the arena once, before the first
+call, and hands it the arena and the call's argument list.
 
 **Decisions:**
 - Phase 4 finds where every call sits in the data tree once, before its loop, as a path of
@@ -1369,8 +1370,27 @@ argument expressions.
 - **More removed with phase 5.** The owned phase 5 (334 lines: the pass loop's walk, and
   `resolve_identifiers_in_entry` and `resolve_identifiers_in_value` with the path strings built for
   every node visited) is replaced by `identifier_resolution.rs`; the loop that keeps the context in
-  step between passes and logs stays in `value_resolver.rs`. `convert_dix_value_to_value` stays: the
-  interpreter's argument wrapping still calls it, and nothing else does.
+  step between passes and logs stays in `value_resolver.rs`.
+- **Phase 4 hands the interpreter the arena.** `execute_call_raw` is now a call of
+  `FunctionInterpreter::execute_data_call` with the arena the data section lives in, the call's
+  argument list (`FunctionCallInfo.arguments` is an `ExprList`, not a copy of the expressions) and
+  its scope. The dependency check (`has_unresolved_dependencies` and the three functions under it)
+  walks those argument nodes in the arena, with the repeated "is this name unresolved" test
+  written once as `name_is_unresolved`. The resolver holds the arena for write-back between calls and
+  lends it to the interpreter as `&Arena` for the length of one call, so nothing is shared across
+  calls but the handles.
+- **Functions are registered when phase 4 has a call to run.** `register_functions` copies the
+  enhanced `@QUICKFUNCS` of the owned tree, and every function of every imported namespace, into
+  the arena. It runs at the start of phase 4 only when phase 3 found a call, so a run with no calls
+  allocates nothing, and the interpreter is no longer built with a copy of the function list. The
+  local functions come from the owned tree and not from `Document.quick_functions` on purpose: the
+  enhancer exports its enhanced section to the owned tree but leaves the document's section as it
+  parsed, so the document's functions are the ones before enhancement.
+- **`convert_dix_value_to_value` and `FunctionRegistry` are gone from the public API.** Once the
+  interpreter takes evaluated values, nothing in the library builds a literal from a result. The
+  function lives on in the unit tests of `write_back.rs`, where it is the oracle the arena
+  conversion `alloc_dix_value` is checked against. `FunctionRegistry` (in `supporting_classes.rs`)
+  was only re-exported and never used.
 
 **Tests:** `cargo test -p dixscript --test value_resolver_enums_document`,
 `cargo test -p dixscript --test value_resolver_context_document`,
@@ -1433,7 +1453,9 @@ replaced, and checks the properties of the new one.
   directions, with a document that has no data, and with an owned tree that has none.
 - **Sharing is tested by the arena's counters:** data with nothing to resolve allocates nothing,
   not even a list, and data with one change allocates the two values and one expression it
-  needs and leaves the entries around it on their old ids.
+  needs and leaves the entries around it on their old ids. The resolver copies the functions it can
+  call into the arena before its first call, so the first of these counts them as already there
+  (`sizes_with_functions`, the same `register_functions` call on a copy of the arena).
 - **A debug-log test** checks the counts and the merge message, since the counts also decide
   what happens to a nested array. The message for a missing data section is emitted at debug
   level and did not appear in either debug mode of the test's error manager, so it is not asserted.
@@ -1483,11 +1505,15 @@ literal.
 **What it does:** Phase 3 of value resolution: finds every quickfunction call in `@DATA`, with its
 place (location, scope and the variables in scope), and hands each to the interpreter as a
 `FunctionCallInfo`. `find_all_in(&Arena, &DocData)` is the implementation; the owned
-`find_all(&DataSection)` copies the section into a scratch arena and calls it.
+`find_all(&DataSection)` copies the section into a scratch arena, calls it, and returns the calls
+together with that arena, because their argument lists point into it.
 
 **Decisions:**
-- **Only the arguments of a found call are copied out of the arena,** once each, into the owned
-  `Expression`s the interpreter takes. The rest of the walk only reads.
+- **Nothing is copied out of the arena.** A found call keeps its arguments as an `ExprList`, a handle
+  of the nodes that are already there; the interpreter reads them where they are. Copying them out
+  into owned `Expression`s, which the walk used to do for every call, cost about 3 percent more than
+  cloning the owned arguments had, and the interpreter no longer takes owned expressions at all.
+  The walk only reads.
 - **What the walk enters is part of the contract and is pinned by tests.** In a value, a call is
   found together with the calls in its arguments; arrays and nested arrays, objects, interpolated
   strings, constructor arguments, both ends of a range and a lambda body are entered. In an
@@ -1519,7 +1545,9 @@ they replaced, and checks the properties of the new ones.
   history of calls included, for five crafted sources and four corpus files; `HAND_RECORDING`,
   `CONTEXT_RECORDING` and `WALK_RECORDING` do the same for the result, the data context and the
   found calls of 15 hand-built data sections. The results are required through the document and
-  through the owned entry point.
+  through the owned entry point. A found call now holds its arguments as a list in an arena, so
+  `WALK_RECORDING` fingerprints each call through `call_debug`, which exports the arguments out of
+  the arena and prints the call exactly as its derived `Debug` did before; the table did not change.
 - **The hand-built sections reach what the grammar cannot write:** every value kind the context
   converts, constructors, containers, tables and groups, alias chains past the pass limit, and
   every expression kind the call finder enters or does not, with the quickfunctions they call
@@ -1536,9 +1564,11 @@ they replaced, and checks the properties of the new ones.
 - **Which tree is read** is tested with an owned tree and a document that disagree, with a document
   that has no data, and with an owned tree that has none. The owned `find_all` is compared with the
   arena `find_all_in` for every case, and phases 2 and 3 are shown to allocate nothing in the
-  document's arena (the nodes a run adds are the write-back of phase 4, counted exactly).
+  document's arena (the nodes a run adds are the write-back of phase 4, counted exactly, on top of
+  the functions the resolver copies in, which `sizes_with_functions` counts).
 - Of the 16 tests that are not recording checks, 14 were also run on the original and pass there;
-  the two that need the arena finder or a document to be read in phases 2 and 3 cannot.
+  the two that need the arena finder or a document to be read in phases 2 and 3 cannot. The one that
+  counts allocations now needs the interpreter's `register_functions` as well.
 
 **Tests:** `cargo test -p dixscript --test value_resolver_context_document`. 23 tests and three
 ignored helpers (`print_recording`, `print_contexts`, `print_logs`), all passing on Rust 1.75.
@@ -1549,15 +1579,21 @@ ignored helpers (`print_recording`, `print_contexts`, `print_logs`), all passing
 `ValueResolutionResult` (verdict, the resolved tree, the number of calls resolved, errors, log
 statements, duration and the history of every attempt), `FunctionCallInfo` (one found call: its
 name, optional namespace, arguments, location, scope, entry path and position), `ResolutionRecord` (one entry of the history),
-`ScopeTracker` (the path and variables of the entry being walked), `FunctionRegistry` and the two
-error types `ExecutionError` and `FunctionExecutionError`.
+`ScopeTracker` (the path and variables of the entry being walked) and the two error types
+`ExecutionError` and `FunctionExecutionError`.
 
 **Decisions:**
 - **`ValueResolutionResult` has no `original_ast`.** The field held a clone of the whole AST taken
   before resolution; nothing in the workspace read it, so it and the clone are gone (a public field,
   so listed under Removed for 2.0.0).
-- `FunctionCallInfo.arguments` stays a list of owned `Expression`s: the interpreter still takes
-  them, and only the arguments of a call that was found are copied out of the arena.
+- **`FunctionCallInfo.arguments` is an `ExprList`.** It was a `Vec<Expression>` copied out of the
+  arena for each call found; it is now the handle of the argument nodes in the arena the call was
+  found in, so a `FunctionCallInfo` is only meaningful together with that arena (a public field, so
+  listed under Changed for 2.0.0).
+- **`FunctionRegistry` is removed.** It was a map of function definitions that nothing built or
+  read: the module only re-exported it, and the interpreter keeps its own table. It is listed
+  under Removed for 2.0.0. `FunctionExecutionError` is now unused as well, and is left because it
+  is public and in the same file as `ExecutionError`; it is a candidate for removal.
 - `ResolutionRecord` has no `arguments` field any more. It held the `Debug` text of each argument
   expression, built for every call attempt even with debug off; nothing in the workspace read it
   (`Display` does not print it). Removed for 2.0.0, see the last subsection of this document.
@@ -1643,8 +1679,9 @@ not shared nodes.
   literal, a blob and a regex become `b:(...)` and `r:(...)`, a tuple becomes a `t:(...)`
   constructor, an array stays an array, an object becomes an object literal with its properties in
   the order the runtime map yields them, and a type with no literal form becomes a string.
-  `ValueResolver::convert_dix_value_to_value` (kept, see above) is the oracle the unit test checks
-  it against for every kind of value.
+  The owned conversion the resolver used to build argument literals with (`convert_dix_value_to_value`,
+  now a private function of the unit tests in the file) is the oracle the unit test checks it
+  against for every kind of value.
 - **Four unit tests live in the file** because the module is `pub(crate)`: the path to a node in
   every kind of place (table, group, object property entry, array, nested array, object,
   constructor) with the index, the slot and the search agreeing; paths and positions that lead
@@ -1663,7 +1700,7 @@ the new way a result is written.
   built and run twice with the ignored `print_recording` and `print_shapes`, the two runs identical),
   then required of the new code, through the document and through the owned entry point.
   `RECORDING` fingerprints the whole outcome (verdict, errors, resolved tree, history of calls) of
-  eleven crafted sources (the last has lambdas) and 26 hand-built data sections; `SHAPES` lists the resolved data of every
+  fourteen crafted sources (`w11_lambdas`, `w12_crossing`, `w13_edges` and `w14_failures` are the last four) and 31 hand-built data sections; `SHAPES` lists the resolved data of every
   hand-built section value by value, so a failure names the value.
 - **The hand-built sections reach what the grammar cannot:** a result in every kind of place and
   at depth, nested arrays and their levels, all 16 kinds of result a function can return (null
@@ -1676,7 +1713,42 @@ the new way a result is written.
 - **The new behaviour is tested through the arena:** a replacement copies the path and shares
   everything else (the ids of untouched values are unchanged, and exactly five nodes are added for
   three results and the two arrays on the way to one of them), a call with no node allocates
-  nothing, and the document's data holds the result afterwards.
+  nothing, and the document's data holds the result afterwards. Before the first call the resolver
+  copies the functions the interpreter can call into the arena, so the tests that count nodes take
+  that growth out: `sizes_with_functions` measures it on a copy of the arena with the same
+  `register_functions` call, and the counts above are what the write-back adds on top of it.
+- **`w12_crossing` pins what a value does when it crosses a call.** Each of seventeen functions builds
+  one value of one type in its body and hands it to `pass`, and nine further entries hand a
+  literal straight from `@DATA` to `pass` (a tuple, a date, a hex colour, a blob, a regex, a nested
+  array, a float, a long and a timestamp). The seventeen types are: int, long, float, double, string, bool, hex,
+  blob, regex, array, tuple, nested arrays and tuples, an object, an object holding a tuple, a date,
+  a timestamp and null. A tuple from `@DATA` stays a tuple and one passed between quickfunctions
+  comes out as an array; a regex literal inside a body is a placeholder and one from `@DATA` is not.
+  The recording (38 entries now) was produced by the code before the interpreter moved to the arena,
+  twice with identical output, and the 37 entries that were there did not change.
+- **`w13_edges` and `w14_failures` were added when bug injection into the port showed what the
+  recordings could not see.** `w13_edges` has ten function definitions and nine entries: an object
+  of several properties built in a body, passed to another function and read back (properties are
+  read as scalars, because the order of an object's properties is not fixed and a fingerprint of
+  the object would change from run to run), a tuple of eight items from a body and from `@DATA`, a
+  lambda held in an array and in an object property, a method called through a chain of properties,
+  an object literal passed from `@DATA`, and a function defined twice (the first definition runs).
+  `w14_failures` calls a lambda with fewer arguments than it has parameters, next to a call that
+  works; it is the one source that records `false`.
+- **Five more hand-built sections, `w_dep_prop`, `w_dep_cond`, `w_dep_index`, `w_dep_nested` and
+  `w_dep_object`, put a call before the call it depends on,** with the dependency inside a property
+  access, a conditional, an index, a nested call and an object literal. They are last in the list on
+  purpose: the sections take their positions from a counter, so a new section placed earlier would
+  have changed the recorded fingerprints of every section after it (it did, when it was tried, and
+  the 38 earlier entries came back identical once the new ones moved to the end).
+- **Three tests call the interpreter itself,** for what a script cannot reach. The resolver checks
+  that a function exists before it runs a call, so the messages of `execute_data_call` for a
+  function or namespace that is not there are tested directly. The parser and the enhancer leave
+  only some qualified names in a body, so functions built by hand run the run-time fallback for the
+  rest (a property walk, a method on a variable, a method at the end of a chain, a static builtin, a
+  call by name, and two failures). A tuple of eight items is bound from `@DATA` as a tuple cut to six
+  and in a body as an array of eight. The expectations of these three are written from what the
+  builtins do, not recorded from the original code, which has no such entry points.
 - **Three tests give the resolver an owned tree and a document that disagree,** to show that a run
   that writes nothing leaves the owned data alone (two, which also pass on the original) and that
   phase 5 reads the document (one, which does not).
@@ -1685,46 +1757,103 @@ the new way a result is written.
   by the original. A resolved identifier is shown to copy its path and share the rest (six nodes
   added for the call's result, three resolved identifiers and two arrays), and a run that resolves
   nothing is shown to allocate nothing.
-- Of the twelve tests that run, eight also pass on the original code (the recording, the shapes,
-  the phase 5 log, the chain of 120, the three that leave the owned data or the arena alone, and
-  the one that counts allocations for a call with no node); the four that read the document's arena
-  fail there, as they should.
+- The tables were produced by the original code. The tests that count nodes call the interpreter's
+  `register_functions`, so the file as it is now only builds against the interpreter on the arena;
+  the recording, the shapes and the phase 5 log are what carry the original behaviour forward.
 
-**Tests:** `cargo test -p dixscript --test value_resolver_writeback_document`. Twelve tests and
+**Tests:** `cargo test -p dixscript --test value_resolver_writeback_document`. Sixteen tests and
 three ignored helpers (`print_recording`, `print_shapes`, `print_phase_five`), all passing on
 Rust 1.75.
 
 ### `Compiler/Core/ValueResolution/function_interpreter.rs`
 
 **What it does:** Runs the body of a quickfunction at compile time, for `ValueResolver` phase 4. It
-is one tree-walker over the owned AST, 51 functions in about 2,800 lines: `execute` binds the
+is one tree-walker over the arena AST, 58 functions in about 3,000 lines: `execute` binds the
 parameters and runs the statements of the body, `execute_statement` and its helpers handle the nine
-statement kinds, `evaluate_expression` (the largest function, about 260 lines) the expression kinds,
-and further functions make builtin calls, imported calls, instance method calls and lambda calls.
-Errors are typed `InterpreterError` variants, and recursion has a depth limit. It reads the owned
-`QuickFunction` bodies and `Expression` trees; it is not yet over the arena.
+statement kinds, `evaluate_expression` (the largest function) the expression kinds, and further
+functions make builtin calls, imported calls, instance method calls and lambda calls. The entry
+points are `register_functions` (copy the functions it can call into the arena, once),
+`execute_data_call` (run a call found in `@DATA`) and `execute`. Errors are typed `InterpreterError`
+variants, and recursion has a depth limit. It owns no syntax tree: every function takes the arena as
+a parameter, and function bodies, lambdas and call arguments are ids of nodes in it.
 
 **Decisions:**
+- **The arena is read-only and passed into every call.** The interpreter does not store it, so the
+  resolver can hold `&mut Arena` for write-back between calls and lend `&Arena` for the length of
+  one. A call is a self-contained unit over an immutable arena; the interpreter itself is still not
+  `Send` (see below), which is what a parallel execution would first have to change.
+- **Functions are copied into the arena once, not per call.** The interpreter used to take a deep
+  copy of the function's owned tree for every call (`QuickFunction::clone` and the drop of the copy
+  were 3.9 percent of a run on the largest corpus file, whose 2,596 calls are all calls of imported
+  functions). `register_functions` now copies the local functions and the functions of every
+  imported namespace into the arena once, as `Rc<DocQuickFunction>` entries, and a call takes a
+  pointer. Local functions are looked up by name with the first definition winning, as the linear
+  search did. Imported functions are kept per namespace, keyed by the namespace's address in the
+  symbol table, which is borrowed for the interpreter's whole life and never changed; only
+  top-level namespaces are ever called into (the lookup of a namespace from inside a body
+  ignores the current namespace's own imports, which are used for enums only), so those are the
+  only ones registered.
+- **Arguments are bound from values, not from literal nodes.** `execute` takes the already
+  evaluated arguments (`CallArgs`: the values, how to convert them, the call's position). Each
+  argument used to be turned into a literal node and evaluated again in the callee, which is not
+  the identity for every type; `round_trip` does the same conversion per value without building the
+  nodes. The two call paths used different conversions and both are kept (`Wrap::Data` for a call
+  from `@DATA`: a tuple stays a tuple, cut to six items; `Wrap::Body` for a call inside a body: a
+  tuple becomes an array), and so are the failures: a blob or a regex is rebuilt from its text and
+  can fail, a date and a timestamp are parsed again, and an object is rebuilt in a new map.
+  `w12_crossing` records all of it.
 - **A lambda value is a string key.** Creating a lambda stores its definition (`LambdaAst`: the
-  parameter names, the body expression, the statements of a block body, and the captured variables)
-  in `lambda_registry` under a key `__lam_N` from a counter, and the value that flows through the
-  script is that key as a string. Calling or passing it looks the key up. So a lambda is never held
-  inside a runtime value, only a key is, and the registry belongs to the interpreter.
-- **Registry entries are shared (`Rc<LambdaAst>`).** Every invocation, every argument that is a lambda
-  and every `let g = f` took a deep copy of the entry (body, statements, parameter names and the
-  captured variables), and dropped it afterwards. They now copy a pointer. An entry is never changed
-  after it is inserted, so sharing cannot be seen from a script. The measured effect is in the last
-  subsection.
+  parameter names, the body expression and the statements of a block body as arena handles, and
+  the captured variables) in `lambda_registry` under a key `__lam_N` from a counter, and the value
+  that flows through the script is that key as a string. Calling or passing it looks the key up. So
+  a lambda is never held inside a runtime value, only a key is, and the registry belongs to the
+  interpreter. Creating a lambda copies no tree; it stores three handles and the captured variables.
+- **Registry entries are shared (`Rc<LambdaAst>`).** Every invocation, every argument that is a
+  lambda and every `let g = f` takes a pointer to the entry. An entry is never changed after it is
+  inserted, so sharing cannot be seen from a script.
+- **Nothing needs `unsafe` any more.** The imported-call path cast a namespace reference through a
+  raw pointer to get past the borrow of `self`; the lookup returns a reference that lives as long
+  as the symbol table, so no cast was needed and it is gone.
+- **Small costs taken out of the hot path, none visible to a script.** A value is converted to text
+  to look for a lambda key (`__lam_`) only when it can be one: numbers, booleans and null are
+  skipped. A call's scope is created with room for its parameters and the statements of its body, so
+  it does not grow from empty. An object literal is built directly in the map the value holds,
+  where it was built in a second map and copied over.
+- **A method call on a bare name no longer builds a node.** The qualified-identifier fallback used
+  to wrap the first name in a temporary identifier expression to call the instance-method code;
+  it now passes an `InstanceSource` (an expression id, or a name and a position).
 - **The interpreter is not `Send`.** It holds the data context as an `Rc<RefCell<..>>` shared with the
-  resolver, so it cannot cross a thread today; the shared registry entries add nothing to that. This
-  is what a parallel execution of calls would first have to replace.
-- The arena version of the walker and of the lambda handles is a separate, larger drop; the numbers
-  of the last subsection are the baseline it has to beat.
+  resolver, so it cannot cross a thread today; the shared registry entries add nothing to that.
 
 **Tests:** `cargo test -p dixscript --test value_resolver_writeback_document` (the source
 `w11_lambdas` has fourteen calls that use plain, typed, block-bodied, passed, returned, closed-over,
-nested and repeated lambdas, and its outcome is part of the recording made before the change), and
-the whole suite.
+nested and repeated lambdas, and `w12_crossing` records every type crossing a call; both recordings
+were made before the port), `cargo test -p dixscript --test value_resolver_context_document`, and
+the whole suite. The corpus and the crafted and hand-built inputs were also run through the code
+before and after the port in four modes (see the last subsection).
+
+### `Compiler/Core/ValueResolution/execution_context.rs`
+
+**What it does:** The scoped variable environment of one call: a stack of scopes (a map from name to
+`DixValue` each), the function's name for error messages and an optional parent context.
+`define_variable` adds to the innermost scope and refuses a name it already holds there,
+`set_variable` and `get_variable` look outwards through the scopes and then in the parent, and
+`enter_scope` and `exit_scope` bracket a block. It holds no syntax tree.
+
+**Decisions:**
+- **`with_capacity` sizes the root scope.** A call knows how many parameters it binds and how many
+  statements its body has, and the interpreter creates the context with room for them
+  (`ExecutionContext::with_capacity`), so the map is not grown, and rehashed, from empty as the
+  variables arrive. `new` is `with_capacity(.., 0)`, which does not allocate. In the largest corpus
+  file `bind_parameters`, which is mostly `define_variable`, went from 64.3M to 49.3M instructions
+  for its 2,596 calls (debug build, callgrind). The definitions themselves, two hashes and a
+  `String` each, are still the largest single cost left in a call (47.7M in all, from parameters and
+  from `let` statements).
+- The type is otherwise unchanged by the move of the interpreter to the arena: it was already free of
+  syntax trees, and it is the reason the interpreter is not `Send` (the parent is an
+  `Rc<RefCell<..>>`).
+
+**Tests:** exercised through the resolver tests and the whole suite.
 
 ### `tests/value_resolution_scaling.rs`
 
@@ -2510,3 +2639,94 @@ requires the larger to take less than 7 times as long.
 - **What is left.** Walking the body of a lambda is still over the owned tree. The arena version of
   the interpreter and of the lambda handles is the next drop, and these figures are the baseline it
   has to beat on the same three inputs.
+
+### Fixes and Problems: quickfunction execution (the interpreter of phase 4) works on the arena
+
+- **What it was.** The interpreter walked owned trees. For every call it took a deep copy of the
+  function (`QuickFunction::clone`, dropped afterwards: 39.2M and 19.6M instructions, 3.9 percent of
+  the pipeline on the largest corpus file, `elements_database.mdix`, whose 2,596 calls are all calls
+  of imported functions through the alias `builders`). The call finder copied each call's arguments
+  out of the arena, and the resolver turned every evaluated argument into a literal node for the
+  interpreter to evaluate again. The imported-call path also cast a namespace reference through a
+  raw pointer to get past a borrow.
+- **What changed.** `function_interpreter.rs` was rewritten over the arena: 3,024 lines and 58
+  functions, no `unsafe`. Every function takes the arena as a parameter; `evaluate_expression`,
+  `execute_statement` and the conversions match on `ExprNode`, `StmtNode` and `ValueNode`; a lambda
+  is three handles and its captured variables; a method call on a bare name passes an
+  `InstanceSource` instead of building a temporary node. `register_functions` copies the functions
+  it can call into the arena once, `execute_data_call` runs a call found in `@DATA`, and `execute`
+  takes evaluated arguments (`CallArgs`, `Wrap`). `value_resolver.rs` registers the functions when
+  phase 3 found a call, calls the interpreter with the arena, and checks dependencies over the
+  argument nodes. `FunctionCallInfo.arguments` is an `ExprList`, so `ast_walker.rs` copies nothing
+  out of the arena and `find_all` returns its scratch arena with the calls. `execution_context.rs`
+  got `with_capacity` and its NOTICE and section, `document.rs` got `DocQuickFunction::from_owned`,
+  and `FunctionRegistry` and `convert_dix_value_to_value` left the public API.
+- **Two things in the plan were wrong.** The plan was to read the local functions from
+  `Document.quick_functions`. The enhancer (`general_ast_enhancer.rs`) exports its enhanced section
+  to the owned tree and does not store it back, so the document holds the functions as they
+  parsed, before enhancement; an interpreter reading them would have run different bodies. The
+  local functions are copied from the owned enhanced tree instead (all of the registration costs
+  1.28M instructions on the largest file, 0.09 percent). Storing the enhanced section back in the
+  document would avoid that copy and is left for when the owned tree goes. The plan also removed
+  `ValueResolver::convert_dix_value_to_value` outright; `write_back.rs` uses it as the oracle in a
+  unit test of the arena conversion, so it moved into that test module instead.
+- **Imported functions.** All 2,596 calls of the largest corpus file are imported calls, so their
+  cost decided the design. Reading the lookup code showed that only top-level namespaces are ever
+  called into: a body looks a namespace up with no current namespace, and the imports of an imported
+  file are used for enums only. The functions of those namespaces are copied into the document's arena
+  at the start of phase 4 (option B). The alternative, a second private arena for imported bodies,
+  would have kept the document's arena clean at the price of a choice between two arenas on every
+  node read and a home tag on every function and lambda (a lambda defined in the main file can be
+  passed into an imported function). Option B has no such cost; its price is that the tests that
+  count what the write-back allocates have to leave the copied functions out, which they do through
+  `sizes_with_functions` (the same `register_functions` call on a copy of the arena).
+- **Behaviour kept on purpose.** An argument still goes through the conversion to a literal and back:
+  a blob and a regex are rebuilt and can fail, a date and a timestamp are parsed again, a tuple from
+  `@DATA` stays a tuple (cut to six items) and one passed between quickfunctions becomes an array, an
+  object is rebuilt in a new map, and an argument error carries the call's position. A name is looked
+  up as a lambda before a variable and before a function, the first function of a name wins, and a
+  lambda created inside a call stays in the registry for the whole resolve. All of that is in
+  `w11_lambdas` and `w12_crossing`, which were recorded from the code before the change.
+- **How it was checked.** The unchanged code and the port were run on 122 inputs (the 84 corpus
+  files, and the 12 crafted sources and 26 hand-built sections the write-back test had then) four
+  ways each (document or owned tree, quiet or verbose), two runs of each build, and everything
+  they produce (verdict, errors, resolved tree, history, log) was compared after masking the
+  time of the run, durations and the order of hash-ordered objects. Two runs of the unchanged code
+  agree on 464 of the 488 outputs; the unchanged code against the port agrees on 466 and 467 in the
+  two pairings. The outputs that differ are always the same six files (`FullFunctionTest`,
+  `datetime_static_test`, `enum_static_test`, `guid_static_test`, `random_static_test`,
+  `FullDataTestWithFunc`), which also differ between two runs of the unchanged code (a clock, a random
+  number or a GUID); on them the port agrees as closely as two unchanged runs do, at the strongest of
+  three levels (digits masked, scalar values masked, the sequence of log tags). The recordings of the
+  write-back and context tests, which the original produced, are required of the port through
+  every entry point. The comparison above ran before `w13_edges`, `w14_failures` and the dependency
+  sections existed, so those are covered by the recordings only. Bug injection: 34 single changes
+  behind an environment switch in the interpreter, the resolver and `document.rs`, one build, each
+  run alone against the four test files that read the interpreter, with a control that passes. The first
+  round caught 18 of 35 (one of the 35, a guard in `execute_iterative_resolution` that could never be
+  false, was dead code and is removed). The survivors showed where the recordings were thin, and
+  inputs were added for each: objects of several properties, a tuple over six items, a lambda in an
+  array and in an object, a chained call, a function defined twice, a lambda called with too few
+  arguments, a call placed before its dependency in each of five expression kinds, the messages of
+  `execute_data_call`, the run-time fallback for qualified names, and an argument read inside a
+  namespace. The last complete run caught 31 of 34, and `arg_ns` was caught by a test added after it.
+  Two changes survive and are equivalent: `lambda_key_bool` (a boolean can never print as a lambda
+  key) and `err_pos` (the position of an argument that fails to convert; no value I could construct
+  fails, a date in the year 10000 reads back). The change of a scope's initial size cannot be seen
+  by a script and was not injected. The whole suite passes on the final tree: 551 library tests, 488 integration tests in 37 files (8 ignored helpers) and 28 doctests (26 ignored), none failing, on Rust 1.75 (debug build). The library has 118 warnings (it had 119; an unused parameter of `evaluate_arguments_in_caller_context` is gone).
+- **Measured.** Callgrind, debug build, one run of the harness (prepare and resolve, the history
+  formatted as the tests do), instructions, before against after: lambdas small 12,685,930 to 12,332,930 (-2.8 percent), medium 302,262,745 to 256,173,048
+  (-15.3), large 6,397,273,379 to 5,486,963,938 (-14.2), BigBoy 59,141,076 to 56,878,042 (-3.8),
+  Unholy 320,274,948 to 290,246,107 (-9.4), `elements_database.mdix` 1,506,696,515 to 1,407,018,875
+  (-6.6), a_test 10,114,018 to 10,105,750 (-0.08) and EnumUsage 34,165,799 to 34,167,310 (0.00). The call path
+  (`execute_call_raw` before, `execute_data_call` now) on the largest file went from 285.3M to 192.4M
+  instructions (32 percent fewer). The harness formats the history of every call, which is 5.6 percent of what it
+  measures on the largest file, so the percentages are diluted by the same constant on both sides.
+  Release builds, wall-clock time and peak memory were not measured.
+- **What is left.** In a call of an imported function on the largest file, `define_variable` (two
+  hashes and a `String` per variable) and the object literal that every builder returns are the
+  largest costs left; loading the four imported files is 98.9M instructions (7 percent of the
+  pipeline) and this drop does not touch it. The language server has not been type-checked by me:
+  nothing outside `dixscript/` uses a changed item (searched), and the dependency of `mdix-lsp` on
+  a newer `time` cannot be downloaded with Cargo 1.75. `FunctionExecutionError` is public and now
+  unused. CI was not run by me on this drop.

@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use crate::Utilities::RustcHash::FxHashMap;
 
 use crate::Builtins::Core::DixValue;
-use crate::Compiler::AST::{Expression, QuickFunction};
+use crate::Compiler::AST::arena::ExprList;
 
 pub struct ValueResolutionResult {
     pub is_success: bool,
@@ -60,8 +60,8 @@ pub struct FunctionCallInfo {
     pub function_name: String,
     /// Namespace alias if imported; `None` for local calls.
     pub namespace_name: Option<String>,
-    /// Cloned argument expressions.
-    pub arguments: Vec<Expression>,
+    /// The argument expressions, as a list in the arena the call was found in.
+    pub arguments: ExprList,
     /// Full DATA-rooted path where the call was found.
     pub location: String,
     /// Scope path without the final segment — used for function-scope matching.
@@ -222,55 +222,6 @@ impl ScopeTracker {
 }
 
 impl Default for ScopeTracker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Registry of `QuickFunction` definitions available during value resolution.
-/// Duplicate registration is caught at insert time.
-pub struct FunctionRegistry {
-    functions: FxHashMap<String, QuickFunction>,
-}
-
-impl FunctionRegistry {
-    pub fn new() -> Self {
-        FunctionRegistry {
-            functions: FxHashMap::default(),
-        }
-    }
-
-    /// Returns `Err` if a function with the same name is already registered.
-    pub fn register(&mut self, function: QuickFunction) -> Result<(), FunctionExecutionError> {
-        let name = function.name.clone();
-        if self.functions.contains_key(&name) {
-            return Err(FunctionExecutionError::new(format!(
-                "Function '{}' already registered",
-                name
-            )));
-        }
-        self.functions.insert(name, function);
-        Ok(())
-    }
-
-    pub fn get(&self, name: &str) -> Option<&QuickFunction> {
-        self.functions.get(name)
-    }
-
-    pub fn contains(&self, name: &str) -> bool {
-        self.functions.contains_key(name)
-    }
-
-    pub fn count(&self) -> usize {
-        self.functions.len()
-    }
-
-    pub fn function_names(&self) -> impl Iterator<Item = &String> {
-        self.functions.keys()
-    }
-}
-
-impl Default for FunctionRegistry {
     fn default() -> Self {
         Self::new()
     }

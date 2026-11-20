@@ -18,20 +18,17 @@ use web_time::Instant;
 use chrono::Utc;
 use crate::Utilities::RustcHash::FxHashMap;
 
-use crate::Builtins::Core::{DixType, DixValue};
+use crate::Builtins::Core::DixValue;
 use crate::Builtins::Resolver;
-use crate::Compiler::AST::arena::{Arena, DocData, Document};
-use crate::Compiler::AST::{
-    DixScript, EnumDeclaration, EnumField, EnumsSection, Expression, ObjectProperty, Position, Value,
-};
+use crate::Compiler::AST::arena::{Arena, DocData, Document, ExprId, ExprNode, ValueId, ValueNode};
+use crate::Compiler::AST::{DixScript, EnumDeclaration, EnumField, EnumsSection, Position};
 use crate::Compiler::Core::DebugMode;
-use crate::Compiler::Utilities::{SymbolTable, ImportedNamespace};
+use crate::Compiler::Utilities::SymbolTable;
 use crate::ErrorManager::{DebugConfig, ErrorManager};
 
 use super::ast_walker::ASTWalker;
 use super::data_context;
 use super::enum_resolution::{resolve_data_enums, EnumPass};
-use super::execution_context::ExecutionContext;
 use super::function_interpreter::{FunctionInterpreter, InterpreterError};
 use super::identifier_resolution;
 use super::supporting_classes::{FunctionCallInfo, ResolutionRecord, ValueResolutionResult};
@@ -199,12 +196,6 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             .map(|qf| qf.functions.len())
             .unwrap_or(0);
 
-        let quick_functions = ast
-            .quick_functions
-            .as_ref()
-            .map(|qf| qf.functions.to_vec())
-            .unwrap_or_default();
-
         let data_entry_count = ast
             .data
             .as_ref()
@@ -220,7 +211,6 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
 
         let interpreter = FunctionInterpreter::new_with_error_manager(
             symbol_table,
-            quick_functions,
             Rc::clone(&data_context),
             debug_mode,
            error_manager.clone()
@@ -561,6 +551,11 @@ fn execute_iterative_resolution(
 ) -> (usize, Vec<String>) {
     let total = function_calls.len();
 
+    // The interpreter reads function bodies from the arena, so the functions it can call are
+    // copied there once, before the first call. This runs only when phase 3 found a call, so a run
+    // with no calls copies nothing.
+    self.register_functions();
+
     // Where each call sits in the data tree, found once. Replacing a resolved call then costs
     // the depth of its node instead of a search of the whole tree.
     let target_positions: HashSet<Position> = function_calls.iter().map(|c| c.position).collect();
@@ -717,165 +712,112 @@ fn execute_iterative_resolution(
     (resolved_count, errors)
 }
 
-    fn execute_call_raw(
-    &mut self,
-    call: &FunctionCallInfo,
-) -> Result<DixValue, InterpreterError> {
-    // At DATA level there are no local variables — create an empty top-level
-    // context. The interpreter resolves identifiers via data_context.
-    let mut top_level_ctx = ExecutionContext::new("<data>", None);
-
-    // Evaluate every argument in the top-level context. This correctly handles
-    // nested ImportedFunctionCalls, QuickFuncCalls, arithmetic, enum accesses —
-    // anything the interpreter knows how to evaluate.
-    let evaluated_args = self.interpreter.evaluate_arguments_in_caller_context(
-        &call.arguments,
-        call.position,
-        &mut top_level_ctx,
-        &call.scope_context,
-        None,
-    )?;
-
-    // Wrap resolved DixValues as literal Expression::Value nodes so that
-    // interpreter.execute → bind_parameters → evaluate_expression returns
-    // them immediately without any further lookup.
-    let expr_args: Vec<Expression> = evaluated_args
-        .iter()
-        .map(|dv| Expression::Value {
-            value: Self::convert_dix_value_to_value(dv, call.position),
-            position: call.position,
-        })
-        .collect();
-
-    match &call.namespace_name {
-        Some(ns_name) => {
-            let (func_ast, target_namespace) = {
-                let ns = self
-                    .symbol_table
-                    .try_get_namespace(ns_name)
-                    .ok_or_else(|| InterpreterError::UndefinedFunction {
-                        name: format!("{}.{}", ns_name, call.function_name),
-                        position: call.position,
-                    })?;
-                let func_ast = ns
-                    .functions
-                    .get(&call.function_name)
-                    .ok_or_else(|| InterpreterError::UndefinedFunction {
-                        name: format!("{}.{}", ns_name, call.function_name),
-                        position: call.position,
-                    })?
-                    .ast
-                    .clone();
-                (func_ast, ns as *const ImportedNamespace)
-            };
-
-            // SAFETY: symbol_table lives for 'a which outlives this call.
-            let ns_ref: &ImportedNamespace = unsafe { &*target_namespace };
-            let fqn = format!("{}.{}", ns_name, call.function_name);
-            let mut ctx = ExecutionContext::new(&fqn, None);
-            self.interpreter.execute(
-                &func_ast,
-                &expr_args,
-                &mut ctx,
-                &call.scope_context,
-                Some(ns_ref),
-            )
-        }
-
-        None => {
-            let function_clone = self
-                .interpreter
-                .find_function(&call.function_name)
-                .ok_or_else(|| InterpreterError::UndefinedFunction {
-                    name: call.function_name.clone(),
-                    position: call.position,
-                })?
-                .clone();
-
-            let mut ctx = ExecutionContext::new(&call.function_name, None);
-            self.interpreter.execute(
-                &function_clone,
-                &expr_args,
-                &mut ctx,
-                &call.scope_context,
-                None,
-            )
+    /// Registers the functions the interpreter can call in the arena the data section lives in.
+    fn register_functions(&mut self) {
+        let local = self
+            .ast
+            .quick_functions
+            .as_ref()
+            .map(|section| section.functions.as_slice())
+            .unwrap_or(&[]);
+        if let Some((arena, _)) = self.data.parts() {
+            self.interpreter.register_functions(arena, local);
         }
     }
-}
+
+    fn execute_call_raw(
+        &mut self,
+        call: &FunctionCallInfo,
+    ) -> Result<DixValue, InterpreterError> {
+        let Some((arena, _)) = self.data.parts() else {
+            return Err(InterpreterError::UndefinedFunction {
+                name:     call.function_name.clone(),
+                position: call.position,
+            });
+        };
+        self.interpreter.execute_data_call(
+            arena,
+            &call.function_name,
+            call.namespace_name.as_deref(),
+            call.arguments,
+            call.position,
+            &call.scope_context,
+        )
+    }
 
     // ==================== PHASE 4 HELPERS ====================
 
-    fn has_unresolved_dependencies(&self, call: &FunctionCallInfo) -> bool {
+    fn has_unresolved_dependencies(&mut self, call: &FunctionCallInfo) -> bool {
+        let Some((arena, _)) = self.data.parts() else { return false };
         let ctx = self.data_context.borrow();
-        call.arguments
+        arena
+            .expr_list(call.arguments)
             .iter()
-            .any(|arg| Self::expr_has_unresolved_ref(arg, &ctx))
+            .any(|&arg| Self::expr_has_unresolved_ref(arena, arg, &ctx))
+    }
+
+    /// Whether `name` can be found nowhere in the data context, by exact key or by path suffix.
+    ///
+    /// A name is only truly unresolved if it cannot be found either way. Previously this was just
+    /// `!ctx.contains_key(name)`, which caused false positives for results stored at nested paths
+    /// like "db.primary.total" when the argument was just `total`.
+    fn name_is_unresolved(name: &str, ctx: &FxHashMap<String, DixValue>) -> bool {
+        if ctx.contains_key(name) {
+            return false;
+        }
+        let suffix = format!(".{}", name);
+        !ctx.keys().any(|k| k.ends_with(&suffix))
     }
 
     fn expr_has_unresolved_ref(
-        expr: &Expression,
+        arena: &Arena,
+        expr: ExprId,
         ctx: &FxHashMap<String, DixValue>,
     ) -> bool {
-        match expr {
-            // An Identifier is only truly unresolved if it cannot be found anywhere
-            // in the data context — either by exact key or by path-suffix match.
-            // Previously this was just `!ctx.contains_key(name)`, which caused false
-            // positives for results stored at nested paths like "db.primary.total"
-            // when the argument was just Identifier("total").
-            Expression::Identifier { name, .. } => {
-                if ctx.contains_key(name.as_str()) {
-                    return false;
-                }
-                let suffix = format!(".{}", name);
-                !ctx.keys().any(|k| k.ends_with(&suffix))
-            }
+        match *arena.expr(expr) {
+            ExprNode::Identifier { name, .. } => Self::name_is_unresolved(arena.text(name), ctx),
 
             // After Phase 1 enum pre-resolution these are already Integer literals.
-            Expression::EnumAccess { .. } => false,
+            ExprNode::EnumAccess { .. } => false,
 
             // A nested call is only "unresolved" if its own arguments contain
             // something we cannot evaluate yet.  The interpreter will execute it
             // inline, so the call itself is not a dependency gate.
-            Expression::QuickFuncCall { arguments, .. }
-            | Expression::ImportedFunctionCall { arguments, .. } => {
-                arguments.iter().any(|a| Self::expr_has_unresolved_ref(a, ctx))
+            ExprNode::QuickFuncCall { arguments, .. }
+            | ExprNode::ImportedFunctionCall { arguments, .. } => arena
+                .expr_list(arguments)
+                .iter()
+                .any(|&a| Self::expr_has_unresolved_ref(arena, a, ctx)),
+
+            ExprNode::ArithmeticOp { left, right, .. }
+            | ExprNode::BitwiseOp { left, right, .. }
+            | ExprNode::ComparisonOp { left, right, .. }
+            | ExprNode::LogicalOp { left, right, .. } => {
+                Self::expr_has_unresolved_ref(arena, left, ctx)
+                    || Self::expr_has_unresolved_ref(arena, right, ctx)
             }
 
-            Expression::ArithmeticOp { left, right, .. }
-            | Expression::BitwiseOp { left, right, .. }
-            | Expression::ComparisonOp { left, right, .. }
-            | Expression::LogicalOp { left, right, .. } => {
-                Self::expr_has_unresolved_ref(left, ctx)
-                    || Self::expr_has_unresolved_ref(right, ctx)
+            ExprNode::Conditional { condition, true_value, false_value, .. } => {
+                Self::expr_has_unresolved_ref(arena, condition, ctx)
+                    || Self::expr_has_unresolved_ref(arena, true_value, ctx)
+                    || Self::expr_has_unresolved_ref(arena, false_value, ctx)
             }
 
-            Expression::Conditional { condition, true_value, false_value, .. } => {
-                Self::expr_has_unresolved_ref(condition, ctx)
-                    || Self::expr_has_unresolved_ref(true_value, ctx)
-                    || Self::expr_has_unresolved_ref(false_value, ctx)
-            }
-
-            Expression::Value { value, .. } => Self::value_has_unresolved_ref(value, ctx),
+            ExprNode::Value { value, .. } => Self::value_has_unresolved_ref(arena, value, ctx),
 
             // For property access (e.g. `server.host`) reconstruct the full dotted
             // path and look it up directly rather than only checking the root object.
-            Expression::PropertyAccess { object, property, .. } => {
-                if let Some(full_path) = Self::reconstruct_access_path(object, property) {
-                    if ctx.contains_key(full_path.as_str()) {
-                        return false;
-                    }
-                    let suffix = format!(".{}", full_path);
-                    !ctx.keys().any(|k| k.ends_with(&suffix))
-                } else {
+            ExprNode::PropertyAccess { object, property, .. } => {
+                match Self::reconstruct_access_path(arena, object, arena.text(property)) {
+                    Some(full_path) => Self::name_is_unresolved(&full_path, ctx),
                     // Cannot reconstruct — fall back to checking the base object.
-                    Self::expr_has_unresolved_ref(object, ctx)
+                    None => Self::expr_has_unresolved_ref(arena, object, ctx),
                 }
             }
 
-            Expression::IndexAccess { object, index, .. } => {
-                Self::expr_has_unresolved_ref(object, ctx)
-                    || Self::expr_has_unresolved_ref(index, ctx)
+            ExprNode::IndexAccess { object, index, .. } => {
+                Self::expr_has_unresolved_ref(arena, object, ctx)
+                    || Self::expr_has_unresolved_ref(arena, index, ctx)
             }
 
             // All other expression variants (literals, static calls, etc.)
@@ -883,39 +825,40 @@ fn execute_iterative_resolution(
             _ => false,
         }
     }
+
     /// Reconstruct a fully-qualified dotted path from a chain of PropertyAccess
     /// nodes.  Returns `None` if the chain contains a non-identifier base.
-    fn reconstruct_access_path(object: &Expression, property: &str) -> Option<String> {
-        match object {
-            Expression::Identifier { name, .. } => Some(format!("{}.{}", name, property)),
-            Expression::PropertyAccess {
-                object: inner,
-                property: inner_prop,
-                ..
-            } => Self::reconstruct_access_path(inner, inner_prop)
-                .map(|base| format!("{}.{}", base, property)),
+    fn reconstruct_access_path(arena: &Arena, object: ExprId, property: &str) -> Option<String> {
+        match *arena.expr(object) {
+            ExprNode::Identifier { name, .. } => Some(format!("{}.{}", arena.text(name), property)),
+            ExprNode::PropertyAccess { object: inner, property: inner_prop, .. } => {
+                Self::reconstruct_access_path(arena, inner, arena.text(inner_prop))
+                    .map(|base| format!("{}.{}", base, property))
+            }
             _ => None,
         }
     }
-    fn value_has_unresolved_ref(value: &Value, ctx: &FxHashMap<String, DixValue>) -> bool {
-        match value {
-            Value::Identifier { value: id, .. } => {
-                if ctx.contains_key(id.as_str()) {
-                    return false;
-                }
-                let suffix = format!(".{}", id);
-                !ctx.keys().any(|k| k.ends_with(&suffix))
-            }
-            Value::Expression { expr, .. } => Self::expr_has_unresolved_ref(expr, ctx),
-            Value::Array { values, .. } | Value::NestedArray { values, .. } => {
-                values.iter().any(|v| Self::value_has_unresolved_ref(v, ctx))
-            }
-            Value::Object { properties, .. } => properties
+
+    fn value_has_unresolved_ref(
+        arena: &Arena,
+        value: ValueId,
+        ctx: &FxHashMap<String, DixValue>,
+    ) -> bool {
+        match *arena.value(value) {
+            ValueNode::Identifier { value: id, .. } => Self::name_is_unresolved(arena.text(id), ctx),
+            ValueNode::Expression { expr, .. } => Self::expr_has_unresolved_ref(arena, expr, ctx),
+            ValueNode::Array { values, .. } | ValueNode::NestedArray { values, .. } => arena
+                .value_list(values)
                 .iter()
-                .any(|p| Self::value_has_unresolved_ref(&p.value, ctx)),
-            Value::PrefixedConstructor { arguments, .. } => {
-                arguments.iter().any(|a| Self::value_has_unresolved_ref(a, ctx))
-            }
+                .any(|&v| Self::value_has_unresolved_ref(arena, v, ctx)),
+            ValueNode::Object { properties, .. } => arena
+                .prop_list(properties)
+                .iter()
+                .any(|p| Self::value_has_unresolved_ref(arena, p.value, ctx)),
+            ValueNode::PrefixedConstructor { arguments, .. } => arena
+                .value_list(arguments)
+                .iter()
+                .any(|&a| Self::value_has_unresolved_ref(arena, a, ctx)),
             _ => false,
         }
     }
@@ -1004,91 +947,6 @@ fn execute_iterative_resolution(
             ));
         }
     }
-
-    // ==================== VALUE ↔ DIX CONVERSIONS ====================
-
- // value_resolver.rs — fn convert_dix_value_to_value
-// (Builtins::Core::DixValue → AST Value, used when the interpreter's arguments are wrapped)
-
-pub fn convert_dix_value_to_value(dix: &DixValue, position: Position) -> Value {
-    match dix.get_type() {
-        DixType::Int    => Value::Integer { value: dix.as_int(),    position },
-        DixType::Long   => Value::Long    { value: dix.as_long(),   position },
-        DixType::Float  => Value::Float   { value: dix.as_float(),  position },
-        DixType::Double => Value::Double  { value: dix.as_double(), position },
-        DixType::String => Value::String  { value: dix.as_string(), position },
-        DixType::Bool   => Value::Boolean { value: dix.as_bool(),   position },
-        DixType::Null   => Value::Null    { position },
-        DixType::Hex    => Value::HexColor { value: dix.as_string(), position },
-
-        DixType::Blob => Value::PrefixedConstructor {
-            prefix: "b".to_string(),
-            arguments: vec![Value::String {
-                value: dix.as_blob_base64().unwrap_or_default(),
-                position,
-            }],
-            position,
-        },
-
-        DixType::Regex => Value::PrefixedConstructor {
-            prefix: "r".to_string(),
-            arguments: vec![Value::String {
-                value: dix.as_string(),
-                position,
-            }],
-            position,
-        },
-
-        //  Tuple must round-trip as t:(...) not as [...].
-        // Previously both Array and Tuple produced Value::Array, which broke
-        // subsequent resolution passes that needed to re-read tuple elements
-        // (e.g. createLennardJones returns t:(epsilon, sigma), then the caller
-        // does lj_parameters.first()). Now Tuple → PrefixedConstructor{"t"}
-        // which try_value_to_dix handles correctly via the "t" branch,
-        // and Display renders as `t:(...)` in the .resolved.mdix output.
-        DixType::Array => {
-            let values: Vec<Value> = dix
-                .as_array()
-                .iter()
-                .map(|item| Self::convert_dix_value_to_value(item, position))
-                .collect();
-            Value::Array { values, position }
-        }
-
-        DixType::Tuple => {
-            // Recursion preserves nested tuples: t:(t:(1,2), t:(3,4)) → correct.
-            let arguments: Vec<Value> = dix
-                .as_array()
-                .iter()
-                .map(|item| Self::convert_dix_value_to_value(item, position))
-                .collect();
-            Value::PrefixedConstructor {
-                prefix: "t".to_string(),
-                arguments,
-                position,
-            }
-        }
-
-        DixType::Object => {
-            let properties: Vec<ObjectProperty> = dix
-                .as_object()
-                .iter()
-                .map(|(key, val)| ObjectProperty {
-                    key:      key.clone(),
-                    value:    Self::convert_dix_value_to_value(val, position),
-                    position,
-                })
-                .collect();
-            Value::Object { properties, position }
-        }
-
-        DixType::Date      => Value::Date      { value: dix.as_string(), position },
-        DixType::Timestamp => Value::Timestamp { value: dix.as_string(), position },
-
-        // Enum: already converted to Integer in Phase 1; unreachable in practice.
-        _ => Value::String { value: dix.as_string(), position },
-    }
-}
 
     // ==================== DIAGNOSTIC UTILITIES ====================
 

@@ -1,4 +1,7 @@
-
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/ValueResolution/execution_context.rs"
+// ============================================================================
 //! Scoped variable environment for QuickFunction execution.
 //!
 //! Parent context uses `Rc<RefCell<…>>` for shared mutable access.
@@ -27,8 +30,21 @@ impl ExecutionContext {
         function_name: &str,
         parent: Option<Rc<RefCell<ExecutionContext>>>,
     ) -> Self {
+        Self::with_capacity(function_name, parent, 0)
+    }
+
+    /// Like [`new`](Self::new), with room for `variables` variables in the root scope.
+    ///
+    /// A call that is about to bind its parameters and declare its locals knows how many there
+    /// will be. Sizing the scope for them once avoids growing, and so rehashing, an empty map
+    /// every time a variable is added.
+    pub fn with_capacity(
+        function_name: &str,
+        parent: Option<Rc<RefCell<ExecutionContext>>>,
+        variables: usize,
+    ) -> Self {
         let mut scopes = Vec::with_capacity(4);
-        scopes.push(FxHashMap::default());
+        scopes.push(FxHashMap::with_capacity_and_hasher(variables, Default::default()));
 
         ExecutionContext {
             scopes,

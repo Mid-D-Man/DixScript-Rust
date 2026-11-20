@@ -24,10 +24,11 @@
 //! `print_recording` and `print_shapes` (ignored) print the two tables; run them on the original
 //! code to regenerate them.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::OnceLock;
 
 use dixscript::Compiler::AST::arena::{DocDataEntry, Document, ValueId, ValueNode};
@@ -38,9 +39,13 @@ use dixscript::Compiler::AST::{
 };
 use dixscript::Compiler::Core::Config::{ConfigSectionHandler, OperationalSettings};
 use dixscript::Compiler::Core::Tokenizer::{split_config_tokens, Tokenizer};
-use dixscript::Compiler::Core::ValueResolution::ValueResolver;
+use dixscript::Builtins::Core::{DixType, DixValue};
+use dixscript::Compiler::Core::ValueResolution::{
+    CallArgs, ExecutionContext, FunctionInterpreter, InterpreterError, ValueResolver, Wrap,
+};
 use dixscript::Compiler::Core::{GeneralAstEnhancer, GeneralParser, GeneralSemanticAnalyzer};
 use dixscript::Compiler::Utilities::SymbolTable;
+use dixscript::Utilities::RustcHash::FxHashMap;
 use dixscript::ErrorManager::ErrorManager;
 
 // ==================== helpers ====================
@@ -407,6 +412,106 @@ const LAMBDAS: &str = r#"@QUICKFUNCS(
 )
 "#;
 
+/// A value of every type crossing a call boundary: each `x...` function builds one value in its body and
+/// hands it to `pass`, and the `t...` entries hand a literal straight from `@DATA` to `pass`. This pins
+/// which converter the argument path used for each type (a tuple from `@DATA` stays a tuple but one passed
+/// between quickfunctions comes out as an array, a regex literal inside a body becomes a placeholder).
+const CROSSING: &str = r##"@QUICKFUNCS(
+  ~pass<int> => global(v<int>) { return v; }
+  ~xint<int> => global(x<int>) { let v = x + 1; return pass(v); }
+  ~xlong<long> => global(x<int>) { let v = 9_000_000_000L + x; return pass(v); }
+  ~xfloat<float> => global(x<int>) { let v = 1.5f; return pass(v); }
+  ~xdouble<double> => global(x<int>) { let v = 2.5; return pass(v); }
+  ~xstr<string> => global(s<string>) { let v = s + "!"; return pass(v); }
+  ~xbool<bool> => global(x<int>) { let v = x > 0; return pass(v); }
+  ~xhex<hex> => global(x<int>) { let v = #FF5733; return pass(v); }
+  ~xblob<blob> => global(x<int>) { let v = b:("QUJD"); return pass(v); }
+  ~xre<regex> => global(x<int>) { let v = r:("^a+$"); return pass(v); }
+  ~xarr<array> => global(x<int>) { let v = [x, x + 1]; return pass(v); }
+  ~xtup<tuple> => global(x<int>) { let v = t:(x, x + 1); return pass(v); }
+  ~xnest<array> => global(x<int>) { let v = [[x], [t:(x, 2)]]; return pass(v); }
+  ~xobj<object> => global(x<int>) { let v = { only = x }; return pass(v); }
+  ~xobjin<object> => global(x<int>) { let v = { k = [t:(x, 2)] }; return pass(v); }
+  ~xdate<date> => global(x<int>) { let v = 2025-12-31; return pass(v); }
+  ~xts<timestamp> => global(x<int>) { let v = 2025-12-31T23:59:59Z; return pass(v); }
+  ~xnull<int> => global(x<int>) { let v = null; return pass(v); }
+)
+
+@DATA(
+  i = xint(1)
+  l = xlong(1)
+  f = xfloat(1)
+  d = xdouble(1)
+  s = xstr("hi")
+  b = xbool(1)
+  h = xhex(1)
+  bl = xblob(1)
+  re = xre(1)
+  a = xarr(1)
+  t = xtup(1)
+  n = xnest(1)
+  o = xobj(1)
+  oi = xobjin(1)
+  dt = xdate(1)
+  ts = xts(1)
+  nl = xnull(1)
+  t1 = pass(t:(1, 2))
+  t2 = pass(2025-12-31)
+  t3 = pass(#FF5733)
+  t4 = pass(b:("QUJD"))
+  t5 = pass(r:("^a+$"))
+  t6 = pass([1, [2, 3]])
+  t7 = pass(1.5f)
+  t8 = pass(9_000_000_000L)
+  t9 = pass(2025-12-31T23:59:59Z)
+)
+"##;
+
+/// Edges of what a body can do that the other sources do not reach: an object of several
+/// properties built in a body, passed on and read back (the properties are read as scalars, because
+/// the order of an object's properties is not fixed), a tuple of more than six items from a body
+/// and from `@DATA`, a lambda held in an array and in an object property, a method called through a
+/// chain of properties, an object literal passed from `@DATA`, and a function defined twice (the
+/// first definition is the one that runs).
+const EDGES: &str = r##"@QUICKFUNCS(
+  ~pickb<int> => global(o<object>) { return o.b; }
+  ~pass<int> => global(v<int>) { return v; }
+  ~obj3<int> => global(x<int>) { let v = { a = x, b = x + 1, c = x + 2 }; return v.c; }
+  ~objpass<int> => global(x<int>) { let v = { a = x, b = x + 1, c = x + 2 }; return pickb(v); }
+  ~tup8<tuple> => global(x<int>) { let v = t:(x, 2, 3, 4, 5, 6, 7, 8); return pass(v); }
+  ~arrcall<int> => global(x<int>) { let ops = [(n<int>) => n + 1, (n<int>) => n + 10]; return ops[1](x); }
+  ~objlam<int> => global(x<int>) { let c = { add = (a<int>, b<int>) => a + b }; return c.add(x, 10); }
+  ~chainup<string> => global(s<string>) { let o = { name = s }; return o.name.toUpper(); }
+  ~dup<int> => global(x<int>) { return 1; }
+  ~dup<int> => global(x<int>) { return 2; }
+)
+
+@DATA(
+  o1 = obj3(1)
+  op = objpass(1)
+  tp = tup8(1)
+  tq = pass(t:(1, 2, 3, 4, 5, 6, 7, 8))
+  ac = arrcall(5)
+  ol = objlam(1)
+  cu = chainup("abc")
+  d1 = dup(0)
+  ob = pickb({ a = 1, b = 2, c = 3 })
+)
+"##;
+
+/// A call that fails inside the interpreter: a lambda called with fewer arguments than it has
+/// parameters. The failure is part of the recording, with the rest of the run.
+const FAILURES: &str = r##"@QUICKFUNCS(
+  ~arity<int> => global(x<int>) { let f = (a<int>, b<int>) => a + b; return f(x); }
+  ~ok<int> => global(x<int>) { return x + 1; }
+)
+
+@DATA(
+  e1 = arity(1)
+  e2 = ok(1)
+)
+"##;
+
 fn sources3() -> Vec<(&'static str, String)> {
     let (h, i, e, q) = (HEADER, IMPORTS, ENUMS, QF3);
     let mut v: Vec<(&'static str, String)> = Vec::new();
@@ -420,6 +525,9 @@ fn sources3() -> Vec<(&'static str, String)> {
     v.push(("w08_dups", format!("{h}{q}@DATA(\n  a = f(1)\n  b = f(1)\n  arr = [f(1), f(1)]\n  tbl.t:\n    k = f(1),\n    m = f(1)\n)\n")));
     v.push(("w09_imported", format!("{h}{i}{q}@DATA(\n  a = Base.scaledValue(10, Base.Rarity.RARE)\n  arr = [Base.scaledValue(1, Base.Rarity.COMMON), f(2)]\n  tbl.t:\n    k = Base.scaledValue(3, Base.Rarity.RARE)\n    m = mkarr(1)\n)\n")));
     v.push(("w11_lambdas", format!("{h}{LAMBDAS}")));
+    v.push(("w12_crossing", format!("{h}{CROSSING}")));
+    v.push(("w13_edges", format!("{h}{EDGES}")));
+    v.push(("w14_failures", format!("{h}{FAILURES}")));
     v.push(("w10_only_literals", format!("{h}{q}@DATA(\n  a = 1\n  b = [1, 2]\n  o = {{ x = 1 }}\n)\n")));
     v
 }
@@ -659,6 +767,30 @@ fn hand3_cases() -> Vec<(&'static str, Vec<DataEntry>)> {
     ]));
     v.push(("p_after_fail", vec![simple("x", call("f", 1)), simple("b", call("boom", 1)), simple("y", ident("DATA.x"))]));
     v.push(("p_expr_ident", vec![simple("x", call("f", 1)), simple("e", vexp(E::Identifier { name: "DATA.x".into(), position: pos() }))]));
+
+    // Arguments of every expression kind the dependency check enters. Each call comes before the
+    // call it depends on, so the check decides which pass it runs in.
+    let prop = |o: E, p: &str| E::PropertyAccess { object: bx(o), property: p.to_string(), position: pos() };
+    v.push(("w_dep_prop", vec![
+        simple("b", qfv("g", vec![prop(ide("t"), "k")])),
+        tbl(&["t"], vec![("k", call("f", 2))]),
+    ]));
+    v.push(("w_dep_cond", vec![
+        simple("b", qfv("g", vec![E::Conditional { condition: bx(ie(1)), true_value: bx(ie(2)), false_value: bx(ide("a")), position: pos() }])),
+        simple("a", call("f", 1)),
+    ]));
+    v.push(("w_dep_index", vec![
+        simple("b", qfv("g", vec![E::IndexAccess { object: bx(E::Value { value: arr(vec![int(7), int(8)]), position: pos() }), index: bx(ide("a")), position: pos() }])),
+        simple("a", call("f", 0)),
+    ]));
+    v.push(("w_dep_nested", vec![
+        simple("b", qfv("g", vec![eqf("f", vec![ide("a")])])),
+        simple("a", call("f", 1)),
+    ]));
+    v.push(("w_dep_object", vec![
+        simple("b", qfv("g", vec![E::Value { value: obj(vec![("k", ident("a"))]), position: pos() }])),
+        simple("a", call("f", 1)),
+    ]));
     v
 }
 
@@ -766,6 +898,9 @@ const RECORDING: &[(&str, bool, u64)] = &[
     ("w08_dups", true, 0xe19464aee831fb64),
     ("w09_imported", true, 0x92f44c3aab3fa574),
     ("w11_lambdas", true, 0xadb6a68f6df8ac10),
+    ("w12_crossing", true, 0x4e26275c7f0ac999),
+    ("w13_edges", true, 0x76f71477b2c0ab17),
+    ("w14_failures", false, 0x4dfa449cebcb43e6),
     ("w10_only_literals", true, 0x4fc40277c07cf6d6),
     ("hand3_w_simple", true, 0xad514b4217d7c010),
     ("hand3_w_table", true, 0x3999cd49695a5f6f),
@@ -793,6 +928,11 @@ const RECORDING: &[(&str, bool, u64)] = &[
     ("hand3_p_literals", true, 0xcdaf4521dcdd4995),
     ("hand3_p_after_fail", false, 0xafd797da5017ceb1),
     ("hand3_p_expr_ident", true, 0x3e6299c76dc54d69),
+    ("hand3_w_dep_prop", false, 0x50b07ea87f6c2ad9),
+    ("hand3_w_dep_cond", true, 0xc9bce258083a34e0),
+    ("hand3_w_dep_index", true, 0x322f3da435556440),
+    ("hand3_w_dep_nested", true, 0xeeae6bc4e0029a84),
+    ("hand3_w_dep_object", false, 0x1aad676d20a83242),
 ];
 
 /// The resolved data section of every hand-built case, one line per value, produced by running
@@ -838,6 +978,11 @@ const SHAPES: &[(&str, &[&str])] = &[
     ("p_literals", &["base = 5", "s = \"text\"", "arr = [1, 2]", "y = 5", "ys = \"text\"", "ya = [1, 2]", "y1 = 2", "nest = [5]", "none = id DATA.none"]),
     ("p_after_fail", &["x = 2", "b = call boom", "y = id DATA.x"]),
     ("p_expr_ident", &["x = 2", "e = expr"]),
+    ("w_dep_prop", &["b = call g", "t.k = 3"]),
+    ("w_dep_cond", &["b = 4", "a = 2"]),
+    ("w_dep_index", &["b = 10", "a = 1"]),
+    ("w_dep_nested", &["b = 5", "a = 2"]),
+    ("w_dep_object", &["b = call g", "a = 2"]),
 ];
 
 #[test]
@@ -1032,7 +1177,7 @@ fn a_resolved_identifier_copies_its_path_and_shares_the_rest() {
     let arr_inner_items = children(before, arr_items[1]);
     let rows = group_items(before, "rows");
     let table = table_values(before, "t");
-    let sizes = arena_sizes(before);
+    let sizes = sizes_with_functions(&prepared);
 
     let outcome = resolve(prepared.enhanced, &prepared.symbols, &prepared.settings, Some(prepared.document));
     assert!(outcome.ok, "{:?}", outcome.errors);
@@ -1129,6 +1274,23 @@ fn children(document: &Document, id: ValueId) -> Vec<ValueId> {
     }
 }
 
+/// What the arena holds once the functions the interpreter can call are copied into it, which the
+/// resolver does before the first call. It is measured on a copy of the arena by the same call the
+/// resolver makes, so that the tests of what the write-back allocates can leave the functions out
+/// of the count.
+fn sizes_with_functions(prepared: &Prepared) -> (usize, usize, usize) {
+    let mut probe = prepared.document.arena.clone();
+    let mut interpreter = FunctionInterpreter::new_with_error_manager(
+        &prepared.symbols,
+        Rc::new(RefCell::new(FxHashMap::default())),
+        DebugMode::Off,
+        ErrorManager::new_isolated_silent(),
+    );
+    let local = prepared.enhanced.quick_functions.as_ref().map(|q| q.functions.as_slice()).unwrap_or(&[]);
+    interpreter.register_functions(&mut probe, local);
+    (probe.value_count(), probe.expr_count(), probe.used_bytes())
+}
+
 fn arena_sizes(document: &Document) -> (usize, usize, usize) {
     (document.arena.value_count(), document.arena.expr_count(), document.arena.used_bytes())
 }
@@ -1155,7 +1317,7 @@ fn a_replacement_copies_its_path_and_shares_the_rest() {
     let arr_inner_items = children(before, arr_items[1]);
     let rows = group_items(before, "rows");
     let table = table_values(before, "t");
-    let sizes = arena_sizes(before);
+    let sizes = sizes_with_functions(&prepared);
 
     let outcome = resolve(prepared.enhanced, &prepared.symbols, &prepared.settings, Some(prepared.document));
     assert!(outcome.ok, "{:?}", outcome.errors);
@@ -1191,7 +1353,7 @@ fn a_call_with_no_position_in_the_tree_allocates_nothing() {
     POS.with(|p| p.set(6000));
     let entries = vec![simple("keep", int(5)), simple("e", vexp(eqf("f", vec![ie(2)])))];
     let prepared = prepared_with3(entries);
-    let sizes = arena_sizes(&prepared.document);
+    let sizes = sizes_with_functions(&prepared);
     let outcome = resolve(prepared.enhanced, &prepared.symbols, &prepared.settings, Some(prepared.document));
     assert!(outcome.ok, "{:?}", outcome.errors);
     assert_eq!(outcome.history.len(), 1, "the call is made");
@@ -1208,4 +1370,172 @@ fn the_document_holds_the_result_afterwards() {
     let held = document.data.as_ref().expect("a data section").export(&document.arena);
     let resolved = outcome.resolved.as_ref().and_then(|r| r.data.as_ref()).expect("a data section");
     assert_eq!(format!("{held:?}"), format!("{resolved:?}"));
+}
+
+#[test]
+fn a_data_call_names_the_function_it_cannot_find() {
+    // The resolver checks that a function exists before it runs a call, so these messages are only
+    // reachable by calling the interpreter directly.
+    let _guard = registry_lock();
+    let prepared = prepared_with3(vec![simple("a", qfv("f", vec![ie(1)]))]);
+    let mut arena = prepared.document.arena.clone();
+    let mut interpreter = FunctionInterpreter::new_with_error_manager(
+        &prepared.symbols,
+        Rc::new(RefCell::new(FxHashMap::default())),
+        DebugMode::Off,
+        ErrorManager::new_isolated_silent(),
+    );
+    let local = prepared.enhanced.quick_functions.as_ref().map(|q| q.functions.as_slice()).unwrap_or(&[]);
+    interpreter.register_functions(&mut arena, local);
+    let no_arguments = arena.alloc_expr_list(&[]);
+    let scope = FxHashMap::default();
+    let at = Position { line: 3, column: 4 };
+    for (namespace, name, shown) in [(Some("Base"), "missing", "Base.missing"), (Some("Nope"), "f", "Nope.f"), (None, "missing", "missing")] {
+        let err = interpreter
+            .execute_data_call(&arena, name, namespace, no_arguments, at, &scope)
+            .expect_err("the function does not exist");
+        assert!(
+            matches!(&err, InterpreterError::UndefinedFunction { name, position } if name == shown && *position == at),
+            "{err:?}"
+        );
+    }
+}
+
+// ==================== the interpreter called directly ====================
+
+/// A function with one `return` of `body`, built by hand. The parser and the enhancer leave only some
+/// of the expression kinds in a body, so these tests reach the rest by building the tree.
+fn by_hand(name: &str, params: &[&str], body: E) -> dixscript::Compiler::AST::QuickFunction {
+    use dixscript::Compiler::AST::{QuickFuncParam, QuickFuncStatement, QuickFunction};
+    QuickFunction {
+        name: name.into(),
+        return_type: None,
+        scope_list: None,
+        parameters: params
+            .iter()
+            .map(|p| QuickFuncParam { name: (*p).into(), data_type: None, default_value: None, position: pos() })
+            .collect(),
+        body: vec![QuickFuncStatement::Return { value: body, position: pos() }],
+        position: pos(),
+    }
+}
+
+fn qualified(parts: &[&str], arguments: Option<Vec<E>>) -> E {
+    E::QualifiedIdentifier { parts: parts.iter().map(|p| p.to_string()).collect(), arguments, position: pos() }
+}
+
+/// Runs `function` on `values` the way a call inside a body does, on an interpreter that also knows
+/// the functions of the hand-built base source (`f`, `g`, `h`, ...).
+fn run_by_hand(
+    function: dixscript::Compiler::AST::QuickFunction,
+    values: Vec<DixValue>,
+    wrap: Wrap,
+    namespace: Option<&str>,
+) -> Result<DixValue, InterpreterError> {
+    use dixscript::Compiler::AST::QuickFunction;
+    let _guard = registry_lock();
+    let prepared = prepared_with3(vec![simple("a", qfv("f", vec![ie(1)]))]);
+    let mut arena = prepared.document.arena.clone();
+    let mut interpreter = FunctionInterpreter::new_with_error_manager(
+        &prepared.symbols,
+        Rc::new(RefCell::new(FxHashMap::default())),
+        DebugMode::Off,
+        ErrorManager::new_isolated_silent(),
+    );
+    let local: &[QuickFunction] = prepared.enhanced.quick_functions.as_ref().map(|q| q.functions.as_slice()).unwrap_or(&[]);
+    interpreter.register_functions(&mut arena, local);
+    let copy = dixscript::Compiler::AST::arena::DocQuickFunction::from_owned(&mut arena, &function);
+    let mut context = ExecutionContext::new(&function.name, None);
+    let position = Position { line: 2, column: 5 };
+    let namespace = namespace.map(|name| prepared.symbols.try_get_namespace(name).expect("the namespace is imported"));
+    interpreter.execute(&arena, &copy, CallArgs { values: &values, wrap, position }, &mut context, &FxHashMap::default(), namespace)
+}
+
+fn object_of(pairs: Vec<(&str, DixValue)>) -> DixValue {
+    DixValue::from_object(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+}
+
+#[test]
+fn a_qualified_name_the_enhancer_left_is_resolved_at_run_time() {
+    let text = |f: Vec<(&str, Vec<DixValue>, E)>| -> Vec<String> {
+        f.into_iter()
+            .map(|(name, values, body)| {
+                let params: Vec<&str> = if name == "inc" { vec!["n"] } else { vec!["o"] };
+                let got = run_by_hand(by_hand(name, &params, body), values, Wrap::Body, None);
+                match got {
+                    Ok(v) => format!("{name}: {:?} {}", v.get_type(), v.as_string()),
+                    Err(InterpreterError::InvalidOperation { message, .. }) => format!("{name}: invalid operation: {message}"),
+                    Err(InterpreterError::PropertyNotFound { property, .. }) => format!("{name}: no property {property}"),
+                    Err(e) => format!("{name}: other error {e}"),
+                }
+            })
+            .collect()
+    };
+    let nested = object_of(vec![("a", object_of(vec![("b", DixValue::from_int(7))]))]);
+    let named = object_of(vec![("name", DixValue::from_string("abc".into()))]);
+    let results = text(vec![
+        // a.b.c with no call: the property walk
+        ("walk", vec![nested.clone()], qualified(&["o", "a", "b"], None)),
+        // a variable that holds an object, one property on it
+        ("one", vec![nested.clone()], qualified(&["o", "a"], None)),
+        // a method on a variable: `o.toUpper()` with o a string
+        ("method", vec![DixValue::from_string("abc".into())], qualified(&["o", "toUpper"], Some(vec![]))),
+        // a method at the end of a property chain
+        ("chain", vec![named.clone()], qualified(&["o", "name", "toUpper"], Some(vec![]))),
+        // a static builtin
+        ("static", vec![DixValue::from_int(-3)], qualified(&["Math", "abs"], Some(vec![ide("o")]))),
+        // a bare name with arguments is a call by name
+        ("inc", vec![DixValue::from_int(4)], qualified(&["f"], Some(vec![ide("n")]))),
+        // failures: a property of a number, a property that is not there
+        ("number", vec![DixValue::from_int(1)], qualified(&["o", "a", "b"], None)),
+        ("missing", vec![nested.clone()], qualified(&["o", "zzz", "y"], None)),
+        ("chain_missing", vec![named.clone()], qualified(&["o", "zzz", "toUpper"], Some(vec![]))),
+    ]);
+    assert_eq!(
+        results,
+        vec![
+            "walk: Int 7".to_string(),
+            "one: Object ".to_string() + &nested_text(),
+            "method: String ABC".into(),
+            "chain: String ABC".into(),
+            "static: Double 3".into(),
+            "inc: Int 5".into(),
+            "number: invalid operation: Cannot access property 'a' on Int".into(),
+            "missing: no property zzz".into(),
+            "chain_missing: no property zzz".into(),
+        ],
+        "{results:#?}"
+    );
+}
+
+/// The text of the object `{a: {b: 7}}` as a value prints it.
+fn nested_text() -> String {
+    object_of(vec![("a", object_of(vec![("b", DixValue::from_int(7))]))]).as_string()
+}
+
+#[test]
+fn a_tuple_argument_is_cut_to_six_items_from_data_and_stays_whole_in_a_body() {
+    let eight = || DixValue::from_tuple((1..=8).map(DixValue::from_int).collect());
+    let data = run_by_hand(by_hand("pass", &["v"], ide("v")), vec![eight()], Wrap::Data, None).expect("the call runs");
+    assert_eq!(data.get_type(), DixType::Tuple);
+    assert_eq!(data.as_array().len(), 6);
+    let body = run_by_hand(by_hand("pass", &["v"], ide("v")), vec![eight()], Wrap::Body, None).expect("the call runs");
+    assert_eq!(body.get_type(), DixType::Array);
+    assert_eq!(body.as_array().len(), 8);
+}
+
+#[test]
+fn the_arguments_of_a_call_in_an_imported_function_are_read_in_that_namespace() {
+    // `Rarity` is an enum of the imported file only. A body running inside that namespace can name it
+    // in the arguments of a call; the same body outside it cannot.
+    let call = || {
+        E::QuickFuncCall {
+            name: "f".into(),
+            arguments: vec![E::EnumAccess { namespace_name: None, enum_name: "Rarity".into(), value: "RARE".into(), position: pos() }],
+            position: pos(),
+        }
+    };
+    let inside = run_by_hand(by_hand("inside", &[], call()), vec![], Wrap::Body, Some("Base")).expect("Rarity.RARE is 2");
+    assert_eq!((inside.get_type(), inside.as_string()), (DixType::Int, "3".to_string()), "f(2) is 3");
+    run_by_hand(by_hand("outside", &[], call()), vec![], Wrap::Body, None).expect_err("Rarity is not an enum of this file");
 }

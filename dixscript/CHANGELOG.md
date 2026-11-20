@@ -93,6 +93,15 @@ Breaking release.
   the other constructors work as before, and the owned data is copied once for the three phases.
 - **`ASTWalker::find_all_in(&Arena, &DocData)`** is the arena entry of the call finder.
   `find_all(&DataSection)` stays and copies the section into a scratch arena.
+- **Quickfunction execution reads the arena.** `FunctionInterpreter::register_functions(&mut self,
+  &mut Arena, &[QuickFunction])` copies the functions it can call (the local ones and every function
+  of every imported namespace) into the arena once, and `execute_data_call` runs a call found in
+  `@DATA` with the arena and the call's argument list. `execute` takes the already evaluated
+  arguments as `CallArgs { values, wrap, position }`; `Wrap::Data` and `Wrap::Body` name the two
+  conversions the two call paths always used (a tuple stays a tuple, cut to six items, or becomes an
+  array). `DocQuickFunction::from_owned(&mut Arena, &QuickFunction)` copies one function in, and
+  `ExecutionContext::with_capacity` sizes the root scope.
+
 
 ### Removed
 - `VersionConstraints::with_forward_compat`, `is_valid_value_type`, `is_valid_default_value`,
@@ -125,6 +134,12 @@ Breaking release.
   replaced by the arena version in `identifier_resolution.rs`.
 - `ResolutionRecord::arguments` (a public field, so a breaking change): the `Debug` text of each
   argument expression, built for every call attempt and read by nothing in the workspace.
+- `FunctionRegistry` (a map of function definitions that nothing built or read; it was only
+  re-exported) and `ValueResolver::convert_dix_value_to_value` (a public function; the resolver no
+  longer turns results into literal nodes to pass them to the interpreter). The copy of a function's
+  whole tree that the interpreter took for every call, and the one `unsafe` pointer cast in the
+  interpreter, are gone with them.
+
 
 ### Performance
 
@@ -153,6 +168,16 @@ Breaking release.
   `elements_database.mdix` (445 KB, debug mode off) takes about a third of the time it did,
   and a 32x scaled input takes about a sixth. Output is unchanged. A new test,
   `value_resolution_scaling`, guards the growth rate.
+- Calling a quickfunction no longer copies the function's whole tree and drops the copy: the functions
+  are copied into the arena once and a call takes a pointer. On the largest corpus file, whose 2,596
+  calls are all calls of imported functions, the whole pipeline (debug build, prepare and resolve,
+  callgrind instruction counts) is 6.6 percent cheaper, and the call path itself 32 percent; on
+  two other corpus files 9.4 and 3.8 percent. The three generated lambda scripts run 2.8, 15.3 and 14.2
+  percent fewer instructions on top of the earlier sharing of lambda entries, and the two smallest
+  files are unchanged. A script's execution scopes are sized for their parameters, and an object literal
+  is built directly in the map the value holds. Release builds, wall-clock time and peak memory were
+  not measured.
+
 
 ### Changed
 
@@ -192,6 +217,16 @@ Breaking release.
   temporary-lifetime pattern in `Runtime/format_options.rs` that only Rust 1.79 and
   later accepts was rewritten. The repository's `Cargo.lock` pins seven dependencies
   below their newest versions to stay inside 1.75.
+- **Quickfunction execution and call discovery work on the arena.** Breaking for anyone who built a
+  `FunctionInterpreter` or read a `FunctionCallInfo`: the interpreter's constructors no longer take the
+  quickfunction list (`register_functions` does that work, once); `find_function` returns
+  `Option<&DocQuickFunction>`; `LambdaAst` holds arena handles (`params: StrList`, `body: ExprId`,
+  `statements: StmtList`) with its captured variables; `FunctionCallInfo.arguments` is an `ExprList`
+  into the arena the call was found in, and `ASTWalker::find_all` returns the calls together with the
+  scratch arena they point into. The language server's use of `ValueResolver::new` is unchanged. A
+  script resolves exactly as before: the corpus, the crafted and the hand-built inputs give the same
+  results, history and logs through every entry point.
+
 
 ## [1.0.0] — 2026-07-21
 

@@ -4,22 +4,29 @@
 // ============================================================================
 //! Executes QuickFunction bodies at compile time.
 //!
+//! The interpreter walks the arena AST. It never owns a syntax tree: the arena it reads is
+//! passed into every call, and function bodies, lambdas and the arguments of a call are ids of
+//! nodes in it. Before the first call [`FunctionInterpreter::register_functions`] copies the
+//! functions it can call into that arena once, so a call costs no copy of its function.
+//!
 //! Parameter threading eliminates mutable field swapping. DebugConfig is
-//! cached on construction — format!() is never evaluated when debug is off.
+//! cached on construction - format!() is never evaluated when debug is off.
 //! All errors are typed InterpreterError variants. Recursion depth has both
 //! absolute and dynamic limits.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::Utilities::RustcHash::FxHashMap;
 
 use crate::Builtins::Core::{DixType, DixValue};
 use crate::Builtins::Resolver::builtin_call_resolver;
-use crate::Compiler::AST::{
-    Expression, ObjectProperty, Position, QuickFunction, QuickFuncParam,
-    QuickFuncStatement, SwitchCase, Value,
+use crate::Compiler::AST::arena::{
+    Arena, CaseId, CaseList, DocQuickFuncParam, DocQuickFunction, ExprId, ExprList, ExprNode,
+    PropList, StmtId, StmtList, StmtNode, StrList, ValueId, ValueList, ValueNode,
 };
+use crate::Compiler::AST::{Position, QuickFunction};
 use crate::Compiler::Core::DebugMode;
 use crate::Compiler::Utilities::SymbolTable;
 use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
@@ -33,6 +40,120 @@ const BASE_RECURSION_DEPTH: u32 = 1_000;
 fn calculate_recursion_limit(param_count: usize, body_size: usize) -> u32 {
     let complexity_factor = (param_count * 10 + body_size / 5) as u32;
     (BASE_RECURSION_DEPTH + complexity_factor).min(ABSOLUTE_MAX_RECURSION)
+}
+
+/// The execution context a call of `function` starts with, sized for its parameters and the
+/// statements of its body (a body declares at most one variable per statement).
+fn scope_for(name: &str, function: &DocQuickFunction) -> ExecutionContext {
+    ExecutionContext::with_capacity(name, None, function.parameters.len() + function.body.len())
+}
+
+/// The key of a namespace in the interpreter's table of imported functions: its address.
+fn namespace_key(namespace: &ImportedNamespace) -> usize {
+    namespace as *const ImportedNamespace as usize
+}
+
+/// The key of a lambda held in `val`, if `val` is a string that starts with `__lam_`.
+///
+/// Numbers, booleans and null can never print that way, so they are skipped without building
+/// their text.
+fn lambda_key(val: &DixValue) -> Option<String> {
+    if matches!(
+        val.get_type(),
+        DixType::Int | DixType::Long | DixType::Float | DixType::Double | DixType::Bool | DixType::Null
+    ) {
+        return None;
+    }
+    let text = val.as_string();
+    text.starts_with("__lam_").then_some(text)
+}
+
+/// A date literal as a value.
+fn date_value(text: &str) -> Result<DixValue, InterpreterError> {
+    use chrono::NaiveDate;
+    let date = NaiveDate::parse_from_str(text, "%Y-%m-%d").map_err(|e| {
+        InterpreterError::InvalidOperation {
+            message: format!("Invalid date format: {}", e),
+            position: Position::UNKNOWN,
+        }
+    })?;
+    Ok(DixValue::from_date(chrono::DateTime::from_naive_utc_and_offset(
+        date.and_hms_opt(0, 0, 0).unwrap(),
+        chrono::Utc,
+    )))
+}
+
+/// A timestamp literal as a value.
+fn timestamp_value(text: &str) -> Result<DixValue, InterpreterError> {
+    let timestamp = text
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .map_err(|e| InterpreterError::InvalidOperation {
+            message: format!("Invalid timestamp format: {}", e),
+            position: Position::UNKNOWN,
+        })?;
+    Ok(DixValue::from_timestamp(timestamp))
+}
+
+/// What a parameter holds when `dix` is passed as an argument.
+///
+/// An argument used to be turned into a literal syntax node and evaluated again in the callee.
+/// That conversion is not the identity for every type: a blob and a regex are rebuilt from their
+/// text and can fail, a date and a timestamp are parsed again, a tuple is cut to six items or
+/// turned into an array depending on `wrap`, and an object is rebuilt in a new map. This does the
+/// same conversion directly, without building the intermediate nodes.
+fn round_trip(dix: &DixValue, position: Position, wrap: Wrap) -> Result<DixValue, InterpreterError> {
+    Ok(match dix.get_type() {
+        DixType::Int       => DixValue::from_int(dix.as_int()),
+        DixType::Long      => DixValue::from_long(dix.as_long()),
+        DixType::Float     => DixValue::from_float(dix.as_float()),
+        DixType::Double    => DixValue::from_double(dix.as_double()),
+        DixType::String    => DixValue::from_string(dix.as_string()),
+        DixType::Bool      => DixValue::from_bool(dix.as_bool()),
+        DixType::Null      => DixValue::null(),
+        DixType::Hex       => DixValue::from_hex(dix.as_string()),
+        DixType::Blob      => DixValue::from_blob(dix.as_blob_base64().unwrap_or_default())
+            .map_err(|message| InterpreterError::InvalidOperation { message, position })?,
+        DixType::Regex     => DixValue::from_regex(dix.as_string())
+            .map_err(|message| InterpreterError::InvalidOperation { message, position })?,
+        DixType::Array     => {
+            let items = dix.as_array();
+            let mut values = Vec::with_capacity(items.len());
+            for item in items.iter() {
+                values.push(round_trip(item, position, wrap)?);
+            }
+            DixValue::from_array(values)
+        }
+        DixType::Tuple     => {
+            let items = dix.as_array();
+            match wrap {
+                Wrap::Body => {
+                    let mut values = Vec::with_capacity(items.len());
+                    for item in items.iter() {
+                        values.push(round_trip(item, position, wrap)?);
+                    }
+                    DixValue::from_array(values)
+                }
+                Wrap::Data => {
+                    let mut values = Vec::with_capacity(items.len().min(6));
+                    for item in items.iter().take(6) {
+                        values.push(round_trip(item, position, wrap)?);
+                    }
+                    DixValue::from_tuple(values)
+                }
+            }
+        }
+        DixType::Object    => {
+            let object = dix.as_object();
+            let mut rebuilt = HashMap::with_capacity(object.len());
+            for (key, value) in object.iter() {
+                rebuilt.insert(key.clone(), round_trip(value, position, wrap)?);
+            }
+            DixValue::from_object(rebuilt)
+        }
+        DixType::Date      => date_value(&dix.as_string())?,
+        DixType::Timestamp => timestamp_value(&dix.as_string())?,
+        _                  => DixValue::from_string(dix.as_string()),
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -183,27 +304,70 @@ impl std::fmt::Display for InterpreterError {
 impl std::error::Error for InterpreterError {}
 
 // ── LambdaAst ─────────────────────────────────────────────────────────────────
+/// A lambda definition: handles into the arena the lambda was written in, plus the variables it
+/// captured. Creating one copies no syntax tree, because the parameters, the body and the
+/// statements are only ids of nodes that already exist.
 #[derive(Debug, Clone)]
 pub struct LambdaAst {
-    pub params:       Vec<String>,
-    pub body:         Expression,
-    pub statements:   Vec<QuickFuncStatement>,
+    pub params:       StrList,
+    pub body:         ExprId,
+    pub statements:   StmtList,
     /// Variables captured from the enclosing scope at lambda-definition time.
     /// `None` when the lambda was defined in an empty / global context.
     pub captured_env: Option<FxHashMap<String, DixValue>>,
 }
 
+/// How the arguments of a call are turned into the values a function's parameters hold.
+///
+/// Every argument is evaluated in the caller first and then goes through a conversion to a
+/// literal and back, which is not the identity for every type. The two call paths used two
+/// different conversions, and the difference is observable, so both are kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wrap {
+    /// A call found in `@DATA`. A tuple stays a tuple (cut to its first six items).
+    Data,
+    /// A call made inside a function body. A tuple becomes an array.
+    Body,
+}
+
+/// The already evaluated arguments of one call, and how to convert them (see [`Wrap`]).
+#[derive(Debug, Clone, Copy)]
+pub struct CallArgs<'x> {
+    /// The arguments, evaluated in the caller's context.
+    pub values: &'x [DixValue],
+    /// Which conversion the arguments go through before they are bound.
+    pub wrap: Wrap,
+    /// The position of the call; conversion errors carry it.
+    pub position: Position,
+}
+
+/// The object a method is called on: an expression, or a bare name that is read as a variable.
+#[derive(Clone, Copy)]
+enum InstanceSource<'x> {
+    Expr(ExprId),
+    Identifier(&'x str, Position),
+}
+
+/// Executes the functions of `@QUICKFUNCS` and of imported namespaces over the arena AST.
+///
+/// Create one with [`new_with_error_manager`](Self::new_with_error_manager), copy the functions it
+/// can call into the arena with [`register_functions`](Self::register_functions), then run calls
+/// with [`execute_data_call`](Self::execute_data_call).
 pub struct FunctionInterpreter<'a> {
     symbol_table:             &'a SymbolTable,
-    quick_functions:          Vec<QuickFunction>,
+    /// The functions of `@QUICKFUNCS`, by name; when a name is defined twice the first wins.
+    quick_functions:          FxHashMap<String, Rc<DocQuickFunction>>,
+    /// The functions of each imported namespace, keyed by the address of the namespace in the
+    /// symbol table. The table is borrowed for `'a` and never changed while the interpreter
+    /// lives, so an address names exactly one namespace.
+    imported_functions:       FxHashMap<usize, FxHashMap<String, Rc<DocQuickFunction>>>,
     data_context:             Rc<RefCell<FxHashMap<String, DixValue>>>,
     debug_config:             DebugConfig,
     recursion_depth:          u32,
     current_recursion_limit:  u32,
     /// The lambdas defined so far, by reference key. Entries are shared (`Rc`) because every
-    /// invocation and every `let g = f` takes a copy of the entry, and a deep copy of the body, the
-    /// statements and the captured variables on each of them was a large part of the cost of a
-    /// lambda-heavy script. An entry is never changed after it is inserted.
+    /// invocation and every `let g = f` takes a copy of the entry. An entry is never changed
+    /// after it is inserted.
     lambda_registry:          FxHashMap<String, Rc<LambdaAst>>,
     /// Monotonically-increasing counter used to generate unique lambda reference
     /// keys of the form `"__lam_N"`.  These keys are stored as DixValue strings
@@ -216,38 +380,62 @@ pub struct FunctionInterpreter<'a> {
 impl<'a> FunctionInterpreter<'a> {
     pub fn new(
         symbol_table: &'a SymbolTable,
-        quick_functions: Vec<QuickFunction>,
         data_context: Rc<RefCell<FxHashMap<String, DixValue>>>,
         debug_mode: DebugMode,
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
-       Self::new_with_error_manager(symbol_table,quick_functions,data_context,debug_mode,error_manager)
+        Self::new_with_error_manager(symbol_table, data_context, debug_mode, error_manager)
     }
+
     pub fn new_with_error_manager(
         symbol_table:  &'a SymbolTable,
-        quick_functions: Vec<QuickFunction>,
         data_context:  Rc<RefCell<FxHashMap<String, DixValue>>>,
         debug_mode:    DebugMode,
         error_manager: ErrorManager,
     ) -> Self {
-        let func_count = quick_functions.len();
-
         FunctionInterpreter {
             symbol_table,
-            quick_functions,
+            quick_functions: FxHashMap::default(),
+            imported_functions: FxHashMap::default(),
             data_context,
             debug_config: DebugConfig::from_debug_mode(debug_mode),
             recursion_depth: 0,
             current_recursion_limit: BASE_RECURSION_DEPTH,
-            lambda_registry: FxHashMap::with_capacity_and_hasher(
-                func_count.max(4),
-                Default::default(),
-            ),
+            lambda_registry: FxHashMap::with_capacity_and_hasher(4, Default::default()),
             lambda_counter: 0,
             log_statements: Vec::with_capacity(4),
             error_manager,
         }
     }
+
+    /// Copies the functions the interpreter can call into `arena`: the `local` functions of
+    /// `@QUICKFUNCS` and every function of every imported namespace.
+    ///
+    /// The interpreter reads function bodies from the arena it is handed, so this has to run
+    /// once, before the first call. Copying costs the size of the function bodies once, where
+    /// the interpreter used to copy a function's whole tree for every call.
+    pub fn register_functions(&mut self, arena: &mut Arena, local: &[QuickFunction]) {
+        for function in local {
+            if !self.quick_functions.contains_key(&function.name) {
+                let copy = Rc::new(DocQuickFunction::from_owned(arena, function));
+                self.quick_functions.insert(function.name.clone(), copy);
+            }
+        }
+        for namespace in self.symbol_table.namespaces.values() {
+            if namespace.functions.is_empty() {
+                continue;
+            }
+            let mut table = FxHashMap::with_capacity_and_hasher(
+                namespace.functions.len(),
+                Default::default(),
+            );
+            for (name, info) in &namespace.functions {
+                table.insert(name.clone(), Rc::new(DocQuickFunction::from_owned(arena, &info.ast)));
+            }
+            self.imported_functions.insert(namespace_key(namespace), table);
+        }
+    }
+
     pub fn update_data_context(&mut self, key: String, value: DixValue) {
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -259,18 +447,21 @@ impl<'a> FunctionInterpreter<'a> {
         self.data_context.borrow_mut().insert(key, value);
     }
 
-    pub fn find_function(&self, name: &str) -> Option<&QuickFunction> {
-        self.quick_functions.iter().find(|f| f.name == name)
+    /// The function of `@QUICKFUNCS` with this name.
+    pub fn find_function(&self, name: &str) -> Option<&DocQuickFunction> {
+        self.quick_functions.get(name).map(|function| &**function)
     }
 
     pub fn take_logs(&mut self) -> Vec<String> {
         std::mem::take(&mut self.log_statements)
     }
 
+    /// Runs `function` with `arguments` bound to its parameters.
     pub fn execute(
         &mut self,
-        function: &QuickFunction,
-        arguments: &[Expression],
+        arena: &Arena,
+        function: &DocQuickFunction,
+        arguments: CallArgs<'_>,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
@@ -303,6 +494,7 @@ impl<'a> FunctionInterpreter<'a> {
         }
 
         self.bind_parameters(
+            arena,
             &function.parameters,
             arguments,
             context,
@@ -312,20 +504,20 @@ impl<'a> FunctionInterpreter<'a> {
 
         let mut last_result = DixValue::null();
 
-        for (i, statement) in function.body.iter().enumerate() {
+        for (i, &statement) in arena.stmt_list(function.body).iter().enumerate() {
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug(&format!(
                     "[Execute] Statement {}/{}: {}",
                     i + 1,
                     function.body.len(),
-                    statement_variant_name(statement)
+                    statement_variant_name(arena.stmt(statement))
                 ));
             }
 
             last_result =
-                self.execute_statement(statement, context, scope_context, namespace)?;
+                self.execute_statement(arena, statement, context, scope_context, namespace)?;
 
-            if matches!(statement, QuickFuncStatement::Return { .. }) {
+            if matches!(arena.stmt(statement), StmtNode::Return { .. }) {
                 if self.debug_config.is_enabled {
                     self.error_manager.log_debug(&format!(
                         "[Execute] Explicit return: {}",
@@ -350,8 +542,9 @@ impl<'a> FunctionInterpreter<'a> {
 
     fn bind_parameters(
         &mut self,
-        parameters: &[QuickFuncParam],
-        arguments: &[Expression],
+        arena: &Arena,
+        parameters: &[DocQuickFuncParam],
+        arguments: CallArgs<'_>,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
@@ -360,36 +553,32 @@ impl<'a> FunctionInterpreter<'a> {
             .iter()
             .filter(|p| p.default_value.is_none())
             .count();
+        let given = arguments.values.len();
 
-        if arguments.len() < required_count {
+        if given < required_count {
             let position = parameters
                 .first()
                 .map(|p| p.position)
                 .unwrap_or(Position::UNKNOWN);
             return Err(InterpreterError::ParameterCountMismatch {
                 expected: parameters.len(),
-                got: arguments.len(),
+                got: given,
                 required: required_count,
                 position,
             });
         }
 
         for (i, param) in parameters.iter().enumerate() {
-            let value = if i < arguments.len() {
-                self.evaluate_expression(
-                    &arguments[i],
-                    context,
-                    scope_context,
-                    namespace,
-                )
-                .map_err(|e| InterpreterError::ParameterEvalFailed {
-                    index: i,
-                    param_name: param.name.clone(),
-                    inner: Box::new(e),
-                    position: arguments[i].position(),
-                })?
-            } else if let Some(ref default) = param.default_value {
-                self.evaluate_expression(default, context, scope_context, namespace)
+            let value = if i < given {
+                round_trip(&arguments.values[i], arguments.position, arguments.wrap)
+                    .map_err(|e| InterpreterError::ParameterEvalFailed {
+                        index: i,
+                        param_name: param.name.clone(),
+                        inner: Box::new(e),
+                        position: arguments.position,
+                    })?
+            } else if let Some(default) = param.default_value {
+                self.evaluate_expression(arena, default, context, scope_context, namespace)
                     .map_err(|e| InterpreterError::ParameterEvalFailed {
                         index: i,
                         param_name: param.name.clone(),
@@ -399,7 +588,7 @@ impl<'a> FunctionInterpreter<'a> {
             } else {
                 return Err(InterpreterError::ParameterCountMismatch {
                     expected: parameters.len(),
-                    got: arguments.len(),
+                    got: given,
                     required: required_count,
                     position: param.position,
                 });
@@ -509,90 +698,86 @@ impl<'a> FunctionInterpreter<'a> {
 
     fn execute_statement(
         &mut self,
-        statement: &QuickFuncStatement,
+        arena: &Arena,
+        statement: StmtId,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
+        let node = *arena.stmt(statement);
         if self.debug_config.is_verbose {
             self.error_manager.log_debug(&format!(
                 "[ExecuteStatement] {}",
-                statement_variant_name(statement)
+                statement_variant_name(&node)
             ));
         }
 
-        match statement {
-            QuickFuncStatement::Return { value, .. } => {
-                self.execute_return(value, context, scope_context, namespace)
+        match node {
+            StmtNode::Return { value, .. } => {
+                self.execute_return(arena, value, context, scope_context, namespace)
             }
-            QuickFuncStatement::Assignment { variable, value, position } => {
-                self.execute_assignment(
-                    variable, value, *position, context, scope_context, namespace,
+            StmtNode::Assignment { variable, value, position } => self.execute_assignment(
+                arena, arena.text(variable), value, position, context, scope_context, namespace,
+            ),
+            StmtNode::ArithmeticAssignment { variable, operator, value, position } => {
+                self.execute_arithmetic_assignment(
+                    arena,
+                    arena.text(variable),
+                    arena.text(operator),
+                    value,
+                    position,
+                    context,
+                    scope_context,
+                    namespace,
                 )
             }
-            QuickFuncStatement::ArithmeticAssignment {
-                variable,
-                operator,
-                value,
-                position,
-            } => self.execute_arithmetic_assignment(
-                variable, operator, value, *position, context, scope_context, namespace,
-            ),
-            QuickFuncStatement::If {
+            StmtNode::If { condition, then_branch, else_branch, position } => self.execute_if(
+                arena,
                 condition,
                 then_branch,
                 else_branch,
                 position,
-            } => self.execute_if(
-                condition,
-                then_branch,
-                else_branch.as_ref(),
-                *position,
                 context,
                 scope_context,
                 namespace,
             ),
-            QuickFuncStatement::Switch {
+            StmtNode::Switch { expression, cases, default_case, position } => self.execute_switch(
+                arena,
                 expression,
                 cases,
                 default_case,
                 position,
-            } => self.execute_switch(
-                expression,
-                cases,
-                default_case.as_ref(),
-                *position,
                 context,
                 scope_context,
                 namespace,
             ),
-            QuickFuncStatement::Log { value, position } => {
-                self.execute_log(value, *position, context, scope_context, namespace)
+            StmtNode::Log { value, position } => {
+                self.execute_log(arena, value, position, context, scope_context, namespace)
             }
-            QuickFuncStatement::VariableDeclaration {
-                variable_name,
-                value,
-                position,
-                ..
-            } => self.execute_variable_declaration(
-                variable_name, value, *position, context, scope_context, namespace,
-            ),
-            QuickFuncStatement::ExpressionStatement { expression, .. } => {
-                self.evaluate_expression(expression, context, scope_context, namespace)
+            StmtNode::VariableDeclaration { variable_name, value, position, .. } => {
+                self.execute_variable_declaration(
+                    arena,
+                    arena.text(variable_name),
+                    value,
+                    position,
+                    context,
+                    scope_context,
+                    namespace,
+                )
             }
-            QuickFuncStatement::ObjectCreation {
-                variable,
-                object,
-                position,
-            } => self.execute_object_creation(
-                variable, object, *position, context, scope_context, namespace,
+            StmtNode::ExpressionStatement { expression, .. } => {
+                self.evaluate_expression(arena, expression, context, scope_context, namespace)
+            }
+            StmtNode::ObjectCreation { variable, object, position } => self.execute_object_creation(
+                arena, arena.text(variable), object, position, context, scope_context, namespace,
             ),
         }
     }
 
     fn execute_return(
         &mut self,
-        value: &Expression,
+        arena: &Arena,
+        value: ExprId,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
@@ -603,7 +788,7 @@ impl<'a> FunctionInterpreter<'a> {
         }
 
         let return_value =
-            self.evaluate_expression(value, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, value, context, scope_context, namespace)?;
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -618,20 +803,20 @@ impl<'a> FunctionInterpreter<'a> {
 
     fn execute_assignment(
         &mut self,
+        arena: &Arena,
         variable:      &str,
-        value:         &Expression,
+        value:         ExprId,
         position:      Position,
         context:       &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace:     Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        let val = self.evaluate_expression(value, context, scope_context, namespace)?;
+        let val = self.evaluate_expression(arena, value, context, scope_context, namespace)?;
 
         // Keep the lambda registry entry for this variable name in sync whenever a
         // variable is reassigned to a different lambda (e.g. after a re-assignment
         // inside a loop or after receiving a lambda from a higher-order function).
-        let val_str = val.as_string();
-        if val_str.starts_with("__lam_") {
+        if let Some(val_str) = lambda_key(&val) {
             if let Some(lambda) = self.lambda_registry.get(&val_str).cloned() {
                 if self.debug_config.is_enabled {
                     self.error_manager.log_debug(&format!(
@@ -664,8 +849,9 @@ impl<'a> FunctionInterpreter<'a> {
 
     fn execute_variable_declaration(
         &mut self,
+        arena: &Arena,
         variable_name: &str,
-        value:         &Expression,
+        value:         ExprId,
         position:      Position,
         context:       &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
@@ -678,15 +864,14 @@ impl<'a> FunctionInterpreter<'a> {
             ));
         }
 
-        let val = self.evaluate_expression(value, context, scope_context, namespace)?;
+        let val = self.evaluate_expression(arena, value, context, scope_context, namespace)?;
 
         // If the result is a lambda reference key ("__lam_N"), also register the
         // LambdaAst under the variable name so that direct calls like
         // `variable_name(args)` resolve via the lambda registry name lookup.
         // This handles both literal lambda assignments AND lambdas returned from
         // higher-order functions (e.g. `let addFive = outer(5)`).
-        let val_str = val.as_string();
-        if val_str.starts_with("__lam_") {
+        if let Some(val_str) = lambda_key(&val) {
             if let Some(lambda) = self.lambda_registry.get(&val_str).cloned() {
                 if self.debug_config.is_enabled {
                     self.error_manager.log_debug(&format!(
@@ -710,9 +895,10 @@ impl<'a> FunctionInterpreter<'a> {
 
     fn execute_arithmetic_assignment(
         &mut self,
+        arena: &Arena,
         variable: &str,
         operator: &str,
-        value: &Expression,
+        value: ExprId,
         position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
@@ -729,7 +915,7 @@ impl<'a> FunctionInterpreter<'a> {
             })?;
 
         let operand_value =
-            self.evaluate_expression(value, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, value, context, scope_context, namespace)?;
 
         let use_long = current_value.get_type() == DixType::Long
             || operand_value.get_type() == DixType::Long;
@@ -774,7 +960,7 @@ impl<'a> FunctionInterpreter<'a> {
                     .as_double()
                     .powf(operand_value.as_double()),
             ),
-            // Bitwise assign ops — use Long path if either operand is Long
+            // Bitwise assign ops - use Long path if either operand is Long
             "&=" => {
                 if use_long {
                     DixValue::from_long(current_value.as_long() & operand_value.as_long())
@@ -830,14 +1016,15 @@ impl<'a> FunctionInterpreter<'a> {
 
     fn execute_object_creation(
         &mut self,
+        arena: &Arena,
         variable: &str,
-        object: &Value,
+        object: ValueId,
         position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        let dix_obj = self.convert_ast_value_to_dix_value(
+        let dix_obj = self.convert_ast_value_to_dix_value(arena, 
             object,
             context,
             scope_context,
@@ -856,9 +1043,10 @@ impl<'a> FunctionInterpreter<'a> {
 
     fn execute_if(
         &mut self,
-        condition: &Expression,
-        then_branch: &[QuickFuncStatement],
-        else_branch: Option<&Vec<QuickFuncStatement>>,
+        arena: &Arena,
+        condition: ExprId,
+        then_branch: StmtList,
+        else_branch: Option<StmtList>,
         _position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
@@ -870,7 +1058,7 @@ impl<'a> FunctionInterpreter<'a> {
         }
 
         let cond_value =
-            self.evaluate_expression(condition, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, condition, context, scope_context, namespace)?;
 
         if self.debug_config.is_verbose {
             self.error_manager.log_debug(&format!(
@@ -885,11 +1073,11 @@ impl<'a> FunctionInterpreter<'a> {
                     .log_debug("[ExecuteIf] Taking THEN branch");
             }
             let mut last_result = DixValue::null();
-            for stmt in then_branch {
-                last_result = self.execute_statement(
+            for &stmt in arena.stmt_list(then_branch) {
+                last_result = self.execute_statement(arena, 
                     stmt, context, scope_context, namespace,
                 )?;
-                if matches!(stmt, QuickFuncStatement::Return { .. }) {
+                if matches!(arena.stmt(stmt), StmtNode::Return { .. }) {
                     if self.debug_config.is_enabled {
                         self.error_manager.log_debug(&format!(
                             "[ExecuteIf] Explicit return from THEN: {}",
@@ -906,11 +1094,11 @@ impl<'a> FunctionInterpreter<'a> {
                     .log_debug("[ExecuteIf] Taking ELSE branch");
             }
             let mut last_result = DixValue::null();
-            for stmt in else_stmts {
-                last_result = self.execute_statement(
+            for &stmt in arena.stmt_list(else_stmts) {
+                last_result = self.execute_statement(arena, 
                     stmt, context, scope_context, namespace,
                 )?;
-                if matches!(stmt, QuickFuncStatement::Return { .. }) {
+                if matches!(arena.stmt(stmt), StmtNode::Return { .. }) {
                     if self.debug_config.is_enabled {
                         self.error_manager.log_debug(&format!(
                             "[ExecuteIf] Explicit return from ELSE: {}",
@@ -932,9 +1120,10 @@ impl<'a> FunctionInterpreter<'a> {
 
     fn execute_switch(
         &mut self,
-        expression: &Expression,
-        cases: &[SwitchCase],
-        default_case: Option<&SwitchCase>,
+        arena: &Arena,
+        expression: ExprId,
+        cases: CaseList,
+        default_case: Option<CaseId>,
         _position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
@@ -946,7 +1135,7 @@ impl<'a> FunctionInterpreter<'a> {
         }
 
         let switch_value =
-            self.evaluate_expression(expression, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, expression, context, scope_context, namespace)?;
 
         if self.debug_config.is_verbose {
             self.error_manager.log_debug(&format!(
@@ -956,9 +1145,10 @@ impl<'a> FunctionInterpreter<'a> {
             ));
         }
 
-        for (i, case) in cases.iter().enumerate() {
+        for (i, case) in arena.case_list(cases).iter().enumerate() {
             let case_value = self.convert_ast_value_to_dix_value(
-                &case.case_value,
+                arena,
+                case.case_value,
                 context,
                 scope_context,
                 namespace,
@@ -979,11 +1169,11 @@ impl<'a> FunctionInterpreter<'a> {
                     ));
                 }
                 let mut last_result = DixValue::null();
-                for stmt in &case.statements {
-                    last_result = self.execute_statement(
+                for &stmt in arena.stmt_list(case.statements) {
+                    last_result = self.execute_statement(arena, 
                         stmt, context, scope_context, namespace,
                     )?;
-                    if matches!(stmt, QuickFuncStatement::Return { .. }) {
+                    if matches!(arena.stmt(stmt), StmtNode::Return { .. }) {
                         return Ok(last_result);
                     }
                 }
@@ -991,17 +1181,17 @@ impl<'a> FunctionInterpreter<'a> {
             }
         }
 
-        if let Some(default) = default_case {
+        if let Some(default) = default_case.map(|id| arena.case(id)) {
             if self.debug_config.is_enabled {
                 self.error_manager
                     .log_debug("[ExecuteSwitch] No match, executing default");
             }
             let mut last_result = DixValue::null();
-            for stmt in &default.statements {
-                last_result = self.execute_statement(
+            for &stmt in arena.stmt_list(default.statements) {
+                last_result = self.execute_statement(arena, 
                     stmt, context, scope_context, namespace,
                 )?;
-                if matches!(stmt, QuickFuncStatement::Return { .. }) {
+                if matches!(arena.stmt(stmt), StmtNode::Return { .. }) {
                     return Ok(last_result);
                 }
             }
@@ -1018,14 +1208,15 @@ impl<'a> FunctionInterpreter<'a> {
 
     fn execute_log(
         &mut self,
-        value: &Expression,
+        arena: &Arena,
+        value: ExprId,
         _position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let val =
-            self.evaluate_expression(value, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, value, context, scope_context, namespace)?;
         let message = val.as_string();
 
         self.log_statements.push(message.clone());
@@ -1037,265 +1228,292 @@ impl<'a> FunctionInterpreter<'a> {
 
         Ok(DixValue::null())
     }
-
-fn evaluate_expression(
+    fn evaluate_expression(
         &mut self,
-        expr: &Expression,
+        arena: &Arena,
+        expr: ExprId,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        match expr {
-            Expression::Identifier { name, position } => {
-                self.resolve_identifier(name, *position, context, scope_context)
+        let node = *arena.expr(expr);
+        match node {
+            ExprNode::Identifier { name, position } => {
+                self.resolve_identifier(arena.text(name), position, context, scope_context)
             }
 
-            Expression::Value { value, .. } => {
-                self.convert_ast_value_to_dix_value(value, context, scope_context, namespace)
+            ExprNode::Value { value, .. } => {
+                self.convert_ast_value_to_dix_value(arena, value, context, scope_context, namespace)
             }
 
-            Expression::ArithmeticOp { left, operator, right, position } => {
+            ExprNode::ArithmeticOp { left, operator, right, position } => {
                 self.evaluate_arithmetic_op(
-                    left, operator, right, *position, context, scope_context, namespace,
+                    arena, left, arena.text(operator), right, position, context, scope_context, namespace,
                 )
             }
 
-            Expression::BitwiseOp { left, operator, right, position } => {
+            ExprNode::BitwiseOp { left, operator, right, position } => {
                 self.evaluate_bitwise_op(
-                    left, operator, right, *position, context, scope_context, namespace,
+                    arena, left, arena.text(operator), right, position, context, scope_context, namespace,
                 )
             }
 
-            Expression::ComparisonOp { left, operator, right, position } => {
+            ExprNode::ComparisonOp { left, operator, right, position } => {
                 self.evaluate_comparison_op(
-                    left, operator, right, *position, context, scope_context, namespace,
+                    arena, left, arena.text(operator), right, position, context, scope_context, namespace,
                 )
             }
 
-            Expression::LogicalOp { left, operator, right, position } => {
+            ExprNode::LogicalOp { left, operator, right, position } => {
                 self.evaluate_logical_op(
-                    left, operator, right, *position, context, scope_context, namespace,
+                    arena, left, arena.text(operator), right, position, context, scope_context, namespace,
                 )
             }
 
-            Expression::UnaryOp { operator, operand, position } => {
+            ExprNode::UnaryOp { operator, operand, position } => {
                 self.evaluate_unary_op(
-                    operator, operand, *position, context, scope_context, namespace,
+                    arena, arena.text(operator), operand, position, context, scope_context, namespace,
                 )
             }
 
-            Expression::Conditional { condition, true_value, false_value, position } => {
+            ExprNode::Conditional { condition, true_value, false_value, position } => {
                 self.evaluate_conditional(
-                    condition, true_value, false_value, *position, context, scope_context, namespace,
+                    arena, condition, true_value, false_value, position, context, scope_context, namespace,
                 )
             }
 
-            Expression::StaticMethodCall { object_name, method_name, arguments, position } => {
+            ExprNode::StaticMethodCall { object_name, method_name, arguments, position } => {
                 self.evaluate_static_method_call(
-                    object_name, method_name, arguments, *position, context, scope_context, namespace,
+                    arena,
+                    arena.text(object_name),
+                    arena.text(method_name),
+                    arguments,
+                    position,
+                    context,
+                    scope_context,
+                    namespace,
                 )
             }
 
-            Expression::InstanceMethodCall { instance, method_name, arguments, position } => {
+            ExprNode::InstanceMethodCall { instance, method_name, arguments, position } => {
                 self.evaluate_instance_method_call(
-                    instance, method_name, arguments, *position, context, scope_context, namespace,
+                    arena,
+                    InstanceSource::Expr(instance),
+                    arena.text(method_name),
+                    arguments,
+                    position,
+                    context,
+                    scope_context,
+                    namespace,
                 )
             }
 
-            Expression::PropertyAccess { object, property, position } => {
+            ExprNode::PropertyAccess { object, property, position } => {
                 self.evaluate_property_access(
-                    object, property, *position, context, scope_context, namespace,
+                    arena, object, arena.text(property), position, context, scope_context, namespace,
                 )
             }
 
-            Expression::IndexAccess { object, index, position } => {
+            ExprNode::IndexAccess { object, index, position } => {
                 self.evaluate_index_access(
-                    object, index, *position, context, scope_context, namespace,
+                    arena, object, index, position, context, scope_context, namespace,
                 )
             }
 
-            Expression::EnumAccess { namespace_name, enum_name, value, position } => {
+            ExprNode::EnumAccess { namespace_name, enum_name, value, position } => {
                 self.evaluate_enum_access(
-                    namespace_name.as_deref(), enum_name, value, *position, namespace,
+                    namespace_name.map(|n| arena.text(n)),
+                    arena.text(enum_name),
+                    arena.text(value),
+                    position,
+                    namespace,
                 )
             }
 
-            Expression::QuickFuncCall { name, arguments, position } => {
+            ExprNode::QuickFuncCall { name, arguments, position } => {
                 self.evaluate_quick_func_call(
-                    name, arguments, *position, context, scope_context, namespace,
+                    arena, arena.text(name), arguments, position, context, scope_context, namespace,
                 )
             }
 
-            Expression::ImportedFunctionCall {
-                namespace_name,
-                function_name,
-                arguments,
-                position,
-            } => self.evaluate_imported_function_call(
-                namespace_name, function_name, arguments, *position, context, scope_context,
-            ),
-
-            Expression::ConfigAccess { key, position } => {
-                self.evaluate_config_access(key, *position)
-            }
-
-            Expression::Parenthesized { expression, .. } => {
-                self.evaluate_expression(expression, context, scope_context, namespace)
-            }
-// ── CRITICAL FIX: runtime fallback for QualifiedIdentifiers that  ──
-// ── were not resolved by the AST enhancement phase.               ──
-// ── This should be rare — the enhancer handles the common cases.  ──
-Expression::QualifiedIdentifier { parts, arguments, position } => {
-    if parts.is_empty() {
-        return Ok(DixValue::null());
-    }
-
-    if let Some(ref args) = arguments {
-        // ── Call form: a.b(args) or StaticObj.method(args) ────────────
-        if parts.len() == 2 {
-            let first  = &parts[0];
-            let second = &parts[1];
-
-            // Static builtin: uppercase first letter → Math.sqrt(), DateTime.now()
-            if builtin_call_resolver::has_static_object(first) {
-                let mut arg_vals = Vec::with_capacity(args.len());
-                for a in args.iter() {
-                    arg_vals.push(self.evaluate_expression(
-                        a, context, scope_context, namespace,
-                    )?);
-                }
-                return builtin_call_resolver::resolve_static_call(
-                    first, second, &arg_vals,
+            ExprNode::ImportedFunctionCall { namespace_name, function_name, arguments, position } => {
+                self.evaluate_imported_function_call(
+                    arena,
+                    arena.text(namespace_name),
+                    arena.text(function_name),
+                    arguments,
+                    position,
+                    context,
+                    scope_context,
                 )
-                .map_err(|e| InterpreterError::BuiltinCallFailed {
-                    object:   first.clone(),
-                    method:   second.clone(),
-                    message:  e,
-                    position: *position,
-                });
             }
 
-            // Instance method on a local variable — routes through
-            // evaluate_instance_method_call which has the lambda fixes.
-            let instance_expr = Expression::Identifier {
-                name:     first.clone(),
-                position: *position,
-            };
-            return self.evaluate_instance_method_call(
-                &instance_expr, second, args, *position,
-                context, scope_context, namespace,
-            );
-        }
+            ExprNode::ConfigAccess { key, position } => {
+                self.evaluate_config_access(arena.text(key), position)
+            }
 
-        if parts.len() > 2 {
-            // Chained: a.b.c(args) — walk the property chain, then call .c(args).
-            let method_name   = parts.last().unwrap().clone();
-            let instance_segs = &parts[..parts.len() - 1];
+            ExprNode::Parenthesized { expression, .. } => {
+                self.evaluate_expression(arena, expression, context, scope_context, namespace)
+            }
 
-            let mut val = self.resolve_identifier(
-                &instance_segs[0], *position, context, scope_context,
-            )?;
-            for seg in &instance_segs[1..] {
-                if val.get_type() == DixType::Object {
-                    val = val
-                        .as_object()
-                        .get(seg.as_str())
-                        .cloned()
-                        .ok_or_else(|| InterpreterError::PropertyNotFound {
-                            property: seg.clone(),
-                            position: *position,
-                        })?;
-                } else {
-                    return Err(InterpreterError::InvalidOperation {
-                        message: format!(
-                            "Cannot access '{}' on {:?}",
-                            seg,
-                            val.get_type()
-                        ),
-                        position: *position,
-                    });
+            // ── CRITICAL FIX: runtime fallback for QualifiedIdentifiers that  ──
+            // ── were not resolved by the AST enhancement phase.               ──
+            // ── This should be rare - the enhancer handles the common cases.  ──
+            ExprNode::QualifiedIdentifier { parts, arguments, position } => {
+                let parts = arena.str_list(parts);
+                if parts.is_empty() {
+                    return Ok(DixValue::null());
                 }
-            }
 
-            // ── Fix: lambda ref in property chain ─────────────────────────
-            // If the chain resolves to a lambda ref string, invoke it BEFORE
-            // evaluating arg_vals.  Evaluating args first then dispatching to
-            // resolve_instance_call would hit the same String/call failure.
-            // Also handles Object property lambdas via Fix B above.
-            {
-                let val_str = val.as_string();
-                if val.get_type() == DixType::String && val_str.starts_with("__lam_") {
-                    if let Some(lambda) = self.lambda_registry.get(&val_str).cloned() {
-                        if self.debug_config.is_enabled {
-                            self.error_manager.log_debug(&format!(
-                                "[QualifiedIdentifier chain] Lambda ref '{}' invoked via {}()",
-                                val_str, method_name
-                            ));
+                if let Some(args) = arguments {
+                    // ── Call form: a.b(args) or StaticObj.method(args) ────────────
+                    if parts.len() == 2 {
+                        let first  = arena.text(parts[0]);
+                        let second = arena.text(parts[1]);
+
+                        // Static builtin: uppercase first letter → Math.sqrt(), DateTime.now()
+                        if builtin_call_resolver::has_static_object(first) {
+                            let mut arg_vals = Vec::with_capacity(args.len());
+                            for &a in arena.expr_list(args) {
+                                arg_vals.push(self.evaluate_expression(
+                                    arena, a, context, scope_context, namespace,
+                                )?);
+                            }
+                            return builtin_call_resolver::resolve_static_call(
+                                first, second, &arg_vals,
+                            )
+                            .map_err(|e| InterpreterError::BuiltinCallFailed {
+                                object:   first.to_string(),
+                                method:   second.to_string(),
+                                message:  e,
+                                position,
+                            });
                         }
-                        return self.invoke_lambda(
-                            &lambda, args, *position, context, scope_context, namespace,
+
+                        // Instance method on a local variable - routes through
+                        // evaluate_instance_method_call which has the lambda fixes.
+                        return self.evaluate_instance_method_call(
+                            arena,
+                            InstanceSource::Identifier(first, position),
+                            second,
+                            args,
+                            position,
+                            context,
+                            scope_context,
+                            namespace,
                         );
                     }
+
+                    if parts.len() > 2 {
+                        // Chained: a.b.c(args) - walk the property chain, then call .c(args).
+                        let method_name   = arena.text(parts[parts.len() - 1]);
+                        let instance_segs = &parts[..parts.len() - 1];
+
+                        let mut val = self.resolve_identifier(
+                            arena.text(instance_segs[0]), position, context, scope_context,
+                        )?;
+                        for &seg in &instance_segs[1..] {
+                            let seg = arena.text(seg);
+                            if val.get_type() == DixType::Object {
+                                val = val
+                                    .as_object()
+                                    .get(seg)
+                                    .cloned()
+                                    .ok_or_else(|| InterpreterError::PropertyNotFound {
+                                        property: seg.to_string(),
+                                        position,
+                                    })?;
+                            } else {
+                                return Err(InterpreterError::InvalidOperation {
+                                    message: format!(
+                                        "Cannot access '{}' on {:?}",
+                                        seg,
+                                        val.get_type()
+                                    ),
+                                    position,
+                                });
+                            }
+                        }
+
+                        // ── Fix: lambda ref in property chain ─────────────────────────
+                        // If the chain resolves to a lambda ref string, invoke it BEFORE
+                        // evaluating arg_vals.  Evaluating args first then dispatching to
+                        // resolve_instance_call would hit the same String/call failure.
+                        // Also handles Object property lambdas via Fix B above.
+                        if val.get_type() == DixType::String {
+                            if let Some(val_str) = lambda_key(&val) {
+                                if let Some(lambda) = self.lambda_registry.get(&val_str).cloned() {
+                                    if self.debug_config.is_enabled {
+                                        self.error_manager.log_debug(&format!(
+                                            "[QualifiedIdentifier chain] Lambda ref '{}' invoked via {}()",
+                                            val_str, method_name
+                                        ));
+                                    }
+                                    return self.invoke_lambda(
+                                        arena, &lambda, args, position, context, scope_context, namespace,
+                                    );
+                                }
+                            }
+                        }
+
+                        let mut arg_vals = Vec::with_capacity(args.len());
+                        for &a in arena.expr_list(args) {
+                            arg_vals.push(self.evaluate_expression(
+                                arena, a, context, scope_context, namespace,
+                            )?);
+                        }
+
+                        return builtin_call_resolver::resolve_instance_call(
+                            &val, method_name, &arg_vals,
+                        )
+                        .map_err(|e| InterpreterError::BuiltinCallFailed {
+                            object:   format!("{:?}", val.get_type()),
+                            method:   method_name.to_string(),
+                            message:  e,
+                            position,
+                        });
+                    }
+
+                    // Single part with args - treat as QuickFuncCall.
+                    return self.evaluate_quick_func_call(
+                        arena, arena.text(parts[0]), args, position, context, scope_context, namespace,
+                    );
                 }
-            }
 
-            let mut arg_vals = Vec::with_capacity(args.len());
-            for a in args.iter() {
-                arg_vals.push(self.evaluate_expression(
-                    a, context, scope_context, namespace,
-                )?);
+                // ── Property-access form: a.b.c (no call) ────────────────────────────
+                let mut result = self.resolve_identifier(
+                    arena.text(parts[0]), position, context, scope_context,
+                )?;
+                for &part in &parts[1..] {
+                    let part = arena.text(part);
+                    match result.get_type() {
+                        DixType::Object => {
+                            result = result
+                                .as_object()
+                                .get(part)
+                                .cloned()
+                                .ok_or_else(|| InterpreterError::PropertyNotFound {
+                                    property: part.to_string(),
+                                    position,
+                                })?;
+                        }
+                        _ => {
+                            return Err(InterpreterError::InvalidOperation {
+                                message: format!(
+                                    "Cannot access property '{}' on {:?}",
+                                    part,
+                                    result.get_type()
+                                ),
+                                position,
+                            });
+                        }
+                    }
+                }
+                Ok(result)
             }
-
-            return builtin_call_resolver::resolve_instance_call(
-                &val, &method_name, &arg_vals,
-            )
-            .map_err(|e| InterpreterError::BuiltinCallFailed {
-                object:   format!("{:?}", val.get_type()),
-                method:   method_name.clone(),
-                message:  e,
-                position: *position,
-            });
-        }
-
-        // Single part with args — treat as QuickFuncCall.
-        return self.evaluate_quick_func_call(
-            &parts[0], args, *position, context, scope_context, namespace,
-        );
-    }
-
-    // ── Property-access form: a.b.c (no call) ────────────────────────────
-    let mut result = self.resolve_identifier(
-        &parts[0], *position, context, scope_context,
-    )?;
-    for part in &parts[1..] {
-        match result.get_type() {
-            DixType::Object => {
-                result = result
-                    .as_object()
-                    .get(part.as_str())
-                    .cloned()
-                    .ok_or_else(|| InterpreterError::PropertyNotFound {
-                        property: part.clone(),
-                        position: *position,
-                    })?;
-            }
-            _ => {
-                return Err(InterpreterError::InvalidOperation {
-                    message: format!(
-                        "Cannot access property '{}' on {:?}",
-                        part,
-                        result.get_type()
-                    ),
-                    position: *position,
-                });
-            }
-        }
-    }
-    Ok(result)
-    }
 
             other => Err(InterpreterError::UnsupportedExpression {
-                variant:  expr_variant_name(other).to_string(),
+                variant:  expr_variant_name(&other).to_string(),
                 position: other.position(),
             }),
         }
@@ -1303,41 +1521,42 @@ Expression::QualifiedIdentifier { parts, arguments, position } => {
 
     fn evaluate_arithmetic_op(
         &mut self,
-        left: &Expression,
+        arena: &Arena,
+        left: ExprId,
         operator: &str,
-        right: &Expression,
+        right: ExprId,
         position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         if matches!(operator, "<<" | ">>" | "&" | "|" | "^") {
-            return self.evaluate_bitwise_op(
+            return self.evaluate_bitwise_op(arena, 
                 left, operator, right, position, context, scope_context, namespace,
             );
         }
 
         match operator {
             "%%" => {
-                return self.evaluate_circular_modulo(
+                return self.evaluate_circular_modulo(arena, 
                     left, right, position, context, scope_context, namespace,
                 )
             }
             "%&" => {
-                return self.evaluate_percentage(
+                return self.evaluate_percentage(arena, 
                     left, right, position, context, scope_context, namespace,
                 )
             }
             "&%" => {
-                return self.evaluate_bitwise_modulo(
+                return self.evaluate_bitwise_modulo(arena, 
                     left, right, position, context, scope_context, namespace,
                 )
             }
             _ => {}
         }
 
-        let left_val  = self.evaluate_expression(left,  context, scope_context, namespace)?;
-        let right_val = self.evaluate_expression(right, context, scope_context, namespace)?;
+        let left_val  = self.evaluate_expression(arena, left,  context, scope_context, namespace)?;
+        let right_val = self.evaluate_expression(arena, right, context, scope_context, namespace)?;
 
         let left_type  = left_val.get_type();
         let right_type = right_val.get_type();
@@ -1409,16 +1628,17 @@ Expression::QualifiedIdentifier { parts, arguments, position } => {
 
     fn evaluate_bitwise_op(
         &mut self,
-        left: &Expression,
+        arena: &Arena,
+        left: ExprId,
         operator: &str,
-        right: &Expression,
+        right: ExprId,
         position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        let left_val  = self.evaluate_expression(left,  context, scope_context, namespace)?;
-        let right_val = self.evaluate_expression(right, context, scope_context, namespace)?;
+        let left_val  = self.evaluate_expression(arena, left,  context, scope_context, namespace)?;
+        let right_val = self.evaluate_expression(arena, right, context, scope_context, namespace)?;
 
         if !left_val.is_numeric() || !right_val.is_numeric() {
             return Err(InterpreterError::InvalidOperation {
@@ -1475,15 +1695,16 @@ Expression::QualifiedIdentifier { parts, arguments, position } => {
 
     fn evaluate_circular_modulo(
         &mut self,
-        left: &Expression,
-        right: &Expression,
+        arena: &Arena,
+        left: ExprId,
+        right: ExprId,
         position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        let left_val  = self.evaluate_expression(left,  context, scope_context, namespace)?;
-        let right_val = self.evaluate_expression(right, context, scope_context, namespace)?;
+        let left_val  = self.evaluate_expression(arena, left,  context, scope_context, namespace)?;
+        let right_val = self.evaluate_expression(arena, right, context, scope_context, namespace)?;
 
         if !left_val.is_numeric() || !right_val.is_numeric() {
             return Err(InterpreterError::InvalidOperation {
@@ -1526,17 +1747,18 @@ Expression::QualifiedIdentifier { parts, arguments, position } => {
 
     fn evaluate_percentage(
         &mut self,
-        amount: &Expression,
-        percentage: &Expression,
+        arena: &Arena,
+        amount: ExprId,
+        percentage: ExprId,
         position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let amount_val =
-            self.evaluate_expression(amount, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, amount, context, scope_context, namespace)?;
         let percentage_val =
-            self.evaluate_expression(percentage, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, percentage, context, scope_context, namespace)?;
 
         if !amount_val.is_numeric() || !percentage_val.is_numeric() {
             return Err(InterpreterError::InvalidOperation {
@@ -1564,15 +1786,16 @@ Expression::QualifiedIdentifier { parts, arguments, position } => {
 
     fn evaluate_bitwise_modulo(
         &mut self,
-        left: &Expression,
-        right: &Expression,
+        arena: &Arena,
+        left: ExprId,
+        right: ExprId,
         position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        let left_val  = self.evaluate_expression(left,  context, scope_context, namespace)?;
-        let right_val = self.evaluate_expression(right, context, scope_context, namespace)?;
+        let left_val  = self.evaluate_expression(arena, left,  context, scope_context, namespace)?;
+        let right_val = self.evaluate_expression(arena, right, context, scope_context, namespace)?;
 
         if !left_val.is_numeric() || !right_val.is_numeric() {
             return Err(InterpreterError::InvalidOperation {
@@ -1607,18 +1830,19 @@ Expression::QualifiedIdentifier { parts, arguments, position } => {
 
     fn evaluate_comparison_op(
         &mut self,
-        left: &Expression,
+        arena: &Arena,
+        left: ExprId,
         operator: &str,
-        right: &Expression,
+        right: ExprId,
         position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let left_val =
-            self.evaluate_expression(left, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, left, context, scope_context, namespace)?;
         let right_val =
-            self.evaluate_expression(right, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, right, context, scope_context, namespace)?;
 
         let result: Result<bool, InterpreterError> = match operator {
             "==" => Ok(left_val.equal_to(&right_val)),
@@ -1654,16 +1878,17 @@ Expression::QualifiedIdentifier { parts, arguments, position } => {
 
     fn evaluate_logical_op(
         &mut self,
-        left: &Expression,
+        arena: &Arena,
+        left: ExprId,
         operator: &str,
-        right: &Expression,
+        right: ExprId,
         position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let left_val =
-            self.evaluate_expression(left, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, left, context, scope_context, namespace)?;
 
         match operator {
             "&&" | "and" => {
@@ -1671,7 +1896,7 @@ Expression::QualifiedIdentifier { parts, arguments, position } => {
                     return Ok(DixValue::from_bool(false));
                 }
                 let right_val =
-                    self.evaluate_expression(right, context, scope_context, namespace)?;
+                    self.evaluate_expression(arena, right, context, scope_context, namespace)?;
                 Ok(DixValue::from_bool(right_val.as_bool()))
             }
             "||" | "or" => {
@@ -1679,7 +1904,7 @@ Expression::QualifiedIdentifier { parts, arguments, position } => {
                     return Ok(DixValue::from_bool(true));
                 }
                 let right_val =
-                    self.evaluate_expression(right, context, scope_context, namespace)?;
+                    self.evaluate_expression(arena, right, context, scope_context, namespace)?;
                 Ok(DixValue::from_bool(right_val.as_bool()))
             }
             _ => Err(InterpreterError::InvalidOperation {
@@ -1691,15 +1916,16 @@ Expression::QualifiedIdentifier { parts, arguments, position } => {
 
 fn evaluate_unary_op(
         &mut self,
+        arena: &Arena,
         operator: &str,
-        operand: &Expression,
+        operand: ExprId,
         position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let operand_val =
-            self.evaluate_expression(operand, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, operand, context, scope_context, namespace)?;
 
         match operator {
             // ── CRITICAL FIX: unary `+` is the identity for numeric types ──────
@@ -1780,29 +2006,31 @@ fn evaluate_unary_op(
 
     fn evaluate_conditional(
         &mut self,
-        condition: &Expression,
-        true_value: &Expression,
-        false_value: &Expression,
+        arena: &Arena,
+        condition: ExprId,
+        true_value: ExprId,
+        false_value: ExprId,
         _position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let cond =
-            self.evaluate_expression(condition, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, condition, context, scope_context, namespace)?;
 
         if cond.as_bool() {
-            self.evaluate_expression(true_value, context, scope_context, namespace)
+            self.evaluate_expression(arena, true_value, context, scope_context, namespace)
         } else {
-            self.evaluate_expression(false_value, context, scope_context, namespace)
+            self.evaluate_expression(arena, false_value, context, scope_context, namespace)
         }
     }
 
     fn evaluate_static_method_call(
         &mut self,
+        arena: &Arena,
         object_name: &str,
         method_name: &str,
-        arguments: &[Expression],
+        arguments: ExprList,
         position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
@@ -1818,9 +2046,9 @@ fn evaluate_unary_op(
         }
 
         let mut args = Vec::with_capacity(arguments.len());
-        for (i, arg) in arguments.iter().enumerate() {
+        for (i, &arg) in arena.expr_list(arguments).iter().enumerate() {
             let val =
-                self.evaluate_expression(arg, context, scope_context, namespace)?;
+                self.evaluate_expression(arena, arg, context, scope_context, namespace)?;
             if self.debug_config.is_verbose {
                 self.error_manager.log_debug(&format!(
                     "[StaticMethodCall] Arg[{}]: {} = {}",
@@ -1840,101 +2068,105 @@ fn evaluate_unary_op(
                 position,
             })
     }
-
     fn evaluate_instance_method_call(
-    &mut self,
-    instance:      &Expression,
-    method_name:   &str,
-    arguments:     &[Expression],
-    position:      Position,
-    context:       &mut ExecutionContext,
-    scope_context: &FxHashMap<String, String>,
-    namespace:     Option<&ImportedNamespace>,
-) -> Result<DixValue, InterpreterError> {
-    let instance_val =
-        self.evaluate_expression(instance, context, scope_context, namespace)?;
-
-    // ── Fix A: String lambda ref as instance ───────────────────────────────
-    // Triggered by: `arr[0](x)`, `operations[0](x)`, etc.
-    // `arr[0]` returns DixValue::String("__lam_N").  The subsequent `(x)` call
-    // is parsed as InstanceMethodCall with synthetic method name "call".
-    // Without this the builtin resolver receives a String and fails:
-    //   "Type String has no method: call"
-    {
-        let val_str = instance_val.as_string();
-        if instance_val.get_type() == DixType::String
-            && val_str.starts_with("__lam_")
-        {
-            if let Some(lambda) = self.lambda_registry.get(&val_str).cloned() {
-                if self.debug_config.is_enabled {
-                    self.error_manager.log_debug(&format!(
-                        "[InstanceMethodCall] Lambda ref '{}' invoked via '{}()'",
-                        val_str, method_name
-                    ));
-                }
-                return self.invoke_lambda(
-                    &lambda, arguments, position, context, scope_context, namespace,
-                );
+        &mut self,
+        arena:         &Arena,
+        instance:      InstanceSource<'_>,
+        method_name:   &str,
+        arguments:     ExprList,
+        position:      Position,
+        context:       &mut ExecutionContext,
+        scope_context: &FxHashMap<String, String>,
+        namespace:     Option<&ImportedNamespace>,
+    ) -> Result<DixValue, InterpreterError> {
+        let instance_val = match instance {
+            InstanceSource::Expr(id) => {
+                self.evaluate_expression(arena, id, context, scope_context, namespace)?
             }
-            return Err(InterpreterError::UndefinedFunction {
-                name:     format!("<lambda ref '{}' not in registry>", val_str),
-                position,
-            });
-        }
-    }
-
-    // ── Fix B: Object property is a lambda ref ─────────────────────────────
-    // Triggered by: `calculator.add(x, 10)` where `add` is a stored lambda.
-    // `calculator` resolves to an Object whose property "add" holds "__lam_N".
-    // The builtin resolver has no user-defined lambda methods, so it fails.
-    // Extract the key in a scoped block so the borrow of instance_val ends
-    // before we need &mut self for invoke_lambda.
-    if instance_val.get_type() == DixType::Object {
-        let lambda_key: Option<String> = {
-            let obj_map = instance_val.as_object();
-            obj_map.get(method_name).and_then(|prop_val| {
-                if prop_val.get_type() == DixType::String {
-                    let s = prop_val.as_string();
-                    if s.starts_with("__lam_") { Some(s) } else { None }
-                } else {
-                    None
-                }
-            })
+            InstanceSource::Identifier(name, at) => {
+                self.resolve_identifier(name, at, context, scope_context)?
+            }
         };
-        if let Some(key) = lambda_key {
-            if let Some(lambda) = self.lambda_registry.get(&key).cloned() {
-                if self.debug_config.is_enabled {
-                    self.error_manager.log_debug(&format!(
-                        "[InstanceMethodCall] Object property lambda '{}' invoked",
-                        method_name
-                    ));
+
+        // ── Fix A: String lambda ref as instance ───────────────────────────────
+        // Triggered by: `arr[0](x)`, `operations[0](x)`, etc.
+        // `arr[0]` returns DixValue::String("__lam_N").  The subsequent `(x)` call
+        // is parsed as InstanceMethodCall with synthetic method name "call".
+        // Without this the builtin resolver receives a String and fails:
+        //   "Type String has no method: call"
+        if instance_val.get_type() == DixType::String {
+            if let Some(val_str) = lambda_key(&instance_val) {
+                if let Some(lambda) = self.lambda_registry.get(&val_str).cloned() {
+                    if self.debug_config.is_enabled {
+                        self.error_manager.log_debug(&format!(
+                            "[InstanceMethodCall] Lambda ref '{}' invoked via '{}()'",
+                            val_str, method_name
+                        ));
+                    }
+                    return self.invoke_lambda(
+                        arena, &lambda, arguments, position, context, scope_context, namespace,
+                    );
                 }
-                return self.invoke_lambda(
-                    &lambda, arguments, position, context, scope_context, namespace,
-                );
+                return Err(InterpreterError::UndefinedFunction {
+                    name:     format!("<lambda ref '{}' not in registry>", val_str),
+                    position,
+                });
             }
         }
-    }
 
-    let mut args = Vec::with_capacity(arguments.len());
-    for arg in arguments {
-        args.push(
-            self.evaluate_expression(arg, context, scope_context, namespace)?,
-        );
-    }
-
-    builtin_call_resolver::resolve_instance_call(&instance_val, method_name, &args)
-        .map_err(|e| InterpreterError::BuiltinCallFailed {
-            object: format!("{:?}", instance_val.get_type()),
-            method: method_name.to_string(),
-            message: e,
-            position,
-        })
+        // ── Fix B: Object property is a lambda ref ─────────────────────────────
+        // Triggered by: `calculator.add(x, 10)` where `add` is a stored lambda.
+        // `calculator` resolves to an Object whose property "add" holds "__lam_N".
+        // The builtin resolver has no user-defined lambda methods, so it fails.
+        // Extract the key in a scoped block so the borrow of instance_val ends
+        // before we need &mut self for invoke_lambda.
+        if instance_val.get_type() == DixType::Object {
+            let property_lambda: Option<String> = {
+                let obj_map = instance_val.as_object();
+                obj_map.get(method_name).and_then(|prop_val| {
+                    if prop_val.get_type() == DixType::String {
+                        let s = prop_val.as_string();
+                        if s.starts_with("__lam_") { Some(s) } else { None }
+                    } else {
+                        None
+                    }
+                })
+            };
+            if let Some(key) = property_lambda {
+                if let Some(lambda) = self.lambda_registry.get(&key).cloned() {
+                    if self.debug_config.is_enabled {
+                        self.error_manager.log_debug(&format!(
+                            "[InstanceMethodCall] Object property lambda '{}' invoked",
+                            method_name
+                        ));
+                    }
+                    return self.invoke_lambda(
+                        arena, &lambda, arguments, position, context, scope_context, namespace,
+                    );
+                }
+            }
         }
+
+        let mut args = Vec::with_capacity(arguments.len());
+        for &arg in arena.expr_list(arguments) {
+            args.push(
+                self.evaluate_expression(arena, arg, context, scope_context, namespace)?,
+            );
+        }
+
+        builtin_call_resolver::resolve_instance_call(&instance_val, method_name, &args)
+            .map_err(|e| InterpreterError::BuiltinCallFailed {
+                object: format!("{:?}", instance_val.get_type()),
+                method: method_name.to_string(),
+                message: e,
+                position,
+            })
+    }
 
     fn evaluate_property_access(
         &mut self,
-        object: &Expression,
+        arena: &Arena,
+        object: ExprId,
         property: &str,
         position: Position,
         context: &mut ExecutionContext,
@@ -1942,7 +2174,7 @@ fn evaluate_unary_op(
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let obj =
-            self.evaluate_expression(object, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, object, context, scope_context, namespace)?;
 
         if obj.get_type() != DixType::Object {
             return Err(InterpreterError::InvalidOperation {
@@ -1966,17 +2198,18 @@ fn evaluate_unary_op(
 
     fn evaluate_index_access(
         &mut self,
-        object: &Expression,
-        index: &Expression,
+        arena: &Arena,
+        object: ExprId,
+        index: ExprId,
         position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let obj =
-            self.evaluate_expression(object, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, object, context, scope_context, namespace)?;
         let idx =
-            self.evaluate_expression(index, context, scope_context, namespace)?;
+            self.evaluate_expression(arena, index, context, scope_context, namespace)?;
 
         match obj.get_type() {
             DixType::Array | DixType::Tuple => {
@@ -2116,8 +2349,9 @@ fn evaluate_enum_access(
 
     fn evaluate_quick_func_call(
         &mut self,
+        arena:         &Arena,
         name:          &str,
-        arguments:     &[Expression],
+        arguments:     ExprList,
         position:      Position,
         context:       &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
@@ -2129,7 +2363,7 @@ fn evaluate_enum_access(
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug(&format!("[Lambda] Invoking '{}' from registry", name));
             }
-            return self.invoke_lambda(&lambda, arguments, position, context, scope_context, namespace);
+            return self.invoke_lambda(arena, &lambda, arguments, position, context, scope_context, namespace);
         }
 
         // 2. Check whether `name` is a local variable holding a lambda reference key.
@@ -2138,8 +2372,7 @@ fn evaluate_enum_access(
         //    returned from other functions but not re-registered under their new name
         //    in any prior assignment path.
         if let Ok(context_val) = context.get_variable(name) {
-            let val_str = context_val.as_string();
-            if val_str.starts_with("__lam_") {
+            if let Some(val_str) = lambda_key(&context_val) {
                 if let Some(lambda) = self.lambda_registry.get(&val_str).cloned() {
                     if self.debug_config.is_enabled {
                         self.error_manager.log_debug(&format!(
@@ -2148,7 +2381,7 @@ fn evaluate_enum_access(
                         ));
                     }
                     return self.invoke_lambda(
-                        &lambda, arguments, position, context, scope_context, namespace,
+                        arena, &lambda, arguments, position, context, scope_context, namespace,
                     );
                 }
             }
@@ -2158,31 +2391,29 @@ fn evaluate_enum_access(
         // callee's context so parameter names from the callee's signature are never
         // looked up in an empty execution context during bind_parameters.
         let evaluated_args = self.evaluate_arguments_in_caller_context(
-            arguments, position, context, scope_context, namespace,
+            arena, arguments, position, context, scope_context, namespace,
         )?;
-
-        let literal_args: Vec<Expression> = evaluated_args
-            .iter()
-            .map(|dv| Expression::Value {
-                value: self.dix_value_to_ast_value(dv, position),
-                position,
-            })
-            .collect();
+        let call_args = CallArgs { values: &evaluated_args, wrap: Wrap::Body, position };
 
         // 3. Current namespace functions.
         if let Some(ns) = namespace {
-            if let Some(func_info) = ns.functions.get(name) {
+            if let Some(function) = self
+                .imported_functions
+                .get(&namespace_key(ns))
+                .and_then(|table| table.get(name))
+                .cloned()
+            {
                 if self.debug_config.is_enabled {
                     self.error_manager.log_debug(&format!(
                         "[QuickFuncCall] Found '{}' in current namespace",
                         name
                     ));
                 }
-                let func_ast = func_info.ast.clone();
-                let mut nested_context = ExecutionContext::new(name, None);
+                let mut nested_context = scope_for(name, &function);
                 return self.execute(
-                    &func_ast,
-                    &literal_args,
+                    arena,
+                    &function,
+                    call_args,
                     &mut nested_context,
                     scope_context,
                     namespace,
@@ -2193,25 +2424,25 @@ fn evaluate_enum_access(
         // 4. Global quick-functions registry.
         let function = self
             .quick_functions
-            .iter()
-            .find(|f| f.name == name)
+            .get(name)
             .cloned()
             .ok_or_else(|| InterpreterError::UndefinedFunction {
                 name:     name.to_string(),
                 position,
             })?;
 
-        let mut nested_context = ExecutionContext::new(name, None);
-        self.execute(&function, &literal_args, &mut nested_context, scope_context, None)
+        let mut nested_context = scope_for(name, &function);
+        self.execute(arena, &function, call_args, &mut nested_context, scope_context, None)
     }
 
     fn evaluate_imported_function_call(
         &mut self,
+        arena:         &Arena,
         namespace_name: &str,
         function_name: &str,
-        arguments: &[Expression],
-        position: Position,
-        context: &mut ExecutionContext,
+        arguments:     ExprList,
+        position:      Position,
+        context:       &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
     ) -> Result<DixValue, InterpreterError> {
         if self.debug_config.is_enabled {
@@ -2223,55 +2454,106 @@ fn evaluate_enum_access(
 
         // FIX: evaluate all arguments in the CALLER's context first.
         // The callee is in a different namespace and its execution context
-        // starts empty — it cannot see the caller's local variables.
+        // starts empty - it cannot see the caller's local variables.
         let evaluated_args = self.evaluate_arguments_in_caller_context(
-            arguments, position, context, scope_context, None,
+            arena, arguments, position, context, scope_context, None,
         )?;
 
-        let literal_args: Vec<Expression> = evaluated_args
-            .iter()
-            .map(|dv| Expression::Value {
-                value: self.dix_value_to_ast_value(dv, position),
+        let ns = self
+            .resolve_namespace(namespace_name, None)
+            .ok_or_else(|| InterpreterError::NamespaceNotFound {
+                name: namespace_name.to_string(),
                 position,
-            })
-            .collect();
+            })?;
 
-        // Resolve and clone the function AST before taking a mutable borrow.
-        let (func_ast, target_namespace) = {
-            let ns = self
-                .resolve_namespace(namespace_name, None)
-                .ok_or_else(|| InterpreterError::NamespaceNotFound {
-                    name: namespace_name.to_string(),
-                    position,
-                })?;
-
-            let func_ast = ns
-                .functions
-                .get(function_name)
-                .ok_or_else(|| InterpreterError::FunctionNotInNamespace {
-                    namespace: namespace_name.to_string(),
-                    function: function_name.to_string(),
-                    position,
-                })?
-                .ast
-                .clone();
-
-            (func_ast, ns as *const ImportedNamespace)
-        };
-
-        // SAFETY: symbol_table lives for 'a which outlives this call.
-        let ns_ref: &ImportedNamespace = unsafe { &*target_namespace };
+        let function = self
+            .imported_functions
+            .get(&namespace_key(ns))
+            .and_then(|table| table.get(function_name))
+            .cloned()
+            .ok_or_else(|| InterpreterError::FunctionNotInNamespace {
+                namespace: namespace_name.to_string(),
+                function: function_name.to_string(),
+                position,
+            })?;
 
         let fqn = format!("{}.{}", namespace_name, function_name);
-        let mut imported_context = ExecutionContext::new(&fqn, None);
+        let mut imported_context = scope_for(&fqn, &function);
 
         self.execute(
-            &func_ast,
-            &literal_args,
+            arena,
+            &function,
+            CallArgs { values: &evaluated_args, wrap: Wrap::Body, position },
             &mut imported_context,
             scope_context,
-            Some(ns_ref),
+            Some(ns),
         )
+    }
+
+    /// Runs the call of a function found in `@DATA`, `namespace_name` being the alias of an
+    /// imported namespace for an imported function.
+    ///
+    /// The arguments are evaluated in an empty top-level context, converted the way calls from
+    /// `@DATA` always were (see [`Wrap::Data`]), and bound to the function's parameters.
+    pub fn execute_data_call(
+        &mut self,
+        arena:          &Arena,
+        function_name:  &str,
+        namespace_name: Option<&str>,
+        arguments:      ExprList,
+        position:       Position,
+        scope_context:  &FxHashMap<String, String>,
+    ) -> Result<DixValue, InterpreterError> {
+        // At DATA level there are no local variables - create an empty top-level
+        // context. The interpreter resolves identifiers via data_context.
+        let mut top_level_ctx = ExecutionContext::new("<data>", None);
+
+        // Evaluate every argument in the top-level context. This correctly handles
+        // nested ImportedFunctionCalls, QuickFuncCalls, arithmetic, enum accesses -
+        // anything the interpreter knows how to evaluate.
+        let evaluated_args = self.evaluate_arguments_in_caller_context(
+            arena,
+            arguments,
+            position,
+            &mut top_level_ctx,
+            scope_context,
+            None,
+        )?;
+        let call_args = CallArgs { values: &evaluated_args, wrap: Wrap::Data, position };
+
+        match namespace_name {
+            Some(ns_name) => {
+                let undefined = || InterpreterError::UndefinedFunction {
+                    name: format!("{}.{}", ns_name, function_name),
+                    position,
+                };
+                let ns = self.symbol_table.try_get_namespace(ns_name).ok_or_else(undefined)?;
+                let function = self
+                    .imported_functions
+                    .get(&namespace_key(ns))
+                    .and_then(|table| table.get(function_name))
+                    .cloned()
+                    .ok_or_else(undefined)?;
+
+                let fqn = format!("{}.{}", ns_name, function_name);
+                let mut ctx = scope_for(&fqn, &function);
+                self.execute(arena, &function, call_args, &mut ctx, scope_context, Some(ns))
+            }
+
+            None => {
+                let function = self
+                    .quick_functions
+                    .get(function_name)
+                    .cloned()
+                    .ok_or_else(|| InterpreterError::UndefinedFunction {
+                        name: function_name.to_string(),
+                        position,
+                    })?;
+
+                let mut ctx = scope_for(function_name, &function);
+                self.execute(arena, &function, call_args, &mut ctx, scope_context, None)
+            }
+        }
     }
 
     // =========================================================================
@@ -2281,86 +2563,34 @@ fn evaluate_enum_access(
     /// Evaluate every argument expression in the *caller's* context, returning
     /// a vec of resolved DixValues. Called before constructing any callee context.
     pub fn evaluate_arguments_in_caller_context(
-    &mut self,
-    arguments: &[Expression],
-    position: Position,
-    context: &mut ExecutionContext,
-    scope_context: &FxHashMap<String, String>,
-    namespace: Option<&ImportedNamespace>,
-) -> Result<Vec<DixValue>, InterpreterError> {
-    let mut evaluated = Vec::with_capacity(arguments.len());
-    for (i, arg) in arguments.iter().enumerate() {
-        let val = self
-            .evaluate_expression(arg, context, scope_context, namespace)
-            .map_err(|e| InterpreterError::ParameterEvalFailed {
-                index: i,
-                param_name: format!("arg{}", i),
-                inner: Box::new(e),
-                position: arg.position(),
-            })?;
-        evaluated.push(val);
-    }
-    Ok(evaluated)
+        &mut self,
+        arena: &Arena,
+        arguments: ExprList,
+        _position: Position,
+        context: &mut ExecutionContext,
+        scope_context: &FxHashMap<String, String>,
+        namespace: Option<&ImportedNamespace>,
+    ) -> Result<Vec<DixValue>, InterpreterError> {
+        let mut evaluated = Vec::with_capacity(arguments.len());
+        for (i, &arg) in arena.expr_list(arguments).iter().enumerate() {
+            let val = self
+                .evaluate_expression(arena, arg, context, scope_context, namespace)
+                .map_err(|e| InterpreterError::ParameterEvalFailed {
+                    index: i,
+                    param_name: format!("arg{}", i),
+                    inner: Box::new(e),
+                    position: arena.expr(arg).position(),
+                })?;
+            evaluated.push(val);
         }
+        Ok(evaluated)
+    }
 
-    /// Convert a DixValue back to a lightweight AST Value literal so it can be
-    /// passed to execute() → bind_parameters() → evaluate_expression(), which
-    /// will return it immediately without any variable lookup.
-    fn dix_value_to_ast_value(&self, dix: &DixValue, position: Position) -> Value {
-        match dix.get_type() {
-            DixType::Int       => Value::Integer { value: dix.as_int(), position },
-            DixType::Long      => Value::Long    { value: dix.as_long(), position },
-            DixType::Float     => Value::Float   { value: dix.as_float(), position },
-            DixType::Double    => Value::Double  { value: dix.as_double(), position },
-            DixType::String    => Value::String  { value: dix.as_string(), position },
-            DixType::Bool      => Value::Boolean { value: dix.as_bool(), position },
-            DixType::Null      => Value::Null { position },
-            DixType::Hex       => Value::HexColor { value: dix.as_string(), position },
-            DixType::Blob      => Value::PrefixedConstructor {
-                prefix: "b".to_string(),
-                arguments: vec![Value::String {
-                    value: dix.as_blob_base64().unwrap_or_default(),
-                    position,
-                }],
-                position,
-            },
-            DixType::Regex     => Value::PrefixedConstructor {
-                prefix: "r".to_string(),
-                arguments: vec![Value::String {
-                    value: dix.as_string(),
-                    position,
-                }],
-                position,
-            },
-            DixType::Array | DixType::Tuple => {
-                let values: Vec<Value> = dix
-                    .as_array()
-                    .iter()
-                    .map(|item| self.dix_value_to_ast_value(item, position))
-                    .collect();
-                Value::Array { values, position }
-            }
-            DixType::Object    => {
-                let properties: Vec<ObjectProperty> = dix
-                    .as_object()
-                    .iter()
-                    .map(|(key, val)| ObjectProperty {
-                        key: key.clone(),
-                        value: self.dix_value_to_ast_value(val, position),
-                        position,
-                    })
-                    .collect();
-                Value::Object { properties, position }
-            }
-            DixType::Date      => Value::Date      { value: dix.as_string(), position },
-            DixType::Timestamp => Value::Timestamp { value: dix.as_string(), position },
-            _                  => Value::String    { value: dix.as_string(), position },
-        }
-    }
     fn invoke_lambda(
         &mut self,
+        arena:         &Arena,
         lambda:        &LambdaAst,
-        arguments:     &[Expression],
+        arguments:     ExprList,
         position:      Position,
         context:       &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
@@ -2390,12 +2620,14 @@ fn evaluate_enum_access(
 
         // Evaluate each argument in the CALLER's context (not lambda_context) so
         // that identifier resolution uses the scope where the call was made.
-        for (i, param_name) in lambda.params.iter().enumerate() {
+        let argument_ids = arena.expr_list(arguments);
+        for (i, &param) in arena.str_list(lambda.params).iter().enumerate() {
+            let param_name = arena.text(param);
             let arg_value = self
-                .evaluate_expression(&arguments[i], context, scope_context, namespace)
+                .evaluate_expression(arena, argument_ids[i], context, scope_context, namespace)
                 .map_err(|e| InterpreterError::ParameterEvalFailed {
                     index:      i,
-                    param_name: param_name.clone(),
+                    param_name: param_name.to_string(),
                     inner:      Box::new(e),
                     position,
                 })?;
@@ -2423,11 +2655,11 @@ fn evaluate_enum_access(
         // return statements.
         if !lambda.statements.is_empty() {
             let mut last_result = DixValue::null();
-            for stmt in &lambda.statements {
+            for &stmt in arena.stmt_list(lambda.statements) {
                 last_result = self.execute_statement(
-                    stmt, &mut lambda_context, scope_context, namespace,
+                    arena, stmt, &mut lambda_context, scope_context, namespace,
                 )?;
-                if matches!(stmt, QuickFuncStatement::Return { .. }) {
+                if matches!(arena.stmt(stmt), StmtNode::Return { .. }) {
                     return Ok(last_result);
                 }
             }
@@ -2436,7 +2668,8 @@ fn evaluate_enum_access(
 
         // Single-expression body.
         self.evaluate_expression(
-            &lambda.body,
+            arena,
+            lambda.body,
             &mut lambda_context,
             scope_context,
             namespace,
@@ -2461,50 +2694,52 @@ fn evaluate_enum_access(
 
     fn convert_ast_value_to_dix_value(
         &mut self,
-        value: &Value,
+        arena: &Arena,
+        value: ValueId,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        match value {
-            Value::Expression { expr, .. } => {
-                self.evaluate_expression(expr, context, scope_context, namespace)
+        match *arena.value(value) {
+            ValueNode::Expression { expr, .. } => {
+                self.evaluate_expression(arena, expr, context, scope_context, namespace)
             }
-            Value::Integer { value, .. }            => Ok(DixValue::from_int(*value)),
-            Value::Long { value, .. }               => Ok(DixValue::from_long(*value)),
-            Value::Float { value, .. }              => Ok(DixValue::from_float(*value)),
-            Value::Double { value, .. }             => Ok(DixValue::from_double(*value)),
-            Value::ScientificNotation { value, .. } => Ok(DixValue::from_double(*value)),
-            Value::String { value, .. }             => Ok(DixValue::from_string(value.clone())),
-            Value::Boolean { value, .. }            => Ok(DixValue::from_bool(*value)),
-            Value::Null { .. }                      => Ok(DixValue::null()),
-            Value::HexColor { value, .. }           => Ok(DixValue::from_hex(value.clone())),
+            ValueNode::Integer { value, .. }            => Ok(DixValue::from_int(value)),
+            ValueNode::Long { value, .. }               => Ok(DixValue::from_long(value)),
+            ValueNode::Float { value, .. }              => Ok(DixValue::from_float(value)),
+            ValueNode::Double { value, .. }             => Ok(DixValue::from_double(value)),
+            ValueNode::ScientificNotation { value, .. } => Ok(DixValue::from_double(value)),
+            ValueNode::String { value, .. }             => Ok(DixValue::from_string(arena.text(value).to_string())),
+            ValueNode::Boolean { value, .. }            => Ok(DixValue::from_bool(value)),
+            ValueNode::Null { .. }                      => Ok(DixValue::null()),
+            ValueNode::HexColor { value, .. }           => Ok(DixValue::from_hex(arena.text(value).to_string())),
 
-            Value::Array { values, position }
-            | Value::NestedArray { values, position, .. } => {
-                self.convert_array(values, *position, context, scope_context, namespace)
+            ValueNode::Array { values, position }
+            | ValueNode::NestedArray { values, position, .. } => {
+                self.convert_array(arena, values, position, context, scope_context, namespace)
             }
 
-            Value::Object { properties, position } => {
+            ValueNode::Object { properties, position } => {
                 self.convert_object_literal(
-                    properties, *position, context, scope_context, namespace,
+                    arena, properties, position, context, scope_context, namespace,
                 )
             }
 
-            Value::PrefixedConstructor { prefix, arguments, position } => {
+            ValueNode::PrefixedConstructor { prefix, arguments, position } => {
                 self.convert_prefixed_constructor(
-                    prefix, arguments, *position, context, scope_context, namespace,
+                    arena, arena.text(prefix), arguments, position, context, scope_context, namespace,
                 )
             }
 
             // FIX: lambdas are now first-class values.
             // Each lambda definition gets a unique reference key ("__lam_N") that is
-            // stored as the DixValue.  The actual AST, together with a snapshot of the
-            // current execution context (for closure support), is stored in the lambda
-            // registry under that key.  The key is also registered under the variable
-            // name by execute_variable_declaration / execute_assignment so that direct
-            // calls like `myLambda(args)` still work via the registry name lookup.
-            Value::Lambda { parameters, body, statements, .. } => {
+            // stored as the DixValue.  The definition (handles into the arena), together
+            // with a snapshot of the current execution context (for closure support), is
+            // stored in the lambda registry under that key.  The key is also registered
+            // under the variable name by execute_variable_declaration / execute_assignment
+            // so that direct calls like `myLambda(args)` still work via the registry name
+            // lookup.
+            ValueNode::Lambda { parameters, body, statements, .. } => {
                 // Capture the current environment for closure semantics.
                 let captured = context.get_all_variables();
 
@@ -2512,71 +2747,52 @@ fn evaluate_enum_access(
                 self.lambda_counter += 1;
 
                 self.lambda_registry.insert(key.clone(), Rc::new(LambdaAst {
-                    params:       parameters.clone(),
-                    body:         *body.clone(),
-                    statements:   statements.clone(),
+                    params:       parameters,
+                    body,
+                    statements,
                     captured_env: if captured.is_empty() { None } else { Some(captured) },
                 }));
 
                 if self.debug_config.is_verbose {
+                    let names: Vec<&str> =
+                        arena.str_list(parameters).iter().map(|&s| arena.text(s)).collect();
                     self.error_manager.log_debug(&format!(
                         "[Lambda] Registered under key {} (params: {:?})",
-                        key, parameters
+                        key, names
                     ));
                 }
 
                 Ok(DixValue::from_string(key))
             }
 
-            Value::QuickFuncCall { function_name, arguments, position } => {
+            ValueNode::QuickFuncCall { function_name, arguments, position } => {
                 self.evaluate_quick_func_call(
-                    function_name, arguments, *position, context, scope_context, namespace,
+                    arena, arena.text(function_name), arguments, position, context, scope_context, namespace,
                 )
             }
 
-            Value::InterpolatedString { template, expressions, position } => {
+            ValueNode::InterpolatedString { template, expressions, position } => {
                 self.evaluate_interpolated_string(
-                    template, expressions, *position, context, scope_context, namespace,
+                    arena, arena.text(template), expressions, position, context, scope_context, namespace,
                 )
             }
 
-            Value::EnumValue { enum_name, value: enum_value, position } => {
-                self.evaluate_enum_access(None, enum_name, enum_value, *position, namespace)
+            ValueNode::EnumValue { enum_name, value: enum_value, position } => {
+                self.evaluate_enum_access(
+                    None, arena.text(enum_name), arena.text(enum_value), position, namespace,
+                )
             }
 
-            Value::Identifier { value: id_value, position } => {
-                self.resolve_identifier(id_value, *position, context, scope_context)
+            ValueNode::Identifier { value: id_value, position } => {
+                self.resolve_identifier(arena.text(id_value), position, context, scope_context)
             }
 
-            Value::Date { value, .. } => {
-                use chrono::NaiveDate;
-                let date =
-                    NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|e| {
-                        InterpreterError::InvalidOperation {
-                            message: format!("Invalid date format: {}", e),
-                            position: Position::UNKNOWN,
-                        }
-                    })?;
-                Ok(DixValue::from_date(
-                    chrono::DateTime::from_naive_utc_and_offset(
-                        date.and_hms_opt(0, 0, 0).unwrap(),
-                        chrono::Utc,
-                    ),
-                ))
-            }
+            ValueNode::Date { value, .. } => date_value(arena.text(value)),
 
-            Value::Timestamp { value, .. } => {
-                let timestamp = value
-                    .parse::<chrono::DateTime<chrono::Utc>>()
-                    .map_err(|e| InterpreterError::InvalidOperation {
-                        message: format!("Invalid timestamp format: {}", e),
-                        position: Position::UNKNOWN,
-                    })?;
-                Ok(DixValue::from_timestamp(timestamp))
-            }
+            ValueNode::Timestamp { value, .. } => timestamp_value(arena.text(value)),
 
             _ => Err(InterpreterError::InvalidOperation {
-                message: format!("Unsupported value type: {}", value_variant_name(value)),
+                message: format!("Unsupported value type: {}", value_variant_name(arena.value(value))),
                 position: Position::UNKNOWN,
             }),
         }
@@ -2584,16 +2800,17 @@ fn evaluate_enum_access(
 
     fn convert_array(
         &mut self,
-        values: &[Value],
+        arena: &Arena,
+        values: ValueList,
         _position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let mut dix_values = Vec::with_capacity(values.len());
-        for value in values {
+        for &value in arena.value_list(values) {
             dix_values.push(
-                self.convert_ast_value_to_dix_value(value, context, scope_context, namespace)?,
+                self.convert_ast_value_to_dix_value(arena, value, context, scope_context, namespace)?,
             );
         }
         Ok(DixValue::from_array(dix_values))
@@ -2601,52 +2818,54 @@ fn evaluate_enum_access(
 
     fn convert_object_literal(
         &mut self,
-        properties: &[ObjectProperty],
+        arena: &Arena,
+        properties: PropList,
         _position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        let mut dix_obj =
-            FxHashMap::with_capacity_and_hasher(properties.len(), Default::default());
-        for prop in properties {
+        let mut dix_obj = HashMap::with_capacity(properties.len());
+        for prop in arena.prop_list(properties) {
             let value = self.convert_ast_value_to_dix_value(
-                &prop.value, context, scope_context, namespace,
+                arena, prop.value, context, scope_context, namespace,
             )?;
-            dix_obj.insert(prop.key.clone(), value);
+            dix_obj.insert(arena.text(prop.key).to_string(), value);
         }
-        Ok(DixValue::from_object(dix_obj.into_iter().collect()))
+        Ok(DixValue::from_object(dix_obj))
     }
 
     fn convert_prefixed_constructor(
         &mut self,
+        arena: &Arena,
         prefix: &str,
-        arguments: &[Value],
+        arguments: ValueList,
         position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
+        let args = arena.value_list(arguments);
         match prefix.to_lowercase().as_str() {
             "t" => {
-                let cap = arguments.len().min(6);
+                let cap = args.len().min(6);
                 let mut tuple_values = Vec::with_capacity(cap);
-                for arg in arguments.iter().take(6) {
+                for &arg in args.iter().take(6) {
                     tuple_values.push(self.convert_ast_value_to_dix_value(
-                        arg, context, scope_context, namespace,
+                        arena, arg, context, scope_context, namespace,
                     )?);
                 }
                 Ok(DixValue::from_tuple(tuple_values))
             }
             "b" => {
-                let base64_data = if arguments.is_empty() {
+                let base64_data = if args.is_empty() {
                     String::new()
                 } else {
-                    match &arguments[0] {
-                        Value::String { value, .. } => value.clone(),
-                        other => self
+                    match *arena.value(args[0]) {
+                        ValueNode::String { value, .. } => arena.text(value).to_string(),
+                        _ => self
                             .convert_ast_value_to_dix_value(
-                                other, context, scope_context, namespace,
+                                arena, args[0], context, scope_context, namespace,
                             )?
                             .as_string(),
                     }
@@ -2656,14 +2875,14 @@ fn evaluate_enum_access(
                 })
             }
             "r" => {
-                let pattern = if arguments.is_empty() {
+                let pattern = if args.is_empty() {
                     ".*".to_string()
                 } else {
-                    match &arguments[0] {
-                        Value::String { value, .. } => value.clone(),
-                        other => self
+                    match *arena.value(args[0]) {
+                        ValueNode::String { value, .. } => arena.text(value).to_string(),
+                        _ => self
                             .convert_ast_value_to_dix_value(
-                                other, context, scope_context, namespace,
+                                arena, args[0], context, scope_context, namespace,
                             )?
                             .as_string(),
                     }
@@ -2681,8 +2900,9 @@ fn evaluate_enum_access(
 
     fn evaluate_interpolated_string(
         &mut self,
+        arena: &Arena,
         template: &str,
-        expressions: &[Expression],
+        expressions: ExprList,
         _position: Position,
         context: &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
@@ -2699,9 +2919,9 @@ fn evaluate_enum_access(
         let mut result = String::with_capacity(template.len() + expressions.len() * 8);
         result.push_str(template);
 
-        for (i, expr) in expressions.iter().enumerate() {
+        for (i, &expr) in arena.expr_list(expressions).iter().enumerate() {
             let value =
-                self.evaluate_expression(expr, context, scope_context, namespace)?;
+                self.evaluate_expression(arena, expr, context, scope_context, namespace)?;
             let placeholder = format!("{{{}}}", i);
             let value_string = value.as_string();
 
@@ -2727,78 +2947,78 @@ fn evaluate_enum_access(
 }
 
 // =============================================================================
-// Diagnostic helpers — zero allocation, used only on debug/error paths
+// Diagnostic helpers - zero allocation, used only on debug/error paths
 // =============================================================================
 
-fn statement_variant_name(stmt: &QuickFuncStatement) -> &'static str {
+fn statement_variant_name(stmt: &StmtNode) -> &'static str {
     match stmt {
-        QuickFuncStatement::Return { .. }              => "Return",
-        QuickFuncStatement::Assignment { .. }          => "Assignment",
-        QuickFuncStatement::ArithmeticAssignment { .. }=> "ArithmeticAssignment",
-        QuickFuncStatement::If { .. }                  => "If",
-        QuickFuncStatement::Switch { .. }              => "Switch",
-        QuickFuncStatement::Log { .. }                 => "Log",
-        QuickFuncStatement::VariableDeclaration { .. } => "VariableDeclaration",
-        QuickFuncStatement::ExpressionStatement { .. } => "ExpressionStatement",
-        QuickFuncStatement::ObjectCreation { .. }      => "ObjectCreation",
+        StmtNode::Return { .. }              => "Return",
+        StmtNode::Assignment { .. }          => "Assignment",
+        StmtNode::ArithmeticAssignment { .. }=> "ArithmeticAssignment",
+        StmtNode::If { .. }                  => "If",
+        StmtNode::Switch { .. }              => "Switch",
+        StmtNode::Log { .. }                 => "Log",
+        StmtNode::VariableDeclaration { .. } => "VariableDeclaration",
+        StmtNode::ExpressionStatement { .. } => "ExpressionStatement",
+        StmtNode::ObjectCreation { .. }      => "ObjectCreation",
     }
 }
 
-fn value_variant_name(value: &Value) -> &'static str {
+fn value_variant_name(value: &ValueNode) -> &'static str {
     match value {
-        Value::Integer { .. }            => "Integer",
-        Value::Long { .. }            => "Long",
-        Value::Float { .. }              => "Float",
-        Value::Double { .. }             => "Double",
-        Value::ScientificNotation { .. } => "ScientificNotation",
-        Value::String { .. }             => "String",
-        Value::Boolean { .. }            => "Boolean",
-        Value::InterpolatedString { .. } => "InterpolatedString",
-        Value::HexColor { .. }           => "HexColor",
-        Value::Date { .. }               => "Date",
-        Value::Timestamp { .. }          => "Timestamp",
-        Value::Null { .. }               => "Null",
-        Value::Array { .. }              => "Array",
-        Value::NestedArray { .. }        => "NestedArray",
-        Value::Object { .. }             => "Object",
-        Value::PrefixedConstructor { .. }=> "PrefixedConstructor",
-        Value::EnumValue { .. }          => "EnumValue",
-        Value::Identifier { .. }         => "Identifier",
-        Value::QuickFuncCall { .. }      => "QuickFuncCall",
-        Value::Expression { .. }         => "Expression",
-        Value::Range { .. }              => "Range",
-        Value::Lambda { .. }             => "Lambda",
-        Value::ParseError { .. }         => "ParseError",
-        Value::Error { .. }              => "Error",
-        Value::Unknown { .. }            => "Unknown",
+        ValueNode::Integer { .. }            => "Integer",
+        ValueNode::Long { .. }               => "Long",
+        ValueNode::Float { .. }              => "Float",
+        ValueNode::Double { .. }             => "Double",
+        ValueNode::ScientificNotation { .. } => "ScientificNotation",
+        ValueNode::String { .. }             => "String",
+        ValueNode::Boolean { .. }            => "Boolean",
+        ValueNode::InterpolatedString { .. } => "InterpolatedString",
+        ValueNode::HexColor { .. }           => "HexColor",
+        ValueNode::Date { .. }               => "Date",
+        ValueNode::Timestamp { .. }          => "Timestamp",
+        ValueNode::Null { .. }               => "Null",
+        ValueNode::Array { .. }              => "Array",
+        ValueNode::NestedArray { .. }        => "NestedArray",
+        ValueNode::Object { .. }             => "Object",
+        ValueNode::PrefixedConstructor { .. }=> "PrefixedConstructor",
+        ValueNode::EnumValue { .. }          => "EnumValue",
+        ValueNode::Identifier { .. }         => "Identifier",
+        ValueNode::QuickFuncCall { .. }      => "QuickFuncCall",
+        ValueNode::Expression { .. }         => "Expression",
+        ValueNode::Range { .. }              => "Range",
+        ValueNode::Lambda { .. }             => "Lambda",
+        ValueNode::ParseError { .. }         => "ParseError",
+        ValueNode::Error { .. }              => "Error",
+        ValueNode::Unknown { .. }            => "Unknown",
     }
 }
 
-fn expr_variant_name(expr: &Expression) -> &'static str {
+fn expr_variant_name(expr: &ExprNode) -> &'static str {
     match expr {
-        Expression::Identifier { .. }          => "Identifier",
-        Expression::QualifiedIdentifier { .. } => "QualifiedIdentifier",
-        Expression::FunctionCall { .. }        => "FunctionCall",
-        Expression::QuickFuncCall { .. }       => "QuickFuncCall",
-        Expression::DixFunctionCall { .. }     => "DixFunctionCall",
-        Expression::StaticMethodCall { .. }    => "StaticMethodCall",
-        Expression::InstanceMethodCall { .. }  => "InstanceMethodCall",
-        Expression::BuiltinFunction { .. }     => "BuiltinFunction",
-        Expression::StaticFunction { .. }      => "StaticFunction",
-        Expression::ImportedFunctionCall { .. }=> "ImportedFunctionCall",
-        Expression::ArithmeticOp { .. }        => "ArithmeticOp",
-        Expression::BitwiseOp { .. }           => "BitwiseOp",
-        Expression::ComparisonOp { .. }        => "ComparisonOp",
-        Expression::LogicalOp { .. }           => "LogicalOp",
-        Expression::UnaryOp { .. }             => "UnaryOp",
-        Expression::ConfigAccess { .. }        => "ConfigAccess",
-        Expression::EnumAccess { .. }          => "EnumAccess",
-        Expression::ObjectAccess { .. }        => "ObjectAccess",
-        Expression::PropertyAccess { .. }      => "PropertyAccess",
-        Expression::IndexAccess { .. }         => "IndexAccess",
-        Expression::Value { .. }               => "Value",
-        Expression::Parenthesized { .. }       => "Parenthesized",
-        Expression::Conditional { .. }         => "Conditional",
-        Expression::TypeCast { .. }            => "TypeCast",
+        ExprNode::Identifier { .. }          => "Identifier",
+        ExprNode::QualifiedIdentifier { .. } => "QualifiedIdentifier",
+        ExprNode::FunctionCall { .. }        => "FunctionCall",
+        ExprNode::QuickFuncCall { .. }       => "QuickFuncCall",
+        ExprNode::DixFunctionCall { .. }     => "DixFunctionCall",
+        ExprNode::StaticMethodCall { .. }    => "StaticMethodCall",
+        ExprNode::InstanceMethodCall { .. }  => "InstanceMethodCall",
+        ExprNode::BuiltinFunction { .. }     => "BuiltinFunction",
+        ExprNode::StaticFunction { .. }      => "StaticFunction",
+        ExprNode::ImportedFunctionCall { .. }=> "ImportedFunctionCall",
+        ExprNode::ArithmeticOp { .. }        => "ArithmeticOp",
+        ExprNode::BitwiseOp { .. }           => "BitwiseOp",
+        ExprNode::ComparisonOp { .. }        => "ComparisonOp",
+        ExprNode::LogicalOp { .. }           => "LogicalOp",
+        ExprNode::UnaryOp { .. }             => "UnaryOp",
+        ExprNode::ConfigAccess { .. }        => "ConfigAccess",
+        ExprNode::EnumAccess { .. }          => "EnumAccess",
+        ExprNode::ObjectAccess { .. }        => "ObjectAccess",
+        ExprNode::PropertyAccess { .. }      => "PropertyAccess",
+        ExprNode::IndexAccess { .. }         => "IndexAccess",
+        ExprNode::Value { .. }               => "Value",
+        ExprNode::Parenthesized { .. }       => "Parenthesized",
+        ExprNode::Conditional { .. }         => "Conditional",
+        ExprNode::TypeCast { .. }            => "TypeCast",
     }
-    }
+}

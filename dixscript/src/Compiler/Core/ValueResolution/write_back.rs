@@ -387,11 +387,95 @@ mod tests {
 
     use super::*;
     use crate::Compiler::AST::{DataEntry, DataSection, DataType, ObjectProperty, PropertyAssignment, TablePath, Value};
-    use crate::Compiler::Core::ValueResolution::ValueResolver;
+    use crate::Builtins::Core::DixType;
 
     fn at(n: usize) -> Position {
         Position { line: n, column: 1 }
     }
+
+    /// The owned form of an argument value, the oracle the arena conversion is checked against. It
+    /// is what the resolver used to build for every argument of a call before the interpreter
+    /// worked on the arena.
+    fn convert_dix_value_to_value(dix: &DixValue, position: Position) -> Value {
+        match dix.get_type() {
+            DixType::Int    => Value::Integer { value: dix.as_int(),    position },
+            DixType::Long   => Value::Long    { value: dix.as_long(),   position },
+            DixType::Float  => Value::Float   { value: dix.as_float(),  position },
+            DixType::Double => Value::Double  { value: dix.as_double(), position },
+            DixType::String => Value::String  { value: dix.as_string(), position },
+            DixType::Bool   => Value::Boolean { value: dix.as_bool(),   position },
+            DixType::Null   => Value::Null    { position },
+            DixType::Hex    => Value::HexColor { value: dix.as_string(), position },
+
+            DixType::Blob => Value::PrefixedConstructor {
+                prefix: "b".to_string(),
+                arguments: vec![Value::String {
+                    value: dix.as_blob_base64().unwrap_or_default(),
+                    position,
+                }],
+                position,
+            },
+
+            DixType::Regex => Value::PrefixedConstructor {
+                prefix: "r".to_string(),
+                arguments: vec![Value::String {
+                    value: dix.as_string(),
+                    position,
+                }],
+                position,
+            },
+
+            //  Tuple must round-trip as t:(...) not as [...].
+            // Previously both Array and Tuple produced Value::Array, which broke
+            // subsequent resolution passes that needed to re-read tuple elements
+            // (e.g. createLennardJones returns t:(epsilon, sigma), then the caller
+            // does lj_parameters.first()). Now Tuple → PrefixedConstructor{"t"}
+            // which try_value_to_dix handles correctly via the "t" branch,
+            // and Display renders as `t:(...)` in the .resolved.mdix output.
+            DixType::Array => {
+                let values: Vec<Value> = dix
+                    .as_array()
+                    .iter()
+                    .map(|item| convert_dix_value_to_value(item, position))
+                    .collect();
+                Value::Array { values, position }
+            }
+
+            DixType::Tuple => {
+                // Recursion preserves nested tuples: t:(t:(1,2), t:(3,4)) → correct.
+                let arguments: Vec<Value> = dix
+                    .as_array()
+                    .iter()
+                    .map(|item| convert_dix_value_to_value(item, position))
+                    .collect();
+                Value::PrefixedConstructor {
+                    prefix: "t".to_string(),
+                    arguments,
+                    position,
+                }
+            }
+
+            DixType::Object => {
+                let properties: Vec<ObjectProperty> = dix
+                    .as_object()
+                    .iter()
+                    .map(|(key, val)| ObjectProperty {
+                        key:      key.clone(),
+                        value:    convert_dix_value_to_value(val, position),
+                        position,
+                    })
+                    .collect();
+                Value::Object { properties, position }
+            }
+
+            DixType::Date      => Value::Date      { value: dix.as_string(), position },
+            DixType::Timestamp => Value::Timestamp { value: dix.as_string(), position },
+
+            // Enum: already converted to Integer in Phase 1; unreachable in practice.
+            _ => Value::String { value: dix.as_string(), position },
+        }
+    }
+
 
     fn int(n: usize) -> Value {
         Value::Integer { value: n as i32, position: at(n) }
@@ -559,7 +643,7 @@ mod tests {
         for dix in values() {
             let mut arena = Arena::default();
             let id = alloc_dix_value(&mut arena, &dix, at(3));
-            let owned = ValueResolver::convert_dix_value_to_value(&dix, at(3));
+            let owned = convert_dix_value_to_value(&dix, at(3));
             assert_eq!(format!("{:?}", arena.export_value(id)), format!("{owned:?}"), "{dix:?}");
         }
     }

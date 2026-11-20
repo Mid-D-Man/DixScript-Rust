@@ -167,6 +167,35 @@ pub struct DocQuickFunction {
     pub position: Position,
 }
 
+impl DocQuickFunction {
+    /// Copies an owned function into `arena`: its body and the default values of its parameters
+    /// become nodes of the arena, and the rest is copied as it is.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `arena` would need more nodes, list entries or text bytes than a `u32` can
+    /// count.
+    pub fn from_owned(arena: &mut Arena, func: &QuickFunction) -> DocQuickFunction {
+        DocQuickFunction {
+            name: func.name.clone(),
+            return_type: func.return_type,
+            scope_list: func.scope_list.clone(),
+            parameters: func
+                .parameters
+                .iter()
+                .map(|p| DocQuickFuncParam {
+                    name: p.name.clone(),
+                    data_type: p.data_type,
+                    default_value: p.default_value.as_ref().map(|e| arena.import_expr(e)),
+                    position: p.position,
+                })
+                .collect(),
+            body: arena.import_stmt_list(&func.body),
+            position: func.position,
+        }
+    }
+}
+
 /// Arena form of [`QuickFuncParam`]. A default value is an expression id.
 #[derive(Debug, Clone)]
 #[allow(missing_docs)]
@@ -550,23 +579,7 @@ fn import_quickfuncs(arena: &mut Arena, src: &QuickFuncsSection) -> DocQuickFunc
         functions: src
             .functions
             .iter()
-            .map(|func| DocQuickFunction {
-                name: func.name.clone(),
-                return_type: func.return_type,
-                scope_list: func.scope_list.clone(),
-                parameters: func
-                    .parameters
-                    .iter()
-                    .map(|p| DocQuickFuncParam {
-                        name: p.name.clone(),
-                        data_type: p.data_type,
-                        default_value: p.default_value.as_ref().map(|e| arena.import_expr(e)),
-                        position: p.position,
-                    })
-                    .collect(),
-                body: arena.import_stmt_list(&func.body),
-                position: func.position,
-            })
+            .map(|func| DocQuickFunction::from_owned(arena, func))
             .collect(),
         position: src.position,
     }

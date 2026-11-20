@@ -25,9 +25,10 @@
 //!   a plain array, and an imported enum is merged into `@ENUMS` only through the dotted value
 //!   form.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::OnceLock;
 
 use dixscript::Compiler::AST::arena::Document;
@@ -38,10 +39,11 @@ use dixscript::Compiler::AST::{
 };
 use dixscript::Compiler::Core::Config::{ConfigSectionHandler, OperationalSettings};
 use dixscript::Compiler::Core::Tokenizer::{split_config_tokens, Tokenizer};
-use dixscript::Compiler::Core::ValueResolution::ValueResolver;
+use dixscript::Compiler::Core::ValueResolution::{FunctionInterpreter, ValueResolver};
 use dixscript::Compiler::Core::{GeneralAstEnhancer, GeneralParser, GeneralSemanticAnalyzer};
 use dixscript::Compiler::Utilities::SymbolTable;
 use dixscript::ErrorManager::ErrorManager;
+use dixscript::Utilities::RustcHash::FxHashMap;
 
 // ==================== helpers ====================
 
@@ -986,6 +988,22 @@ fn the_document_decides_whether_there_is_a_data_section() {
 
 // ==================== sharing ====================
 
+/// What the document's arena holds once the functions the interpreter can call are copied into it,
+/// which the resolver does before the first call. It is measured on a copy of the arena by the same
+/// call the resolver makes, so that a test of what a phase allocates can leave the functions out.
+fn sizes_with_functions(document: &Document, ast: &DixScript, symbols: &SymbolTable) -> (usize, usize, usize) {
+    let mut probe = document.arena.clone();
+    let mut interpreter = FunctionInterpreter::new_with_error_manager(
+        symbols,
+        Rc::new(RefCell::new(FxHashMap::default())),
+        DebugMode::Off,
+        ErrorManager::new_isolated_silent(),
+    );
+    let local = ast.quick_functions.as_ref().map(|q| q.functions.as_slice()).unwrap_or(&[]);
+    interpreter.register_functions(&mut probe, local);
+    (probe.value_count(), probe.expr_count(), probe.used_bytes())
+}
+
 fn arena_sizes(document: &Document) -> (usize, usize, usize) {
     (document.arena.value_count(), document.arena.expr_count(), document.arena.used_bytes())
 }
@@ -1011,9 +1029,11 @@ fn data_without_a_change_allocates_nothing_in_the_document() {
         Position::UNKNOWN,
     ));
     let document = Document::from_owned(&ast);
-    let before = arena_sizes(&document);
+    let before = sizes_with_functions(&document, &ast, &prepared.symbols);
     let before_data = document.data.as_ref().unwrap().export(&document.arena);
-    // The call to an undefined function fails a later phase; phase 1 is what is measured.
+    // The call to an undefined function fails a later phase; phase 1 is what is measured. The
+    // resolver copies the functions it can call into the arena before the first call, so they are
+    // part of what the arena holds at the start.
     let outcome = resolve(ast, &prepared.symbols, &prepared.settings, Some(document));
     let document = outcome.document.as_ref().unwrap();
     assert_eq!(arena_sizes(document), before, "nothing was allocated, not even a list");

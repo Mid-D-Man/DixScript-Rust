@@ -38,7 +38,6 @@ pub use supporting_classes::{
     FunctionCallInfo,
     ResolutionRecord,
     ScopeTracker,
-    FunctionRegistry,
     ExecutionError,
     FunctionExecutionError,
 };
@@ -48,4 +47,4 @@ pub use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
 pub use execution_context::{ExecutionContext, ExecutionContextSnapshot};
 pub use ast_walker::ASTWalker;
 pub use value_resolver::{ValueResolver, ResolverError};
-pub use function_interpreter::{FunctionInterpreter, InterpreterError, LambdaAst};
+pub use function_interpreter::{CallArgs, FunctionInterpreter, InterpreterError, LambdaAst, Wrap};

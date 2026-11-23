@@ -18,9 +18,11 @@
 //! ## Reading the arena
 //! [`GeneralAstEnhancer::with_document`] gives the enhancer the [`Document`] the owned tree was
 //! exported from. The `@QUICKFUNCS` section is then read from the document and enhanced in its
-//! arena, and only the enhanced section is copied out into the result's tree. Without a document
-//! the owned section is enhanced through a scratch arena. The sections are decided by the tree
-//! that is read: with a document attached, the document says whether there is a section.
+//! arena, and only the enhanced section is copied out into the result's tree. The document keeps
+//! the enhanced section too, in place of the parsed one, so it is the single source of the
+//! functions as they are after this stage. Without a document the owned section is enhanced
+//! through a scratch arena. The sections are decided by the tree that is read: with a document
+//! attached, the document says whether there is a section.
 
 use crate::Compiler::AST::arena::Document;
 use crate::Compiler::AST::DixScript;
@@ -77,8 +79,9 @@ impl<'a> GeneralAstEnhancer<'a> {
     /// Makes the enhancer read the `@QUICKFUNCS` section from `document` instead of from the
     /// owned tree passed to [`enhance`](Self::enhance).
     ///
-    /// The enhanced nodes are allocated in the document's arena after the existing ones, so the
-    /// document stays valid and means the same as before.
+    /// The enhanced nodes are allocated in the document's arena after the existing ones, and the
+    /// document's `quick_functions` section is replaced by the enhanced one. Every other section
+    /// is left as it was, and the parsed function nodes stay in the arena, unreferenced.
     pub fn with_document(mut self, document: &'a mut Document) -> Self {
         self.document = Some(document);
         self
@@ -166,7 +169,11 @@ impl<'a> GeneralAstEnhancer<'a> {
                     .as_ref()
                     .expect("presence was read from this document just above");
                 let enhanced = enhancer.enhance_doc(section, arena, quickfuncs_analysis);
-                enhanced.export(arena)
+                let exported = enhanced.export(arena);
+                // The document keeps the enhanced section, so that it carries the functions
+                // as they are after this stage and not as they were parsed.
+                *quick_functions = Some(enhanced);
+                exported
             }
             None => {
                 let section = ast

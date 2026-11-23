@@ -560,13 +560,13 @@ impl<'a> SchemaSectionAnalyzer<'a> {
         self.run(schema, data, arena)
     }
 
-    /// Post-resolution entry, called by `DixLoader` once value resolution
-    /// has replaced computed values with concrete ones.
+    /// Post-resolution entry for an owned tree, for callers that hold the resolved sections as
+    /// owned types.
     ///
-    /// It takes the owned types because value resolution still produces an owned tree. The
-    /// sections are copied into a scratch arena and checked by
-    /// [`analyze_doc`](Self::analyze_doc), so this costs a copy of the resolved `@DATA`
-    /// section that the semantic-phase entry no longer pays.
+    /// The sections are copied into a scratch arena and checked by the same `run` as
+    /// [`analyze_doc`](Self::analyze_doc), so this costs a copy of the resolved `@DATA` section
+    /// that the loader's own entry over a document's sections does not pay, because the document
+    /// is what the loader keeps.
     ///
     /// # Panics
     ///
@@ -578,6 +578,21 @@ impl<'a> SchemaSectionAnalyzer<'a> {
         data: Option<&DataSection>,
     ) -> SectionAnalysisResult {
         self.run_owned(schema, data)
+    }
+
+    /// Post-resolution entry over a document's own sections, called by `DixLoader` once value
+    /// resolution has replaced computed values with concrete ones.
+    ///
+    /// It runs the same checks as [`validate_resolved`](Self::validate_resolved) and reports the
+    /// same diagnostics, reading the sections where they are. `data` is passed separately from
+    /// `schema` because a caller may check a schema against another section's data.
+    pub(crate) fn validate_resolved_doc(
+        &mut self,
+        schema: &DocSchema,
+        data: Option<&DocData>,
+        arena: &Arena,
+    ) -> SectionAnalysisResult {
+        self.run(schema, data, arena)
     }
 
     /// Copies the owned sections into a scratch arena and runs the checks over it.

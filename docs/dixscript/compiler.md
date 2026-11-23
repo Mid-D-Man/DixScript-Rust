@@ -320,15 +320,15 @@ against them: presence, type, numeric `min`/`max`, string
   checks, not at the end of them — the Halt strategy returns early from
   inside the checks, and `SectionAnalysisResult::new` defaults it to false.
 - Error ids `SCH001`–`SCH007`; warning `SCHEMA_WARN001` (empty schema).
-- **One implementation, three entry points.** `analyze_doc(&DocSchema, Option<&DocData>, &Arena, ...)`
-  holds the checks and reads both sections through the arena. `analyze` and `validate_resolved` keep
-  their owned signatures and copy the schema and the data into a scratch arena before calling it, so
-  the three cannot disagree.
-- **The post-resolution pass pays for a copy.** `DixLoader` calls `validate_resolved` with the tree
-  that value resolution produced, which is still the owned type, so Stage 9 copies the resolved
-  `@DATA` section into an arena to check it. The semantic phase no longer copies anything. The extra
-  cost is one pass over the resolved data, and only for a file that has a `@SCHEMA`. It goes away
-  when the resolver reads the arena. It has not been measured.
+- **One implementation, four entry points.** `analyze_doc(&DocSchema, Option<&DocData>, &Arena, ...)`
+  holds the checks and reads both sections through the arena, and `validate_resolved_doc` (crate
+  private) runs the same checks for the loader. `analyze` and `validate_resolved` keep their owned
+  signatures and copy the schema and the data into a scratch arena before calling them, so the four
+  cannot disagree.
+- **The post-resolution pass reads the document.** `DixLoader` calls `validate_resolved_doc` with the
+  schema, the data and the arena of the document that value resolution resolved in place, so Stage 9
+  copies nothing. `validate_resolved` stays for callers that hold the sections as owned types and
+  still pays one copy of the resolved `@DATA` section; nothing in the library calls it any more.
 - The `Schema` builtin takes owned values, so `build_descriptor` copies the arguments of each field
   out of the arena before calling it. They are a handful of literals, not the data section.
 - A string's length is its number of characters, not its bytes, so `"héllo wörld"` is 11.
@@ -340,13 +340,17 @@ supplied after compilation — compile-time only.
 **Tests:** `tests/schema_section_tests.rs` — missing/optional fields, wrong
 type, numeric/string/array bounds, table and group-array paths, enums, the
 post-resolution stage, feature gating. `tests/schema_analyzer_document.rs`
-pins the diagnostics themselves and compares the three entry points.
+pins the diagnostics themselves and compares the three entry points. `tests/loader_document.rs`
+compares the diagnostics of the loader's stage 9 (`validate_resolved_doc`) with `validate_resolved`
+on a schema that a computed value satisfies and on one it violates.
 
 ### `Runtime/loader.rs`
 
 **What it does:** Runtime-layer, but the actual pipeline entry point —
 reads a file (or takes source text directly), then drives tokenize,
-parse, and semantic analysis in sequence.
+parse, semantic analysis, enhancement, value resolution, homogenization and schema
+validation in sequence, and returns the arena `Document` (`compile_to_document`) or its export
+(`compile_to_resolved_ast`).
 
 **Decisions:**
 - `compile_source` split into a `&str` wrapper (unchanged behavior for
@@ -357,21 +361,39 @@ parse, and semantic analysis in sequence.
   `fs::read` instead of `fs::read_to_string` and hand bytes to the new
   core directly — needed so a file with a genuinely binary `@RAW` payload
   can still load at all.
-- Stage 9 (after numeric-array homogenization) runs
-  `SchemaSectionAnalyzer::validate_resolved` against the resolved `@DATA`,
-  so a schema can constrain values a QuickFunc computed. A file whose plain
-  literals already failed never reaches it, so nothing is reported twice.
+- **The pipeline's product is the arena `Document`.** `compile_document_from_bytes` runs the nine
+  stages and returns the `Document`; `compile_to_document` and `compile_to_document_from_str` are
+  its public entry points. `compile_source_from_bytes` is that function followed by one `export`,
+  and `compile_to_resolved_ast` and `compile_to_resolved_ast_from_str` are the document entry points
+  followed by one `export`, so each owned entry point has one implementation and cannot disagree
+  with the document one. The two path entry points share `document_from_path` and the two string
+  entry points share `document_from_str`; each is told the public method's name, so the first log
+  line of an owned entry point is the one it always was.
+- **What the document holds when it is returned.** The enhanced `@QUICKFUNCS` section (the enhancer
+  stores it back), the resolved `@DATA` with its numeric arrays homogenized, the `@ENUMS` section
+  with the imported enums the data referenced merged in, and every other section as it parsed. Its
+  export is what `compile_to_resolved_ast` returned before the document became the product.
+- **Stage 8 and stage 9 read the document's own arena.** Stage 8 is `homogenize_document` and stage 9
+  is `SchemaSectionAnalyzer::validate_resolved_doc`, so neither copies the resolved `@DATA` section
+  into a scratch arena. Stage 9 uses the resolved data to check a schema against values a QuickFunc
+  computed; a file whose plain literals already failed never reaches it, so nothing is reported
+  twice.
+- **Stage 8 only finds arrays a function computed.** Semantic analysis rejects a literal array of
+  mixed numeric types (`Array in property 'x' contains mixed types: Int and Double`), so for text
+  parsed from a source the homogenizer never sees one. The comment at stage 8 said a hand-written
+  `[12.3, 4, 4.9]` gets the same treatment; it does not, and the comment is corrected.
+  `m09_mixed_literal_array` in `tests/loader_document.rs` pins the rejection.
 - Stage 4 calls `GeneralParser::parse_document` and exports the `Document` once, into the owned
   tree that the stages which have not moved still read. Stage 5 gets both, through
   `with_document`. Stage 6 gets the document again, `&mut` this time, because the `@QUICKFUNCS`
-  enhancer allocates its output in the document's arena. Stage 7 gets it too, through
-  `ValueResolver::with_document`, because the first phase of value resolution (enum
-  pre-resolution) reads and rewrites `@DATA` in that arena. The document is dropped after stage 7,
-  whether or not the stage ran, because nothing later reads the arena. When the last stage that
-  reads the owned tree has moved, the export goes away. Imported
-  files are still parsed by the imports resolver with `parse`, so their `@RAW`, `@SECURITY` and
-  `@SCHEMA` sections take the owned path. Stage 9 still passes the resolved owned tree to
-  `SchemaSectionAnalyzer::validate_resolved`, which copies it into a scratch arena.
+  enhancer allocates its output in the document's arena and stores the enhanced section back.
+  Stage 7 gets it through `ValueResolver::with_document_product`: the phases rewrite `@DATA` in that
+  arena, the imported enums are merged into the document's `@ENUMS`, and the resolver returns no
+  owned tree. The owned tree stage 7 still takes is the enhanced one, read only for its
+  `@QUICKFUNCS` section. The document is no longer dropped after stage 7. The export at stage 4
+  and that tree go when stages 5 to 7 stop needing an owned tree. Imported files are still parsed
+  by the imports resolver with `parse`, so their `@RAW`, `@SECURITY` and `@SCHEMA` sections take
+  the owned path.
 
 ### `Compiler/Core/general_parser.rs`
 
@@ -918,12 +940,18 @@ Only `@QUICKFUNCS` has one.
   there is a section is decided by the tree that is read, as in the semantic analyzer: with a document
   the document says, without one the owned tree does. The enhanced section is exported out of the
   document's arena and set in the copy of the owned tree; the rest of that tree is a clone, as before.
-- **The document is `&mut` because the enhanced nodes are allocated in its arena.** They are added
-  after the existing ones, so the document is still valid and means the same.
+- **The document is `&mut` because the enhanced nodes are allocated in its arena, and the enhanced
+  section is stored back.** The nodes are added after the existing ones and the document's
+  `quick_functions` is replaced by the enhanced section, so the loader's `Document` carries the
+  functions as they are after this stage and not as they parsed. The parsed function nodes stay in
+  the arena, unreferenced, and every other section is untouched. Nothing reads the stored section
+  yet: the resolver still registers the local functions from the owned enhanced tree, and will
+  read them from the document when the owned tree goes.
 - **Imported files and the language server still call `enhance` without a document,** so they take
   the owned path through a scratch arena.
 
-**Tests:** `tests/quickfuncs_enhancer_document.rs`.
+**Tests:** `tests/quickfuncs_enhancer_document.rs`, which also checks the store-back, and
+`tests/loader_document.rs`.
 
 ### `tests/quickfuncs_enhancer_document.rs`
 
@@ -946,8 +974,12 @@ change, and checks which tree is read.
   disagree on purpose.
 - **Sharing is tested by counting:** a section with nothing to enhance leaves the arena exactly as
   large as it was, and only the path to a resolved identifier is allocated.
+- **The store-back is tested on the 25 crafted sources.** After the enhancer has run through the
+  document, the document exports the section the result carries and every other section is what the
+  parse produced; the enhancement changes the section of 20 of the 25 (the number is pinned from a
+  run of the code), and a document with no section stays without one.
 
-**Tests:** `cargo test -p dixscript --test quickfuncs_enhancer_document`. 15 tests, all passing on
+**Tests:** `cargo test -p dixscript --test quickfuncs_enhancer_document`. 17 tests, all passing on
 Rust 1.75.
 
 ### `tests/orchestrator_sections_document.rs`
@@ -1339,14 +1371,25 @@ call, and hands it the arena and the call's argument list.
   until the result.
 - **The document is updated too.** When any phase changed something the document's `@DATA` holds
   the section as of that phase, so afterwards it holds every result and every resolved
-  identifier, and a later stage that moves to the arena finds it there. `@ENUMS` is not updated in the document: the
-  merge of imported enums below goes to the owned tree, which is the one the result is built
-  from.
+  identifier, and a later stage that moves to the arena finds it there. `@ENUMS` is not updated in the
+  document by `with_document`: the merge of imported enums below goes to the owned tree, which is the
+  one the result is built from. `with_document_product` sends it to the document instead.
 - **With a document attached the results go to the document's data.** Phases 4 and 5 used to
   write into the owned tree even then (phase 4 by position). A document and an owned tree that
   disagree (the loader never makes that) now give the results to the document's data, and the
   owned data is replaced by its export only when something was written; when nothing was, the
   owned data is untouched. Three tests pin that.
+- **`with_document_product` makes the document the result.** The loader's stage 7 uses it in place
+  of `with_document`. The document's `@DATA` is the resolved data, as before; the imported enums the
+  data referenced are merged into the document's `@ENUMS` (the same merge, into the other section);
+  no owned data is exported (`sync_owned_data` returns at once); and `resolved_ast` is `None` on
+  success and on failure, so no owned tree is built or cloned. It takes the document itself
+  instead of being a switch next to `with_document`, so a product mode without a document cannot be
+  written. The owned tree passed to the constructor is read only for its `@QUICKFUNCS` section.
+  `with_document` and `new` behave as they did, which is what the language server, the benchmarks and
+  the sibling crates call. In the 37 single-change runs of the bug injection (see Fixes and Problems),
+  the only change to this mode that no test can see is the one that exports the data into the owned
+  tree anyway: the tree is dropped unread, so only the instruction count shows it.
 - **`original_ast` is gone.** `resolve()` cloned the whole AST before it started, for the
   `original_ast` field of `ValueResolutionResult`. Nothing in the workspace read it (the
   language server, the sibling crates, the tests and the benchmark were searched), so the clone
@@ -1383,9 +1426,10 @@ call, and hands it the arena and the call's argument list.
   enhanced `@QUICKFUNCS` of the owned tree, and every function of every imported namespace, into
   the arena. It runs at the start of phase 4 only when phase 3 found a call, so a run with no calls
   allocates nothing, and the interpreter is no longer built with a copy of the function list. The
-  local functions come from the owned tree and not from `Document.quick_functions` on purpose: the
-  enhancer exports its enhanced section to the owned tree but leaves the document's section as it
-  parsed, so the document's functions are the ones before enhancement.
+  local functions still come from the owned tree and not from `Document.quick_functions`. When this
+  was written the enhancer left the document's section as it parsed, so the document's functions were
+  the ones before enhancement; the enhancer now stores its section back, so the two agree for the
+  loader's document, and reading them from the document is possible once the owned tree goes.
 - **`convert_dix_value_to_value` and `FunctionRegistry` are gone from the public API.** Once the
   interpreter takes evaluated values, nothing in the library builds a literal from a result. The
   function lives on in the unit tests of `write_back.rs`, where it is the oracle the arena
@@ -1586,6 +1630,9 @@ name, optional namespace, arguments, location, scope, entry path and position), 
 - **`ValueResolutionResult` has no `original_ast`.** The field held a clone of the whole AST taken
   before resolution; nothing in the workspace read it, so it and the clone are gone (a public field,
   so listed under Removed for 2.0.0).
+- **`ValueResolutionResult.resolved_ast` can be `None` on success.** `ValueResolver::with_document_product`
+  puts the result in the document and returns no owned tree, on success and on failure. The field was
+  already an `Option` (it is `None` on failure of the default mode), so no type changes.
 - **`FunctionCallInfo.arguments` is an `ExprList`.** It was a `Vec<Expression>` copied out of the
   arena for each call found; it is now the handle of the argument nodes in the arena the call was
   found in, so a `FunctionCallInfo` is only meaningful together with that arena (a public field, so
@@ -1854,6 +1901,106 @@ before and after the port in four modes (see the last subsection).
   `Rc<RefCell<..>>`).
 
 **Tests:** exercised through the resolver tests and the whole suite.
+
+### `Runtime/array_homogenizer.rs`
+
+**What it does:** The stage 8 pass. When every element of an array is a numeric literal but they
+do not share a rank (`Integer < Long < Float < Double`, with `ScientificNotation` at the top rank
+beside `Double`), it promotes the lower elements to the highest rank present. Arrays with any
+non-numeric element, arrays whose elements already share a rank, and the elements of a tuple
+relative to each other are left alone; the elements of a tuple are still searched for arrays.
+
+**Decisions:**
+- **One walk, over the arena.** `homogenize_document_data(&mut Arena, &mut DocData) -> bool` holds the
+  walk. `homogenize_document(&mut Document) -> bool` runs it over a document's own data, which is what
+  the loader does, and `homogenize_data_section(&mut DixScript)` keeps the owned entry point: it copies
+  the section into a scratch arena, runs the walk and exports it back only when something changed.
+- **It rewrites by allocation.** A node whose children did not change keeps its id, a list is copied
+  from its first changed element, and the return value says whether anything changed. A pass over a
+  section with nothing to promote allocates nothing (a test counts the arena's values before and
+  after), and a pass that promotes one array allocates the promoted element and the new array node.
+  Replaced nodes stay in the arena, unreferenced.
+- **Same semantics as the owned walk.** A simple property, each property of a table and an object
+  property are walked as values; a group array's items are walked and then promoted as siblings, like
+  the elements of an array; an array or nested array recurses into each element first and then promotes
+  its elements (a nested array keeps its variant and its level); an object recurses into its property
+  values; a tuple recurses into its arguments only; a range recurses into both ends. The ranks and the
+  promotions (`Integer`, `Long` or `Float` to `Double`; `Integer` or `Long` to `Float`, through `f32`;
+  `Integer` to `Long`) are the original's, and a scientific-notation literal is never converted.
+- **Two redundancies of the first port were removed.** The early return for an array of fewer than two
+  elements cannot matter (such an array always has one rank), and the rank of the elements is the
+  same before and after recursion (recursion only replaces elements that hold other values, which have
+  no rank), so the rank is read from the original list.
+- **The arena walk costs more instructions than the owned walk in a debug build.** On the largest
+  corpus file the owned `homogenize_data_section` took 1.86M instructions and `homogenize_document`
+  takes 6.87M: the walk reaches every property of every object in the data, and each costs two calls
+  of the arena accessors (`Arena::prop_list` and `Arena::value`), which a debug build does not
+  inline. A change that read a
+  leaf without copying it, and one that copied a property only after something changed, did not
+  move the count and were reverted. Release builds were not measured.
+
+**Tests:** the eight unit tests of the owned entry point, unchanged, and four new ones in the same file
+(`arena_tests`). The original owned implementation is kept in the file, under `#[cfg(test)]`, as
+the oracle. One test runs it and both new entry points on every flat array of up to four literals
+over eight kinds (the five numeric ones, a string, a boolean and null; the integer and the long are
+values that do not survive a trip through `f32`), in five containers each (4,681 inputs, of which the
+original changes 738), and one on 4,000 random trees of arrays, nested arrays, objects, tuples and
+ranges (the original changes 891; the generator is a fixed-seed xorshift). Every node has its own
+position, so a promotion that loses or reuses a position is a difference. A third test checks the
+changed flag, that an untouched entry keeps its node, and the exact number of nodes a promotion
+allocates. A fourth checks that the owned entry point leaves a section with nothing to promote
+exactly as it was. The `homogenize_document` doctest shows that a second run on a loader's document
+changes nothing.
+
+### `Runtime/mod.rs`
+
+**What it does:** Declares the runtime modules and re-exports their public items. Its documentation
+shows loading, reading, struct deserialization and serialization and schema validation.
+
+**Decisions:**
+- `homogenize_document` and `homogenize_document_data` are re-exported beside
+  `homogenize_data_section`.
+- The file had no NOTICE; it has one now and this section.
+
+**Tests:** the whole suite.
+
+### `tests/loader_document.rs`
+
+**What it does:** Checks that the loader returns the arena `Document` as the product of the compile
+pipeline, that the owned entry points return what the stages produced before the document was the
+product, and that the resolver in product mode leaves in the document what a default run puts in its
+owned result.
+
+**Decisions:**
+- **The reference is the old stage sequence, written out in the test.** `legacy_compile` is the loader's
+  stages as they were: parse and analyze, the owned enhancer output through the resolver with
+  `with_document`, the owned homogenizer and `validate_resolved`, holding the enum registry lock the
+  way the loader does. It shares code with the new path (the resolver, the homogenizer walk), so it is
+  the check of the new wiring and not an independent proof; the independent proof is the corpus run
+  of the unchanged binary against the changed one (see Fixes and Problems). The comparison drops the
+  `created` config entry and sorts the config entries, the only parts of a result that differ between
+  two runs of one input.
+- **19 crafted sources**, 11 that compile and 8 that fail, through four entry points each (path and
+  string, owned and document). They cover plain data (stage 7 skipped), local enums, imported enums
+  and imported functions, calls, arrays that a function computes, a schema a computed value satisfies
+  and one it violates, a file with functions and no data, and one source for each stage that can fail
+  (parse, semantic analysis, value resolution, schema). An `ignored` helper (`print_outcomes`) prints
+  what each source does.
+- **Two expectations in the first draft were wrong, and the code was right.** A literal array of
+  mixed numeric types is rejected by semantic analysis, so literal arrays cannot reach stage 8
+  (`m09_mixed_literal_array`); and `@DATA(= = =)` compiles, because the data parser recovers, so the
+  parse-stage failure uses `@DLM` with `features -> "basic"`, which the corpus also has.
+- **Product mode is compared on the resolver's own result.** For every source that reaches the resolver, a
+  default run and a product run are made from separately prepared documents, and the product
+  run's document export must equal the default run's tree, with the same errors and the same number
+  of calls and no owned tree. A second test uses the lenient stages (the strategy `Continue`, as
+  the enum tests do) so that sources the loader stops at in semantic analysis reach the resolver,
+  whose first phase fails; the product run returns no tree there too.
+- **The document is the enhanced one.** A compiled document's `@QUICKFUNCS` differs from the parsed
+  section and equals the section of the owned enhancer output.
+
+**Tests:** `cargo test -p dixscript --test loader_document`. 8 tests and 1 ignored helper, all
+passing on Rust 1.75.
 
 ### `tests/value_resolution_scaling.rs`
 
@@ -2730,3 +2877,97 @@ requires the larger to take less than 7 times as long.
   nothing outside `dixscript/` uses a changed item (searched), and the dependency of `mdix-lsp` on
   a newer `time` cannot be downloaded with Cargo 1.75. `FunctionExecutionError` is public and now
   unused. CI was not run by me on this drop.
+
+### Fixes and Problems: the loader returns the arena Document
+
+- **What it was.** The loader exported the parsed `Document` into an owned tree for the stages that had
+  not moved, passed that tree to value resolution and dropped the document after stage 7. The
+  resolver then exported the resolved `@DATA` back into the owned tree (`sync_owned_data`, 32.1M
+  instructions on the largest corpus file, `elements_database.mdix`), the imported enums it merged
+  existed only in the owned tree, stage 8 homogenized an owned tree, and stage 9 copied the resolved
+  data into a scratch arena to check the schema. The enhancer's arena copy of the enhanced
+  `@QUICKFUNCS` section was exported and then forgotten. The only product was an owned `DixScript`.
+- **What changed.** `loader.rs` builds the `Document` through to stage 9 (`compile_document_from_bytes`)
+  and has the public entry points `compile_to_document` and `compile_to_document_from_str`;
+  `compile_to_resolved_ast`, its string sibling and the internal `compile_source_from_bytes` are the
+  document pipeline plus one `export`. `general_ast_enhancer.rs` stores the enhanced section back into
+  the document. `value_resolver.rs` has `with_document_product`, which merges the imported enums into
+  the document's `@ENUMS`, skips the owned data export and returns no owned tree.
+  `array_homogenizer.rs` holds the stage 8 walk over the arena (`homogenize_document_data`,
+  `homogenize_document`), with `homogenize_data_section` kept as the owned entry point.
+  `schema_section_analyzer.rs` has a crate-private `validate_resolved_doc` for stage 9.
+  `Runtime/mod.rs` re-exports the new homogenizer functions and got its NOTICE and section. A new
+  test file, `tests/loader_document.rs`, and two new tests in `tests/quickfuncs_enhancer_document.rs`
+  cover the change.
+- **A choice that differs from the plan.** The plan was a switch beside `with_document`. The method
+  takes the document itself, `with_document_product(&mut Document)`, so product mode without a
+  document cannot be written. The plan also said to call `analyze_doc` for stage 9; it takes a
+  `&mut SymbolTable` that it does not use and the loader has none to pass at that point, so the
+  loader calls a crate-private method that runs the same checks.
+- **Two expectations were wrong, and the code was right.** The stage 8 comment said a hand-written
+  `[12.3, 4, 4.9]` gets the same treatment as a computed array. Semantic analysis rejects a literal
+  array of mixed numeric types before stage 8, so for text parsed from a source only arrays a
+  function computed are promoted; the comment is corrected and `m09_mixed_literal_array` pins the
+  rejection. And a `@DATA` section of `= = =` compiles (the data parser recovers), so the test of the
+  parse stage uses `@DLM` with `features -> "basic"`, which the corpus also has.
+- **Redundant code found while moving it.** The early return for an array of fewer than two elements
+  cannot matter, and the rank of the elements is the same before and after recursion, so the first
+  port's branch that read the recursed list is gone. Both are in `array_homogenizer.rs` and neither
+  changes a result.
+- **Behaviour kept on purpose.** The default resolver (`new`, `with_document`) is unchanged, because
+  the language server, the benchmarks and the sibling crates call it. `validate_resolved` and the
+  owned `homogenize_data_section` keep their signatures. The first log line of each owned entry point
+  is still its own name. The imported files are still parsed and enhanced through the
+  owned path, and local functions are still registered from the owned enhanced tree.
+- **How it was checked.** The unchanged tree (a worktree of origin at 047d5735) and the changed tree
+  were run on the 84 corpus files through `compile_to_resolved_ast` and
+  `compile_to_resolved_ast_from_str`, two runs of each tree for the first comparison and one of the final
+  tree for the second. Everything each returned (the resolved tree with its config entries sorted, or
+  the error text) was compared after masking the time of the run (the `created` config entry) and
+  sorting the entries of object property lists. 14 of the 84 files fail through the path entry and 23
+  through the string entry, whose imports cannot resolve through a label, so the errors are part of
+  the comparison. Two runs of the unchanged tree agree on 79 of the 84 files; the changed tree equals
+  the unchanged one on those 79 in every pairing, and on the other five at the strongest level two
+  unchanged runs agree on (`FullFunctionTest` and `guid_static_test` with digits and GUIDs masked,
+  `enum_static_test` and `FullDataTestWithFunc` with scalar values masked, `object_builtins_test` as
+  a permutation). There were no differences. The pipeline's log output of the 84 files was compared
+  the same way (clock and durations masked): 76 files identical, 1 with the same lines in another
+  order and 7 different, which is also what two runs of the unchanged tree give, on the same seven
+  files and with differences of the same size; that run was made before the last refactors of the
+  homogenizer, which log nothing. The homogenizer was checked against the original owned
+  implementation on 4,681 flat arrays and 4,000 random trees (738 and 891 of them changed by the
+  original), through the owned entry point and through a document, and every result is equal.
+  Bug injection: 37 single changes behind an environment switch in the homogenizer, the enhancer,
+  the schema entry, the resolver and the loader, one build, each run alone against the library tests
+  of the homogenizer and the two integration files that read the changed code, with a control that
+  passes. 36 were caught on the first run. The survivor, `r1`, exports the data into the owned tree
+  in product mode; the tree is dropped unread, so no output changes and only the instruction count
+  shows it (`sync_owned_data` costs 6 instructions in the measurement below). Before the injection,
+  thinking about which branches the tests reach showed that nothing reached `create_failed_result`:
+  the loader stops at the sources that fail in the enum phase while semantic analysis is still
+  running, so `a_run_that_fails_in_the_enum_phase_returns_no_tree_in_product_mode` was added, with
+  the lenient stages, and it catches the injection into that branch. The whole suite
+  passes on the final tree: 555 library tests, 498 integration tests in 38 files (9 ignored helpers)
+  and 30 doctests (26 ignored), none failing, on Rust 1.75 (debug build); `cargo check --all-targets`
+  is clean; the library builds with 118 warnings and `cargo doc` gives 32, both as before.
+  The seven Rust sibling crates were type-checked against the changed tree with Rust 1.100 (installed from conda-forge, because the dependencies of the language server need a newer Cargo than 1.75): `mdix-lsp`, `mdix-java` and `mdix-lua`, which depend on `dixscript` by path, and `mdix-cli`, `mdix-ffi`, `mdix-python` and `mdix-wasm`, which depend on the published 1.0.0 and were checked against the local crate through a `patch.crates-io` override. All seven give 0 errors, as they did on the unchanged tree. The build script of `mdix-ffi` regenerates a tracked header (`mdix-go/internal/include/mdix_ffi.h`) whenever it runs; it was restored and is not part of the change.
+- **Measured.** Callgrind, debug build, instructions, `elements_database.mdix`, unchanged tree against
+  changed tree: `compile_to_resolved_ast` 1,379,063,569 to 1,384,068,710 (+5.0M, +0.36 percent),
+  `load_text` 2,045,040,003 to 2,050,106,154 (+0.25), compile, pack and unpack 1,798,519,641 to
+  1,803,266,881 (+0.26) and compile and convert 2,180,013,393 to 2,185,142,582 (+0.24). Two runs of
+  the unchanged binary differ by 0.014 percent. This drop alone is slightly slower, and the profiles
+  show why. `sync_owned_data` goes from 32.1M to 6 instructions. Its data export (24.4M) now happens in
+  the final export of the whole document, which is why the two `Document::export` calls cost 47.3M
+  against 22.8M for the one before, and the 7.7M it spent dropping the replaced owned data now happens
+  when the resolver releases its tree (in `then_some`). Those cancel. What remains is the arena
+  homogenizer, 6.87M against 1.86M for the owned one, and that difference of 5.0M is the whole change in
+  the total. The cost is the arena accessors, which a debug build does not inline: the walk reaches
+  every property of every object in the data. Two changes to read less through the accessors left
+  the count where it was and were reverted. Release builds, wall-clock time and peak memory after the
+  change were not measured. Peak live memory, measured with a counting allocator on the same file and build: `compile_to_resolved_ast` peaks at 28,133,795 bytes in 779,259 allocations on the unchanged tree and at 27,592,539 bytes in 779,283 on the changed one (1.9 percent lower), and `load_text` at 28,002,723 bytes in 1,073,564 allocations against 27,527,131 bytes in 1,073,581 (1.7 percent lower). The plan listed a higher peak while the document and the owned tree coexist as a risk; the peak is not higher. What the calls retain is unchanged (the owned tree 4,281,155 bytes, the `DixData` 14.06 MB). For scale, the resolved tree of that file is 30,864 allocations and 4,137,134 bytes as an owned copy and 13,332 allocations and 2,728,210 bytes imported into an arena.
+- **What is left.** The owned export at stage 4 (22.8M), the enhancer's clone of the owned tree (16.8M
+  over the main file and its four imported files) and, on the `load_text` path, the whole-tree clone in
+  `determine_dlm_behavior` (18.3M), and the owned tree the resolver still takes for its functions,
+  are the bridge this drop leaves in place; they go when stages 5 to 7 stop needing an owned tree and
+  when the consumers after stage 9 (binary serialization, DLM, the runtime layer) read the document, so
+  that `compile_to_resolved_ast` is no longer on their path. CI was not run by me on this drop.

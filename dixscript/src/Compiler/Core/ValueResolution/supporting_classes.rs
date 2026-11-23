@@ -16,6 +16,9 @@ use crate::Compiler::AST::arena::ExprList;
 pub struct ValueResolutionResult {
     pub is_success: bool,
     /// AST after successful resolution (`None` on failure).
+    ///
+    /// Also `None`, on success and on failure, when the resolver was given its document with
+    /// `ValueResolver::with_document_product`: the result is in the document then.
     pub resolved_ast: Option<crate::Compiler::AST::DixScript>,
     pub function_calls_resolved: usize,
     pub errors: Vec<String>,

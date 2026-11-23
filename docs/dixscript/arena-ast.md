@@ -1165,10 +1165,11 @@ sources.
 - `DocQuickFunction::from_owned(&mut Arena, &QuickFunction)` copies one function into an arena, and
   `DocQuickFuncs::from_owned` uses it for each function of the section. The interpreter needs it for
   the functions of imported namespaces, which the symbol table holds as owned trees and which have no
-  `Document` of their own at that point. A `Document` keeps the section as it parsed: the enhancer
-  exports its enhanced `@QUICKFUNCS` to the owned tree but does not store it back, so
-  `Document.quick_functions` holds the functions before enhancement, and the interpreter copies the
-  enhanced ones from the owned tree instead of reading them from the document.
+  `Document` of their own at that point. A `Document` that has been through the
+  loader's enhancer holds the enhanced section: the enhancer stores it back as well as exporting it,
+  so `Document.quick_functions` holds the functions after enhancement (a document that did not go
+  through the enhancer holds them as they parsed). The interpreter still copies the local functions
+  from the owned enhanced tree; it can read them from the document when the owned tree goes.
 - A `Doc*` value cannot print by itself, because its ids mean nothing without the arena.
   `Document` implements `Display`, and `Arena::display` returns a handle that prints a `Doc*`
   section (see `document_display.rs`). `Debug` for the `Doc*` types is still the derived one and

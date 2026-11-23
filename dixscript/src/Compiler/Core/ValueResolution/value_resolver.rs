@@ -169,6 +169,10 @@ pub struct ValueResolver<'a> {
     /// Whether any phase has changed the data section in the arena, so that the owned section
     /// the result is built from has to be replaced by an export of it.
     data_changed: bool,
+    /// Whether the attached document is where the result goes, set by
+    /// [`with_document_product`](Self::with_document_product). The owned tree then only supplies
+    /// the functions, and nothing is exported back into it.
+    document_product: bool,
 }
 
 impl<'a> ValueResolver<'a> {
@@ -238,6 +242,7 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             error_manager,
             data: DataSource::None,
             data_changed: false,
+            document_product: false,
         }
     }
     /// Gives the five phases (enum pre-resolution, the data context, the call finder, the
@@ -251,6 +256,21 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
     /// phase changed it, or when it had none.
     pub fn with_document(mut self, document: &'a mut Document) -> Self {
         self.data = DataSource::Document(document);
+        self
+    }
+
+    /// Like [`with_document`](Self::with_document), and the document is also where the result
+    /// goes: the resolved `@DATA` section stays in its arena and the imported enums the data
+    /// referenced are merged into its `enums` section, exactly as they are merged into an owned
+    /// tree otherwise.
+    ///
+    /// The owned tree passed to the constructor is then read only for its `@QUICKFUNCS` section,
+    /// no export of the data section is made, and [`ValueResolutionResult::resolved_ast`] is
+    /// `None` on success and on failure. `document` must hold the same sections as the owned
+    /// tree; the loader passes a document and the tree exported from it.
+    pub fn with_document_product(mut self, document: &'a mut Document) -> Self {
+        self.data = DataSource::Document(document);
+        self.document_product = true;
         self
     }
 
@@ -295,7 +315,7 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             let duration = self.start_time.elapsed();
             return ValueResolutionResult {
                 is_success: true,
-                resolved_ast: Some(self.ast),
+                resolved_ast: (!self.document_product).then_some(self.ast),
                 function_calls_resolved: 0,
                 errors: Vec::new(),
                 log_statements: self.log_statements,
@@ -328,7 +348,7 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
 
         ValueResolutionResult {
             is_success: errors.is_empty(),
-            resolved_ast: Some(self.ast),
+            resolved_ast: (!self.document_product).then_some(self.ast),
             function_calls_resolved: success_count,
             errors,
             log_statements: self.log_statements,
@@ -341,7 +361,7 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
     /// when any phase changed it or the owned tree had none of its own. A run that changed
     /// nothing leaves the owned section as it was.
     fn sync_owned_data(&mut self) {
-        if !(self.data_changed || self.ast.data.is_none()) {
+        if self.document_product || !(self.data_changed || self.ast.data.is_none()) {
             return;
         }
         if let Some((arena, data)) = self.data.parts() {
@@ -415,7 +435,14 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             return;
         }
 
-        let section = self.ast.enums.get_or_insert_with(|| EnumsSection {
+        // The enums go where the result goes: into the document in product mode, into the owned
+        // tree otherwise.
+        let product = self.document_product;
+        let target = match &mut self.data {
+            DataSource::Document(document) if product => &mut document.enums,
+            _ => &mut self.ast.enums,
+        };
+        let section = target.get_or_insert_with(|| EnumsSection {
             enums: Vec::new(),
             position: Position::UNKNOWN,
         });
@@ -990,7 +1017,7 @@ fn execute_iterative_resolution(
     fn create_failed_result(&self, errors: Vec<String>) -> ValueResolutionResult {
         ValueResolutionResult {
             is_success: false,
-            resolved_ast: Some(self.ast.clone()),
+            resolved_ast: (!self.document_product).then(|| self.ast.clone()),
             function_calls_resolved: 0,
             errors,
             log_statements: self.log_statements.clone(),

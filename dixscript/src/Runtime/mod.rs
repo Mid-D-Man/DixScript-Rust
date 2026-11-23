@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Runtime/mod.rs"
+// ============================================================================
 //! Runtime — public API for loading and using `.mdix` files.
 //!
 //! ## Loading
@@ -143,7 +147,7 @@ pub mod schema;
 
 // ── Core types ────────────────────────────────────────────────────────────────
 
-pub use array_homogenizer::homogenize_data_section;
+pub use array_homogenizer::{homogenize_data_section, homogenize_document, homogenize_document_data};
 pub use compactor::DixCompactor;
 pub use converter::DixConverter;
 pub use dix_data::DixData;

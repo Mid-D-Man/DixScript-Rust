@@ -72,14 +72,20 @@ real `pub use` re-export from `Runtime::mod.rs`.
 | `schema.rs` | `SchemaBuilder`, `ExpectedValueType`, `ValidationReport`, `ValidationError`, `ValidationErrorKind` | Fluent runtime schema validation against a loaded `DixData`; never panics, collects every violation |
 | `merge.rs` | `MdixMerger`, `MdixMergeInput`, `MdixMergeResult`, `MdixMergeStrategy`, `ArrayMergeStrategy`, `MergeConflict` | AST-level merge of two or more DixScript databases with weight-based or strict conflict resolution |
 | `key_resolver.rs` | `KeyFileResolver`, `KeyResolver`, `KeySource`, `ResolvedKey`, `KeyFileResolution`, `KeyFileSource` | Locates/reads `.mdix.key` files and derives the actual AES/ChaCha20 key bytes (keyfile or password+Argon2id mode) |
-| `array_homogenizer.rs` | `homogenize_data_section` | Post-resolution pass that promotes mixed-numeric-literal arrays (e.g. `[12.3, 4, 4.9]`) to a single consistent element type |
+| `array_homogenizer.rs` | `homogenize_data_section`, `homogenize_document`, `homogenize_document_data` | Post-resolution pass that promotes an array of numeric literals of different types (one a function computed, e.g. `[12.3, 4, 4.9]`; semantic analysis rejects such a literal in source text) to a single consistent element type. `homogenize_document(&mut Document) -> bool` runs it over a document's own data and reports whether anything changed; `homogenize_data_section(&mut DixScript)` is the owned form |
 | `query.rs` | `DixQuery` | LINQ-style chaining over an array field's elements — `query(path)` for a plain `Array`/`GroupArray`, `query_many(pattern)` across sibling paths sharing shape via a wildcarded segment. `where_`/`order_by_desc`/`select` and friends |
 | `hot_reload.rs` | `HotReloadWatcher` | Poll-based file-change watcher for Rust consumers (`check_and_reload()` in a game loop/tick). Each language binding implements its own native FS-event mechanism instead (inotify/FSEvents/ReadDirectoryChangesW) — this one's Rust-only |
 
 ### Not re-exported at `Runtime::` top level, but reachable
 
+`DixLoader::compile_to_document(path) -> Result<Document, String>` and
+`compile_to_document_from_str(source, label) -> Result<Document, String>`:
+run the full pipeline and hand back the arena `Document` it built (enhanced
+`@QUICKFUNCS`, resolved and homogenized `@DATA`, `@ENUMS` with the imported enums the
+data used, the other sections as parsed) without running any DLM modules.
+
 `DixLoader::compile_to_resolved_ast(path) -> Result<DixScript, String>` —
-runs the full pipeline and hands back the raw `DixScript` AST without
+the same, followed by one `Document::export`: the raw `DixScript` AST, without
 running any DLM modules. This is the entry point `mdix-lsp` and parts of
 `mdix-cli` (`mdix merge`) use when they need the AST itself rather than a
 flattened `DixData` — most useful for direct `DixConverter::to_json` /
@@ -222,7 +228,7 @@ described here.
 | `Compiler::Core::GeneralParser` | Token stream → raw AST | `GeneralParser::new(tokens, &config_section, &settings)?.parse()` |
 | `Compiler::Core::GeneralSemanticAnalyzer` | Symbol table construction + validation | `GeneralSemanticAnalyzer::new(&ast, &settings).analyze()` (add `.with_document(&doc)` when you hold the arena form) → `SemanticAnalysisResult { is_success, errors, warnings, symbol_table: Option<SymbolTable> }`; `symbol_table.namespaces` map exposes `.functions` for imported-namespace lookups |
 | `Compiler::Core::GeneralAstEnhancer` | AST normalization pass (post-parse, pre-resolve) | `GeneralAstEnhancer::new(&settings).enhance(&ast, Some(&semantic_result))` (add `.with_document(&mut doc)` when you hold the arena form) → `EnhancementResult { is_success, errors, total_enhancements, enhanced_ast }` |
-| `Compiler::Core::ValueResolution::ValueResolver` | Compile-time QuickFunc expression evaluator | `ValueResolver::new(ast, &symbol_table, debug_mode).resolve()` (add `.with_document(&mut doc)` before `.resolve()` when you hold the arena form) → `ResolutionResult { is_success, errors, function_calls_resolved, resolved_ast: Option<DixScript> }` |
+| `Compiler::Core::ValueResolution::ValueResolver` | Compile-time QuickFunc expression evaluator | `ValueResolver::new(ast, &symbol_table, debug_mode).resolve()` (add `.with_document(&mut doc)` before `.resolve()` when you hold the arena form, or `.with_document_product(&mut doc)` to make the document the result: the resolved data stays in it, imported enums are merged into its `@ENUMS` and `resolved_ast` is `None`) → `ResolutionResult { is_success, errors, function_calls_resolved, resolved_ast: Option<DixScript> }` |
 | `Compiler::Core::BinarySerialization::{BinaryPacker, BinaryUnpacker}` | Binary pack/unpack for `.mdix.enc` payloads | `BinaryPacker::new().pack(&ast)`, `BinaryUnpacker::new().unpack(&bytes)` |
 | `Compiler::Core::Config::{ConfigSectionHandler, OperationalSettings, DebugMode}` | `@CONFIG` token processing → runtime settings | `ConfigSectionHandler::new(None).process_config_tokens(&tokens)` → `operational_settings`, `config_section` |
 | `Compiler::DLM::{DLMPipelineExecutor, DLMReverseExecutor}` | Forward (compile) and reverse (decrypt) DLM module execution | `DLMPipelineExecutor::new(source_path, output_dir, debug_mode).execute(&mut ast, binary_data)`; `DLMReverseExecutor::new(enc_path, key_path, password, debug_mode).execute()` |

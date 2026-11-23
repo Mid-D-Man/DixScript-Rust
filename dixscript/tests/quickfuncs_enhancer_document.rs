@@ -20,6 +20,8 @@
 //! * the enhancer really reads the `Document` when it has one and the owned tree when it does not;
 //! * a node that did not change is shared with the input, not copied, and the input section means
 //!   what it meant before;
+//! * the document keeps the enhanced section: after the enhancer has run, the document exports the
+//!   section the result carries, not the parsed one;
 //! * the owned entry points of the resolver give what the enhancer puts in a function body.
 
 use std::collections::HashMap;
@@ -1239,4 +1241,51 @@ fn the_owned_resolver_entry_points_give_what_the_enhancer_puts_in_a_body() {
     } else {
         panic!("statement 3 is a log");
     }
+}
+
+// ==================== the document keeps the enhanced section ====================
+
+/// How many of `SOURCES` the enhancement changes, counted by running the enhancer.
+const CHANGED_BY_ENHANCEMENT: usize = 20;
+
+#[test]
+fn the_enhancer_stores_its_section_back_into_the_document() {
+    let mut changed = 0;
+    for (name, text) in SOURCES {
+        let mut parsed = parse(text);
+        let em = ErrorManager::new_isolated_silent();
+        let semantic = GeneralSemanticAnalyzer::new_with_error_manager(&parsed.ast, &parsed.settings, em.clone())
+            .with_document(&parsed.document)
+            .analyze();
+        let result = GeneralAstEnhancer::new_with_error_manager(&parsed.settings, em)
+            .with_document(&mut parsed.document)
+            .enhance(&parsed.ast, Some(&semantic));
+
+        let in_document = parsed.document.export();
+        assert_eq!(
+            in_document.quick_functions, result.enhanced_ast.quick_functions,
+            "{name}: the document holds the section the result carries"
+        );
+        // Nothing but the functions changes: every other section is what the parse produced.
+        let mut rest = in_document.clone();
+        rest.quick_functions = parsed.ast.quick_functions.clone();
+        assert_eq!(rest, parsed.ast, "{name}: the other sections are untouched");
+        if in_document.quick_functions != parsed.ast.quick_functions {
+            changed += 1;
+        }
+    }
+    assert_eq!(changed, CHANGED_BY_ENHANCEMENT, "how many of the sources the enhancement changes");
+}
+
+#[test]
+fn a_document_without_a_section_stays_without_one() {
+    let mut parsed = parse(source("data_section_only"));
+    let em = ErrorManager::new_isolated_silent();
+    let semantic = GeneralSemanticAnalyzer::new_with_error_manager(&parsed.ast, &parsed.settings, em.clone())
+        .with_document(&parsed.document)
+        .analyze();
+    GeneralAstEnhancer::new_with_error_manager(&parsed.settings, em)
+        .with_document(&mut parsed.document)
+        .enhance(&parsed.ast, Some(&semantic));
+    assert!(parsed.document.export().quick_functions.is_none());
 }

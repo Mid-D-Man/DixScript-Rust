@@ -26,6 +26,7 @@ use crate::Compiler::DLM::Auditor::{IAuditor, DiyAuditor, EnhancedAuditor};
 #[cfg(feature = "dlm")]
 use crate::Compiler::Utilities::SecurityUtilities;
 use crate::Compiler::AST::DixScript;
+use crate::Compiler::AST::arena::Document;
 #[cfg(feature = "dlm")]
 use crate::Compiler::AST::DLMModuleType;
 #[cfg(feature = "dlm-auditor")]
@@ -35,7 +36,7 @@ use super::load_options::DixLoadOptions;
 #[cfg(feature = "dlm")]
 use super::key_resolver::{KeyFileResolver, KeyFileResolution, KeyFileSource};
 use super::dix_data::DixData;
-use super::array_homogenizer::homogenize_data_section;
+use super::array_homogenizer::homogenize_document;
 
 /// Internal loader for DixScript files.
 ///
@@ -519,24 +520,63 @@ impl DixLoader {
     // ── Compile-only path ─────────────────────────────────────────────────────
     //
     // Runs the full tokenise → parse → semantic → enhance → value-resolve
-    // pipeline and returns the resolved AST without running any DLM modules.
-    // Imports are resolved using the file's own directory as the base path,
-    // so multi-file projects (like the chemistry DB) resolve correctly.
+    // pipeline without running any DLM modules. Imports are resolved using the
+    // file's own directory as the base path, so multi-file projects (like the
+    // chemistry DB) resolve correctly.
+    //
+    // The pipeline's product is the arena `Document`. `compile_to_document*`
+    // return it; `compile_to_resolved_ast*` are the owned-tree entry points for
+    // callers that need a `DixScript`, and each is the document entry point plus
+    // one export.
+
+    /// Compiles the file at `file_path` and returns the resolved arena [`Document`].
+    ///
+    /// Imports are resolved from the file's own directory. The document is what
+    /// [`compile_to_resolved_ast`](Self::compile_to_resolved_ast) exports: its
+    /// `@QUICKFUNCS` section is the enhanced one, `@DATA` is resolved, its numeric
+    /// arrays homogenized and its `@SCHEMA` (if any) validated against that data,
+    /// and its `@ENUMS` section holds the imported enums the data referenced.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when the file does not exist or cannot be read, or when
+    /// parsing, semantic analysis, value resolution or schema validation fails.
+    pub fn compile_to_document(&self, file_path: &str) -> Result<Document, String> {
+        self.document_from_path("compile_to_document", file_path)
+    }
+
+    /// String-based sibling of [`compile_to_document`](Self::compile_to_document): the same
+    /// pipeline, minus the file read. `label` is used only for error messages (pass
+    /// something like `"<source>"` or a caller-meaningful name); it is not a base path, so
+    /// imports are not resolved through it.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when `source` is empty, or when parsing, semantic analysis, value
+    /// resolution or schema validation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dixscript::Runtime::DixLoader;
+    ///
+    /// let document = DixLoader::new_silent()
+    ///     .compile_to_document_from_str("@DATA(\n  answer = 42\n)\n", "example")
+    ///     .expect("the source compiles");
+    /// assert!(document.data.is_some());
+    /// assert!(document.export().data.is_some());
+    /// ```
+    pub fn compile_to_document_from_str(
+        &self,
+        source: &str,
+        label: &str,
+    ) -> Result<Document, String> {
+        self.document_from_str("compile_to_document_from_str", source, label)
+    }
 
     pub fn compile_to_resolved_ast(&self, file_path: &str) -> Result<DixScript, String> {
-        self.error_manager.clear_errors();
-        self.error_manager.log_info(&format!("compile_to_resolved_ast: {}", file_path));
-
-        if !Path::new(file_path).exists() {
-            return Err(format!("File not found: {}", file_path));
-        }
-
-        let source_bytes = fs::read(file_path)
-            .map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
-
-        self.compile_source_from_bytes(
-            &source_bytes, file_path, crate::Compiler::AST::data_types::CompatibilityMode::Strict,
-        )
+        self.document_from_path("compile_to_resolved_ast", file_path)
+            .map(|document| document.export())
     }
 
     /// String-based sibling of `compile_to_resolved_ast` — same pipeline
@@ -551,15 +591,40 @@ impl DixLoader {
         source: &str,
         label: &str,
     ) -> Result<DixScript, String> {
+        self.document_from_str("compile_to_resolved_ast_from_str", source, label)
+            .map(|document| document.export())
+    }
+
+    /// The file-reading half shared by the path entry points. `entry` is the public
+    /// method's name, which the first log line carries.
+    fn document_from_path(&self, entry: &str, file_path: &str) -> Result<Document, String> {
         self.error_manager.clear_errors();
-        self.error_manager.log_info(&format!("compile_to_resolved_ast_from_str: {}", label));
+        self.error_manager.log_info(&format!("{}: {}", entry, file_path));
+
+        if !Path::new(file_path).exists() {
+            return Err(format!("File not found: {}", file_path));
+        }
+
+        let source_bytes = fs::read(file_path)
+            .map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
+
+        self.compile_document_from_bytes(
+            &source_bytes, file_path, crate::Compiler::AST::data_types::CompatibilityMode::Strict,
+        )
+    }
+
+    /// The empty-source check shared by the string entry points. `entry` is the public
+    /// method's name, which the first log line carries.
+    fn document_from_str(&self, entry: &str, source: &str, label: &str) -> Result<Document, String> {
+        self.error_manager.clear_errors();
+        self.error_manager.log_info(&format!("{}: {}", entry, label));
 
         if source.trim().is_empty() {
             return Err(format!("'{}': source is empty", label));
         }
 
-        self.compile_source(
-            source, label, crate::Compiler::AST::data_types::CompatibilityMode::Strict,
+        self.compile_document_from_bytes(
+            source.as_bytes(), label, crate::Compiler::AST::data_types::CompatibilityMode::Strict,
         )
     }
 
@@ -655,12 +720,33 @@ impl DixLoader {
     /// The two actual file-reading call sites (`load_text`,
     /// `compile_to_resolved_ast`) call this directly via `fs::read`, not
     /// `fs::read_to_string`, for exactly this reason.
+    ///
+    /// Returns the owned tree: the document [`compile_document_from_bytes`] builds, exported.
+    /// The callers that need a `DixScript` (the `DixData` and DLM paths) use this one.
+    ///
+    /// [`compile_document_from_bytes`]: Self::compile_document_from_bytes
     fn compile_source_from_bytes(
         &self,
         source_bytes: &[u8],
         source_file_path: &str,
         compatibility_mode: crate::Compiler::AST::data_types::CompatibilityMode,
     ) -> Result<DixScript, String> {
+        self.compile_document_from_bytes(source_bytes, source_file_path, compatibility_mode)
+            .map(|document| document.export())
+    }
+
+    /// The compile pipeline itself, ending in the arena [`Document`].
+    ///
+    /// Stages 1 to 6 build the document and enhance its `@QUICKFUNCS` section; stage 7 resolves
+    /// its `@DATA` in place and merges the imported enums it referenced into its `enums`;
+    /// stage 8 homogenizes the numeric arrays and stage 9 validates the `@SCHEMA`, both over
+    /// the document's own arena. The enum registry lock is held until the document is returned.
+    fn compile_document_from_bytes(
+        &self,
+        source_bytes: &[u8],
+        source_file_path: &str,
+        compatibility_mode: crate::Compiler::AST::data_types::CompatibilityMode,
+    ) -> Result<Document, String> {
         // Stage 1: tokenize the full source with minimal initial settings.
         //
         // `new_with_error_manager` — same reasoning as every other stage in
@@ -806,7 +892,7 @@ impl DixLoader {
             ));
         }
 
-        let mut resolved_ast = enhancement_result.enhanced_ast;
+        let enhanced_ast = enhancement_result.enhanced_ast;
 
         // Stage 7: value resolution (whenever there are functions, enums, or
         // data to resolve against).
@@ -837,17 +923,17 @@ impl DixLoader {
         // (imported) enum reference; from_ast's own fallback has no
         // visibility into imported namespaces and would silently default an
         // unresolvable reference to 0 rather than erroring.
-        let has_local_functions    = resolved_ast.quick_functions.is_some();
+        let has_local_functions    = enhanced_ast.quick_functions.is_some();
         let has_imported_functions = semantic_result.symbol_table.as_ref()
             .map(|st| st.namespaces.values().any(|ns| !ns.functions.is_empty()))
             .unwrap_or(false);
-        let has_local_enums    = resolved_ast.enums.as_ref()
+        let has_local_enums    = enhanced_ast.enums.as_ref()
             .map(|e| !e.enums.is_empty())
             .unwrap_or(false);
         let has_imported_enums = semantic_result.symbol_table.as_ref()
             .map(|st| st.namespaces.values().any(|ns| !ns.enums.is_empty()))
             .unwrap_or(false);
-        let has_data_section = resolved_ast.data.is_some();
+        let has_data_section = enhanced_ast.data.is_some();
 
         if (has_local_functions || has_imported_functions || has_local_enums || has_imported_enums)
             && has_data_section
@@ -856,12 +942,12 @@ impl DixLoader {
             self.error_manager.log_info("Starting value resolution");
 
             let value_resolver = ValueResolver::new_with_error_manager(
-                resolved_ast,
+                enhanced_ast,
                 semantic_result.symbol_table.as_ref().unwrap(),
                 operational_settings.debug_mode,
                 self.error_manager.clone(),
             )
-            .with_document(&mut document);
+            .with_document_product(&mut document);
 
             let resolution_result = value_resolver.resolve();
 
@@ -875,18 +961,13 @@ impl DixLoader {
                 resolution_result.function_calls_resolved
             ));
 
-            resolved_ast = resolution_result
-                .resolved_ast
-                .ok_or_else(|| "Resolution succeeded but AST is None".to_string())?;
+            // The resolved data and the merged imported enums are in the document already;
+            // product mode returns no owned tree.
         } else {
             self.error_manager.log_info(
                 "Skipping value resolution (no functions, no enums, or no data)"
             );
         }
-
-        // Nothing after stage 7 reads the arena yet, so release it before the later stages
-        // build their own trees.
-        drop(document);
 
         // Stage 8: numeric array homogenization.
         //
@@ -897,9 +978,10 @@ impl DixLoader {
         // type present in that array, so the binary serializer, JSON/TOML
         // converters, and the LSP "Create Resolved" output all see a
         // consistent element type. Runs regardless of whether value
-        // resolution happened — a hand-written `[12.3, 4, 4.9]` literal gets
-        // the same treatment.
-        homogenize_data_section(&mut resolved_ast);
+        // resolution happened. For text parsed from a source it only finds
+        // arrays a function computed: semantic analysis rejects a literal
+        // array of mixed numeric types before this stage is reached.
+        homogenize_document(&mut document);
 
         // Stage 9: @SCHEMA validation against the fully resolved @DATA.
         //
@@ -909,13 +991,16 @@ impl DixLoader {
         // the only place a schema can constrain them. A file whose literals
         // already failed never reaches this point, so nothing is reported
         // twice.
-        if let Some(schema) = resolved_ast.schema.as_ref() {
+        if let Some(schema) = document.schema.as_ref() {
             let mut schema_analyzer = SchemaSectionAnalyzer::new_with_error_manager(
                 &operational_settings,
                 self.error_manager.clone(),
             );
-            let schema_result = schema_analyzer
-                .validate_resolved(schema, resolved_ast.data.as_ref());
+            let schema_result = schema_analyzer.validate_resolved_doc(
+                schema,
+                document.data.as_ref(),
+                &document.arena,
+            );
 
             if !schema_result.is_success {
                 let msgs: Vec<String> = schema_result.errors.iter()
@@ -925,7 +1010,7 @@ impl DixLoader {
             }
         }
 
-        Ok(resolved_ast)
+        Ok(document)
     }
 
     // ── DLM dispatch ──────────────────────────────────────────────────────────

@@ -18,6 +18,18 @@ Breaking release.
 
 ### Added
 
+- **`DixLoader::compile_to_document` and `compile_to_document_from_str`** return the arena `Document`
+  that the compile pipeline builds: the enhanced `@QUICKFUNCS` section, the resolved `@DATA` with its
+  numeric arrays homogenized, the `@ENUMS` section with the imported enums the data referenced, and
+  every other section as parsed. `compile_to_resolved_ast` and `compile_to_resolved_ast_from_str`
+  are these two followed by one `export`, and return what they always did.
+- **`ValueResolver::with_document_product(&mut Document)`** makes the document the result of value
+  resolution: the resolved data stays in its arena, the imported enums are merged into its `@ENUMS`,
+  no owned data is exported and `ValueResolutionResult::resolved_ast` is `None`. `with_document` and
+  `new` behave as before.
+- **`homogenize_document` and `homogenize_document_data`** run the numeric-array pass over a
+  `Document`'s data (or a `DocData` and its arena) and report whether anything changed.
+  `homogenize_data_section` is the same walk behind the owned signature.
 - **`Compiler::AST::arena`**, an index arena for the `Value`, `Expression` and
   `QuickFuncStatement` family: `Arena`, the node types `ValueNode`, `ExprNode` and `StmtNode`
   (40, 48 and 48 bytes, against 144, 160 and 384 for the owned types), and lossless
@@ -143,6 +155,16 @@ Breaking release.
 
 ### Performance
 
+- **The loader's document product, measured alone.** Callgrind, debug build, instructions,
+  `elements_database.mdix` (the largest corpus file), before against after: `compile_to_resolved_ast`
+  1,379,063,569 to 1,384,068,710 (+0.36 percent), `load_text` 2,045,040,003 to 2,050,106,154 (+0.25),
+  compile, pack and unpack 1,798,519,641 to 1,803,266,881 (+0.26) and compile and convert
+  2,180,013,393 to 2,185,142,582 (+0.24). The resolver no longer exports the resolved data into an
+  owned tree (32.1M instructions) and the document's own export at the end takes about the same
+  share back; the difference is the arena homogenizer, 6.87M against 1.86M for the owned one in a
+  debug build. The export at stage 4, the clone the enhancer makes and the owned tree the resolver
+  still takes are what a later change removes. Release builds, wall-clock time and peak memory were
+  not measured.
 - Lambdas no longer copy their whole definition (body, statements and captured variables) every
   time they are called or passed: the interpreter shares the registry entry. A generated script of
   500 calls with block-bodied lambdas runs 18.7 percent fewer instructions and one of 3,000 calls with
@@ -181,6 +203,17 @@ Breaking release.
 
 ### Changed
 
+- **The loader keeps its `Document` to the end of the pipeline.** Stage 6 stores the enhanced
+  `@QUICKFUNCS` section back into it, stage 7 resolves `@DATA` in it and merges the imported enums into
+  its `@ENUMS` (`with_document_product`), and stages 8 and 9 (numeric-array homogenization and the
+  `@SCHEMA` check of the resolved data) read its own arena instead of copying the resolved data into
+  a scratch arena. `compile_to_resolved_ast` returns the export of that document; its result, errors
+  and log lines are unchanged on all 84 corpus files and on 19 crafted sources. On the largest corpus
+  file this step alone is 0.24 to 0.36 percent more instructions in a debug build (see
+  Performance); the owned tree it still builds goes when the stages that read it have moved.
+- **The comment at stage 8 of the loader is corrected.** A hand-written array of mixed numeric
+  literals does not reach the homogenizer: semantic analysis rejects it, so only arrays a function
+  computed are promoted.
 - **Enum pre-resolution runs on the arena.** The first phase of value resolution, which checks every
   enum reference in `@DATA` and turns the ones inside expressions into integers, has one
   implementation over the arena (`ValueResolution/enum_resolution.rs`) in place of the owned walker of

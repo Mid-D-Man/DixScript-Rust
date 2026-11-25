@@ -383,17 +383,25 @@ validation in sequence, and returns the arena `Document` (`compile_to_document`)
   parsed from a source the homogenizer never sees one. The comment at stage 8 said a hand-written
   `[12.3, 4, 4.9]` gets the same treatment; it does not, and the comment is corrected.
   `m09_mixed_literal_array` in `tests/loader_document.rs` pins the rejection.
-- Stage 4 calls `GeneralParser::parse_document` and exports the `Document` once, into the owned
-  tree that the stages which have not moved still read. Stage 5 gets both, through
-  `with_document`. Stage 6 gets the document again, `&mut` this time, because the `@QUICKFUNCS`
-  enhancer allocates its output in the document's arena and stores the enhanced section back.
-  Stage 7 gets it through `ValueResolver::with_document_product`: the phases rewrite `@DATA` in that
-  arena, the imported enums are merged into the document's `@ENUMS`, and the resolver returns no
-  owned tree. The owned tree stage 7 still takes is the enhanced one, read only for its
-  `@QUICKFUNCS` section. The document is no longer dropped after stage 7. The export at stage 4
-  and that tree go when stages 5 to 7 stop needing an owned tree. Imported files are still parsed
-  by the imports resolver with `parse`, so their `@RAW`, `@SECURITY` and `@SCHEMA` sections take
-  the owned path.
+- **No owned tree between the parse and the end.** Stage 4 calls `GeneralParser::parse_document` and
+  the `Document` it returns is the only tree stages 5 to 9 work on; nothing is exported until a
+  caller of an owned entry point exports the result. Stage 5 (`with_document`) is given an empty
+  `DixScript` next to the document: the analyzer's constructors take an owned tree for the callers
+  that have no document, and with one attached every section is read from the document (the
+  analyzer's own section says how that is checked). Stage 6 is `enhance_document`, which enhances the
+  document's `@QUICKFUNCS` in place, stores the section back, and neither copies an owned tree nor
+  exports the section. Stage 7 is `ValueResolver::for_document`: the phases rewrite `@DATA` in the
+  document's arena, the imported enums are merged into its `@ENUMS`, the local functions are the
+  document's own enhanced section, and no owned tree exists to be exported, copied or dropped. The
+  conditions that decide whether stage 7 runs read the document. Imported files are parsed into a
+  `Document` by the imports resolver and analyzed and enhanced next to it, but it still exports an
+  owned tree for each and the enhancer clones that tree; those are the bridge that is left (see
+  Fixes and Problems).
+- **`determine_dlm_behavior` takes the tree by value.** It used to clone the whole resolved tree into
+  its result before it looked for a `@DLM` section, on the `load_text` path, whether or not the file
+  had one. It moves the tree into the result, which is what a file with no modules returns, and
+  copies it only on the path that has to change a copy (a compressor or an encryptor). Both feature
+  variants of the function changed.
 
 ### `Compiler/Core/general_parser.rs`
 
@@ -466,6 +474,16 @@ token stream, parses it, and assigns the result onto a `Document`, which `parse`
 - The analyzer does not check that the document and the owned tree describe the same file. A pair
   that disagrees is analysed as a mixture of both, and two tests build such a pair on purpose to
   show which half a section reads.
+- **The loader gives it an empty owned tree.** Every section is read from the document when one is
+  attached, and the constructors only store the owned tree, so the loader passes `DixScript::new()`
+  and does not export the document. That is only the same as passing the export if no section is
+  still read from the tree, so `the_analyzer_reads_only_the_document_when_it_has_one` in
+  `tests/loader_document.rs` compares the verdict, every error and warning, and the symbol table
+  of two analyses of one document, one with its export and one with the empty tree. It runs on 21
+  crafted sources in strict and in lenient mode and on 78 corpus files (the four `*_cloud_*` files
+  wait for a network timeout and one file over 100 KB adds no section, so they are left out), each
+  analysis with an error manager of its own. A single change that makes the enums, imports or
+  `@DLM` section read the owned tree again is caught by it.
 
 ### `Compiler/VersionControl/version_constraints.rs` and `version_manager.rs`
 
@@ -944,9 +962,16 @@ Only `@QUICKFUNCS` has one.
   section is stored back.** The nodes are added after the existing ones and the document's
   `quick_functions` is replaced by the enhanced section, so the loader's `Document` carries the
   functions as they are after this stage and not as they parsed. The parsed function nodes stay in
-  the arena, unreferenced, and every other section is untouched. Nothing reads the stored section
-  yet: the resolver still registers the local functions from the owned enhanced tree, and will
-  read them from the document when the owned tree goes.
+  the arena, unreferenced, and every other section is untouched. The resolver in product mode
+  registers the local functions from the stored section; the default mode still copies them from
+  the owned tree.
+- **`enhance_document` enhances a document and builds nothing else.** It is crate private. The loader
+  has no owned tree to hand to `enhance`, and `enhance` clones the tree it is given and exports the
+  enhanced section into the clone. `enhance_document` needs the document attached, enhances its
+  section in place, stores it back, and leaves `enhanced_ast` in the result empty. The two share the
+  routine that enhances the section (the exported copy is made only when there is an owned tree to
+  put it in) and the end of the pass (the verdict, the log line, the result), so the log output of
+  the two is the same.
 - **Imported files and the language server still call `enhance` without a document,** so they take
   the owned path through a scratch arena.
 
@@ -1385,7 +1410,13 @@ call, and hands it the arena and the call's argument list.
   no owned data is exported (`sync_owned_data` returns at once); and `resolved_ast` is `None` on
   success and on failure, so no owned tree is built or cloned. It takes the document itself
   instead of being a switch next to `with_document`, so a product mode without a document cannot be
-  written. The owned tree passed to the constructor is read only for its `@QUICKFUNCS` section.
+  written. The owned tree passed to the constructor is not read: the local functions are the
+  document's own `@QUICKFUNCS` section, registered without a copy (see
+  `register_document_functions`). The loader does not go through the public constructors but through
+  the crate-private `ValueResolver::for_document`, which takes the document alone and takes the two
+  table sizes the constructors derive from the sections (the function count and the number of
+  `@DATA` entries) from the document, so the run is the one the constructors make with the same
+  sections. A test that gives the resolver an empty owned tree shows that it reads none.
   `with_document` and `new` behave as they did, which is what the language server, the benchmarks and
   the sibling crates call. In the 37 single-change runs of the bug injection (see Fixes and Problems),
   the only change to this mode that no test can see is the one that exports the data into the owned
@@ -1425,11 +1456,11 @@ call, and hands it the arena and the call's argument list.
 - **Functions are registered when phase 4 has a call to run.** `register_functions` copies the
   enhanced `@QUICKFUNCS` of the owned tree, and every function of every imported namespace, into
   the arena. It runs at the start of phase 4 only when phase 3 found a call, so a run with no calls
-  allocates nothing, and the interpreter is no longer built with a copy of the function list. The
-  local functions still come from the owned tree and not from `Document.quick_functions`. When this
-  was written the enhancer left the document's section as it parsed, so the document's functions were
-  the ones before enhancement; the enhancer now stores its section back, so the two agree for the
-  loader's document, and reading them from the document is possible once the owned tree goes.
+  allocates nothing, and the interpreter is no longer built with a copy of the function list. In the
+  default mode the local functions come from the owned tree and are copied into the arena; in
+  product mode they are the document's `Document.quick_functions`, which the enhancer has replaced by
+  the enhanced section, and nothing is copied for them. When this was first written the enhancer
+  left the document's section as it parsed, which is why the default mode still reads the owned tree.
 - **`convert_dix_value_to_value` and `FunctionRegistry` are gone from the public API.** Once the
   interpreter takes evaluated values, nothing in the library builds a literal from a result. The
   function lives on in the unit tests of `write_back.rs`, where it is the oracle the arena
@@ -1840,6 +1871,12 @@ a parameter, and function bodies, lambdas and call arguments are ids of nodes in
   top-level namespaces are ever called into (the lookup of a namespace from inside a body
   ignores the current namespace's own imports, which are used for enums only), so those are the
   only ones registered.
+- **Local functions that are already in the arena are registered as they are.**
+  `register_document_functions` takes the document's own `DocQuickFunction`s and puts a clone of each
+  (ids, lists and the name) in the registry, so the copy `register_functions` makes of an owned
+  function is not made. The first function of a name wins, as there, and the functions of the
+  imported namespaces are registered by the same routine. Semantic analysis refuses two functions
+  of one name, so a test reaches that rule through the lenient stages.
 - **Arguments are bound from values, not from literal nodes.** `execute` takes the already
   evaluated arguments (`CallArgs`: the values, how to convert them, the call's position). Each
   argument used to be turned into a literal node and evaluated again in the callee, which is not
@@ -1980,7 +2017,7 @@ owned result.
   of the unchanged binary against the changed one (see Fixes and Problems). The comparison drops the
   `created` config entry and sorts the config entries, the only parts of a result that differ between
   two runs of one input.
-- **19 crafted sources**, 11 that compile and 8 that fail, through four entry points each (path and
+- **21 crafted sources**, 12 that compile and 9 that fail, through four entry points each (path and
   string, owned and document). They cover plain data (stage 7 skipped), local enums, imported enums
   and imported functions, calls, arrays that a function computes, a schema a computed value satisfies
   and one it violates, a file with functions and no data, and one source for each stage that can fail
@@ -1998,8 +2035,13 @@ owned result.
   whose first phase fails; the product run returns no tree there too.
 - **The document is the enhanced one.** A compiled document's `@QUICKFUNCS` differs from the parsed
   section and equals the section of the owned enhancer output.
+- **The product run is given an empty owned tree.** It must still give the default run's result, which
+  shows that product mode reads the functions from the document. One test calls the first of two
+  functions of one name through the lenient stages, because the loader refuses the source.
+- **The analyzer guard** (see the analyzer's section) compares an analysis with the document's export
+  to one with an empty tree, on the crafted sources and on 78 corpus files.
 
-**Tests:** `cargo test -p dixscript --test loader_document`. 8 tests and 1 ignored helper, all
+**Tests:** `cargo test -p dixscript --test loader_document`. 10 tests and 1 ignored helper, all
 passing on Rust 1.75.
 
 ### `tests/value_resolution_scaling.rs`
@@ -2971,3 +3013,80 @@ requires the larger to take less than 7 times as long.
   are the bridge this drop leaves in place; they go when stages 5 to 7 stop needing an owned tree and
   when the consumers after stage 9 (binary serialization, DLM, the runtime layer) read the document, so
   that `compile_to_resolved_ast` is no longer on their path. CI was not run by me on this drop.
+
+### Fixes and Problems: the loader builds no owned tree before its last stage
+
+- **What it was.** After the loader began to return the `Document`, it still exported the parse result
+  (20.8M instructions on the largest corpus file) to give stages 5 and 6 an owned tree. The enhancer
+  cloned that tree (15.5M) and exported its section into the clone, stage 7 took the clone for its
+  functions and dropped it when the resolver returned (7.7M, in `then_some`), and every load of a
+  file through `load_text` cloned the whole resolved tree before it looked for a `@DLM` section
+  (18.2M), whether or not the file had one.
+- **What changed.** `loader.rs` no longer exports the parse result: stage 5 is given an empty
+  `DixScript` with the document, stage 6 calls `enhance_document`, stage 7 calls
+  `ValueResolver::for_document` and its conditions read the document, and `determine_dlm_behavior`
+  takes the tree by value in both feature variants. `general_ast_enhancer.rs` has the crate-private
+  `enhance_document` and exports the enhanced section only when there is an owned tree to put it in.
+  `value_resolver.rs` has the crate-private `for_document` and registers the local functions of a
+  product-mode run from the document; `function_interpreter.rs` has `register_document_functions` for
+  that. `with_document_product` keeps its signature, but it no longer reads the owned tree passed to
+  it. `tests/loader_document.rs` has the new tests.
+- **No public API was added.** The new entry points are crate private, because the only caller is the
+  loader. The one change a caller can see is that `with_document_product` ignores its owned tree
+  (it read the `@QUICKFUNCS` section of it); the method is new in this release and the loader is its
+  only caller.
+- **Premises read before they were relied on.** The analyzer's constructors only store the owned tree
+  and every read of it is in a "no document" arm, so an empty tree is the same as the export, and
+  the guard test checks that instead of the reading alone. The resolver's constructors derive two
+  hash-table sizes from the owned tree, so `for_document` takes the same two sizes from the document
+  rather than leave them at the minimum. The imports resolver already parses each imported file into a
+  `Document` and analyzes it in document mode; the statement of the previous entry that imported
+  files are parsed with `parse` was wrong, and the loader's section is corrected.
+- **Findings of the tests that were not defects of the code.** The first guard test shared one error
+  manager between its two analyses, and the second analysis saw the import error of the first again;
+  each now has its own. The corpus has four `*_cloud_*` files that go to the network and wait about
+  14 seconds each for a timeout, so the guard test leaves them out. A baseline of the corpus has to be
+  taken on the day it is compared: the timestamp the compiler adds is masked only within two days of
+  the dump, and `ComplexFull.mdix` formats the day of the week, so a dump from a Saturday differs from
+  one from a Tuesday by `_WEEKEND` and `_WEEKDAY`.
+- **How it was checked.** The unchanged binary was run on the same day on the 84 corpus files through
+  `compile_to_resolved_ast` and `compile_to_resolved_ast_from_str`, and the changed tree was compared
+  with it the way the previous change was: 79 files equal, the five that differ between two unchanged
+  runs equal at the strongest level they agree at, no differences, for both entry points, and again
+  for the final tree. The pipeline's log output of the 84 files has the split two unchanged captures
+  give: 76 identical, 1 with the same lines in another order, and 7 different, the same seven files.
+  Bug injection: 17 single changes in the enhancer, the interpreter, the resolver, the loader and the
+  analyzer, one build, each run alone against the library tests and the two integration files that
+  read the changed code, with a control that passes. 11 were caught. Six survive. `e4` makes the
+  verdict of `enhance_document` always true; the enhancement of a document has no failure to report,
+  so nothing can differ. `v1` and `v1b` set the two hash-table sizes of `for_document` to zero; no
+  output differs, which is why the sizes are not a correctness matter, and they are still taken from
+  the document so that the tables are the size they were. `v4` registers the functions of a document
+  that has no data, and `v5` lets product mode fall through to the owned registration, which
+  registers the imported functions a second time in the arena; both change cost and not output.
+  `l9` removes the local-enums term from the condition that decides whether stage 7 runs: the parser
+  already turns a reference to a local enum into an enum value, so stage 7 has nothing to do for
+  enum-only data, and the term is the original's, so it stays; the corpus was not run under that
+  single change. The three mutations that make the analyzer read the owned tree for its enums, its
+  imports or its `@DLM` are caught by the guard. The whole suite passes on the final tree: 555 library tests, 500 integration tests in 38 files (9 ignored helpers) and 30 doctests (26 ignored), none failing, on Rust 1.75 (debug build); `cargo check --all-targets` is clean; the library builds with 118 warnings and `cargo doc` gives 32, both as before. The seven Rust sibling crates were type-checked against the changed tree with Rust 1.100, as before (`mdix-lsp`, `mdix-java` and `mdix-lua` by path; `mdix-cli`, `mdix-ffi`, `mdix-python` and `mdix-wasm` against the local crate through a `patch.crates-io` override): 0 errors for all seven, and the builds left nothing tracked changed.
+- **Measured.** Callgrind, debug build, instructions, `elements_database.mdix`, the tree before this
+  change against the changed tree: `compile_to_resolved_ast` 1,384,068,710 to 1,332,499,315 (-51.6M,
+  -3.73 percent), `load_text` 2,050,106,154 to 1,969,093,730 (-81.0M, -3.95), compile, pack and
+  unpack 1,803,266,881 to 1,751,758,423 (-51.5M, -2.86) and compile and convert 2,185,142,582 to
+  2,133,261,786 (-51.9M, -2.37). Against the tree before the document became the product, which is
+  where this started, that is -46.6M (-3.38 percent), -75.9M (-3.71), -46.8M (-2.60) and -46.8M
+  (-2.14), so the loader is now cheaper than it was before the document product, not only as cheap.
+  In the first run `Document::export` falls from 47.3M to 26.5M (the export after the parse, 20.8M),
+  `DixScript::clone` from 16.8M to 1.3M (the enhancer's copy of the main file), `drop_in_place` of an
+  owned tree from 26.8M to 11.4M and `then_some` from 8.0M to 0.3M; in the `load_text` run
+  `determine_dlm_behavior` falls from 18.2M to 753 instructions. Release builds, wall-clock time
+  and the other corpus files were not measured.
+- **What is left.** The export at the end of `compile_to_resolved_ast` (26.5M, of which 24.5M is the
+  data) stays until the consumers after stage 9 (binary serialization, the DLM auditors, the runtime
+  layer) read the document. The imports resolver still exports an owned tree for each imported file
+  and the enhancer clones it: in this profile that is 1.8M for the exports, 1.3M for the clones and
+  1.7M for the export of the enhanced section, 4.7M in all (0.35 percent of the run), while the
+  analysis of the four files is 30.8M and their parsing 41.4M, neither of which is a bridge. Taking
+  the owned tree out of the imports path means changing what `ParsedImport` holds and how nested
+  imports are read, for at most that 4.7M, so it was not done; that is a decision for the owner. CI
+  was not run by me on this drop.

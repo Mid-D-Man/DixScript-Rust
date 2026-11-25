@@ -421,6 +421,24 @@ impl<'a> FunctionInterpreter<'a> {
                 self.quick_functions.insert(function.name.clone(), copy);
             }
         }
+        self.register_imported_functions(arena);
+    }
+
+    /// Like [`register_functions`](Self::register_functions) for local functions that already
+    /// live in `arena`, the document's own enhanced `@QUICKFUNCS` section: they are registered
+    /// as they are and nothing is copied for them, which saves the copy the owned form pays. The
+    /// first function of a name wins, as there.
+    pub fn register_document_functions(&mut self, arena: &mut Arena, local: &[DocQuickFunction]) {
+        for function in local {
+            if !self.quick_functions.contains_key(&function.name) {
+                self.quick_functions.insert(function.name.clone(), Rc::new(function.clone()));
+            }
+        }
+        self.register_imported_functions(arena);
+    }
+
+    /// Copies every function of every imported namespace into `arena`, once per namespace.
+    fn register_imported_functions(&mut self, arena: &mut Arena) {
         for namespace in self.symbol_table.namespaces.values() {
             if namespace.functions.is_empty() {
                 continue;

@@ -209,7 +209,7 @@ impl DixLoader {
             return Err(msg);
         }
 
-        let file_gen = self.determine_dlm_behavior(&compiled_ast, mdix_path, options)?;
+        let file_gen = self.determine_dlm_behavior(compiled_ast, mdix_path, options)?;
 
         self.log_generated_files(&file_gen);
         self.error_manager.log_info("Text file loaded successfully");
@@ -821,13 +821,11 @@ impl DixLoader {
             self.error_manager.clone(),
         ).map_err(|e| format!("Parser init failed: {}", e.message()))?;
 
-        // The parser returns a `Document` (one arena for every section). The stages that have
-        // not moved to the arena still read the owned tree, so it is exported once here,
-        // before stage 5. Each stage that moves reads `document` instead; when the last one
-        // has moved, this export goes away.
+        // The parser returns a `Document` (one arena for every section), which stages 5 to 9
+        // read and rewrite. No owned tree is built until a caller of an owned entry point
+        // exports the result.
         let mut document = parser.parse_document()
             .map_err(|e| format!("Parse failed: {}", e.message()))?;
-        let ast = document.export();
 
         // Acquire the enum-registry lock before touching anything that reads
         // or writes `enum_object::DIXSCRIPT_ENUMS`. Stage 5 (semantic
@@ -851,8 +849,12 @@ impl DixLoader {
         // Stage 5: semantic analysis.
         //
         // `new_with_error_manager` — same reasoning as stages 3 and 4 above.
+        // The analyzer takes an owned tree for the callers that have no document. With one attached
+        // it reads every section from the document, so the owned tree is an empty stand-in and
+        // the document is not exported.
+        let owned_stand_in = DixScript::new();
         let semantic_analyzer = GeneralSemanticAnalyzer::new_with_error_manager(
-            &ast,
+            &owned_stand_in,
             &operational_settings,
             self.error_manager.clone(),
         )
@@ -875,7 +877,7 @@ impl DixLoader {
             self.error_manager.clone(),
         )
         .with_document(&mut document);
-        let enhancement_result = enhancer.enhance(&ast, Some(&semantic_result));
+        let enhancement_result = enhancer.enhance_document(Some(&semantic_result));
 
         // Stage 7's first phase (enum pre-resolution) reads the arena, so the document lives
         // until that stage is done.
@@ -891,8 +893,6 @@ impl DixLoader {
                 enhancement_result.total_enhancements
             ));
         }
-
-        let enhanced_ast = enhancement_result.enhanced_ast;
 
         // Stage 7: value resolution (whenever there are functions, enums, or
         // data to resolve against).
@@ -923,17 +923,17 @@ impl DixLoader {
         // (imported) enum reference; from_ast's own fallback has no
         // visibility into imported namespaces and would silently default an
         // unresolvable reference to 0 rather than erroring.
-        let has_local_functions    = enhanced_ast.quick_functions.is_some();
+        let has_local_functions    = document.quick_functions.is_some();
         let has_imported_functions = semantic_result.symbol_table.as_ref()
             .map(|st| st.namespaces.values().any(|ns| !ns.functions.is_empty()))
             .unwrap_or(false);
-        let has_local_enums    = enhanced_ast.enums.as_ref()
+        let has_local_enums    = document.enums.as_ref()
             .map(|e| !e.enums.is_empty())
             .unwrap_or(false);
         let has_imported_enums = semantic_result.symbol_table.as_ref()
             .map(|st| st.namespaces.values().any(|ns| !ns.enums.is_empty()))
             .unwrap_or(false);
-        let has_data_section = enhanced_ast.data.is_some();
+        let has_data_section = document.data.is_some();
 
         if (has_local_functions || has_imported_functions || has_local_enums || has_imported_enums)
             && has_data_section
@@ -941,13 +941,12 @@ impl DixLoader {
         {
             self.error_manager.log_info("Starting value resolution");
 
-            let value_resolver = ValueResolver::new_with_error_manager(
-                enhanced_ast,
+            let value_resolver = ValueResolver::for_document(
                 semantic_result.symbol_table.as_ref().unwrap(),
                 operational_settings.debug_mode,
                 self.error_manager.clone(),
-            )
-            .with_document_product(&mut document);
+                &mut document,
+            );
 
             let resolution_result = value_resolver.resolve();
 
@@ -1018,12 +1017,14 @@ impl DixLoader {
     #[cfg(feature = "dlm")]
     fn determine_dlm_behavior(
         &self,
-        ast: &DixScript,
+        ast: DixScript,
         source_file_path: &str,
         options: &DixLoadOptions,
     ) -> Result<DLMFileGeneration, String> {
+        // The tree is moved into the result, which is what a file without DLM modules returns, so
+        // it is copied only on the path that has to change a copy of it.
         let mut result = DLMFileGeneration {
-            resolved_ast:         ast.clone(),
+            resolved_ast:         ast,
             is_encrypted:         false,
             is_compressed:        false,
             applied_modules:      Vec::new(),
@@ -1032,7 +1033,7 @@ impl DixLoader {
             generated_audit_file: None,
         };
 
-        let dlm_section = match ast.dlm.as_ref() {
+        let dlm_section = match result.resolved_ast.dlm.as_ref() {
             Some(d) if !d.modules.is_empty() => d,
             _ => {
                 self.error_manager.log_info("No DLM modules - returning resolved AST only");
@@ -1046,7 +1047,7 @@ impl DixLoader {
 
         if has_auditor && !has_compressor && !has_encryptor {
             self.error_manager.log_info("DAuditor only - generating .mdix.au file");
-            let audit_file = self.generate_audit_only(ast, source_file_path, options)?;
+            let audit_file = self.generate_audit_only(&result.resolved_ast, source_file_path, options)?;
             result.applied_modules.push("DAuditor".to_string());
             result.generated_audit_file = Some(audit_file);
             return Ok(result);
@@ -1065,7 +1066,7 @@ impl DixLoader {
             fs::create_dir_all(output_dir)
                 .map_err(|e| format!("Failed to create output directory {}: {}", output_dir, e))?;
 
-            let mut ast_with_security = ast.clone();
+            let mut ast_with_security = result.resolved_ast.clone();
             ast_with_security.security = Some(
                 SecurityUtilities::ensure_valid_security_section(
                     ast_with_security.security,
@@ -1114,7 +1115,7 @@ impl DixLoader {
     #[cfg(not(feature = "dlm"))]
     fn determine_dlm_behavior(
         &self,
-        ast: &DixScript,
+        ast: DixScript,
         _source_file_path: &str,
         _options: &DixLoadOptions,
     ) -> Result<DLMFileGeneration, String> {
@@ -1137,7 +1138,7 @@ impl DixLoader {
             _ => {
                 self.error_manager.log_info("No DLM modules - returning resolved AST only");
                 Ok(DLMFileGeneration {
-                    resolved_ast:         ast.clone(),
+                    resolved_ast:         ast,
                     is_encrypted:         false,
                     is_compressed:        false,
                     applied_modules:      Vec::new(),

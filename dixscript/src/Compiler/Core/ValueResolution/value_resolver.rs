@@ -191,9 +191,6 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
         debug_mode: DebugMode,
         error_manager:ErrorManager
     ) -> Self {
-
-        let debug_config = DebugConfig::from_debug_mode(debug_mode);
-
         let func_count = ast
             .quick_functions
             .as_ref()
@@ -205,6 +202,40 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             .as_ref()
             .map(|d| d.entries.len())
             .unwrap_or(0);
+
+        Self::build(ast, func_count, data_entry_count, symbol_table, debug_mode, error_manager)
+    }
+
+    /// The resolver the loader uses: it takes the document and nothing else. The functions are
+    /// the document's enhanced `@QUICKFUNCS` section, the data is its `@DATA`, and the result goes
+    /// into it as with [`with_document_product`](Self::with_document_product), which this
+    /// includes. The table sizes the constructors derive from the sections are taken from the
+    /// document, so the run is the one `new_with_error_manager` with the same sections makes.
+    pub(crate) fn for_document(
+        symbol_table: &'a SymbolTable,
+        debug_mode: DebugMode,
+        error_manager: ErrorManager,
+        document: &'a mut Document,
+    ) -> Self {
+        let func_count = document.quick_functions.as_ref().map_or(0, |qf| qf.functions.len());
+        let data_entry_count = document.data.as_ref().map_or(0, |d| d.entries.len());
+        let mut resolver = Self::build(
+            DixScript::new(), func_count, data_entry_count, symbol_table, debug_mode, error_manager,
+        );
+        resolver.data = DataSource::Document(document);
+        resolver.document_product = true;
+        resolver
+    }
+
+    fn build(
+        ast: DixScript,
+        func_count: usize,
+        data_entry_count: usize,
+        symbol_table: &'a SymbolTable,
+        debug_mode: DebugMode,
+        error_manager: ErrorManager,
+    ) -> Self {
+        let debug_config = DebugConfig::from_debug_mode(debug_mode);
 
         let data_context: Rc<RefCell<FxHashMap<String, DixValue>>> = Rc::new(RefCell::new(
             FxHashMap::with_capacity_and_hasher(
@@ -264,10 +295,11 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
     /// referenced are merged into its `enums` section, exactly as they are merged into an owned
     /// tree otherwise.
     ///
-    /// The owned tree passed to the constructor is then read only for its `@QUICKFUNCS` section,
-    /// no export of the data section is made, and [`ValueResolutionResult::resolved_ast`] is
-    /// `None` on success and on failure. `document` must hold the same sections as the owned
-    /// tree; the loader passes a document and the tree exported from it.
+    /// The owned tree passed to the constructor is not read at all: the local functions are the
+    /// document's own `@QUICKFUNCS` section, which is the enhanced one when the document went
+    /// through the enhancer, and they are registered without a copy. No export of the data
+    /// section is made, and [`ValueResolutionResult::resolved_ast`] is `None` on success and on
+    /// failure.
     pub fn with_document_product(mut self, document: &'a mut Document) -> Self {
         self.data = DataSource::Document(document);
         self.document_product = true;
@@ -741,6 +773,21 @@ fn execute_iterative_resolution(
 
     /// Registers the functions the interpreter can call in the arena the data section lives in.
     fn register_functions(&mut self) {
+        // In product mode the document is the input as well as the result: its section holds the
+        // local functions, already in the arena the data section lives in.
+        if self.document_product {
+            if let DataSource::Document(document) = &mut self.data {
+                let Document { arena, data, quick_functions, .. } = &mut **document;
+                if data.is_some() {
+                    let local = quick_functions
+                        .as_ref()
+                        .map(|section| section.functions.as_slice())
+                        .unwrap_or(&[]);
+                    self.interpreter.register_document_functions(arena, local);
+                }
+            }
+            return;
+        }
         let local = self
             .ast
             .quick_functions

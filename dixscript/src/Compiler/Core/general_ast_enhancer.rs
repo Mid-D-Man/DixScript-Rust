@@ -103,10 +103,33 @@ impl<'a> GeneralAstEnhancer<'a> {
         self.error_manager.log_info("Starting AST enhancement");
 
         let mut enhanced_ast = ast.clone();
-        self.enhance_quickfunctions(&mut enhanced_ast, semantic_result);
+        self.enhance_quickfunctions(Some(&mut enhanced_ast), semantic_result);
 
         self.enhancement_result.enhanced_ast = enhanced_ast;
-        self.enhancement_result.is_success   = self.enhancement_result.errors.is_empty();
+        self.conclude()
+    }
+
+    /// Enhances the document attached with [`with_document`](Self::with_document) in place and
+    /// builds no owned tree: no copy of an owned tree is made, the enhanced section is not
+    /// exported, and `enhanced_ast` in the result stays empty. What the document ends up holding
+    /// is what [`enhance`](Self::enhance) would leave in it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no document was attached.
+    pub(crate) fn enhance_document(
+        mut self,
+        semantic_result: Option<&SemanticAnalysisResult>,
+    ) -> EnhancementResult {
+        assert!(self.document.is_some(), "enhance_document needs a document");
+        self.error_manager.log_info("Starting AST enhancement");
+        self.enhance_quickfunctions(None, semantic_result);
+        self.conclude()
+    }
+
+    /// The end both entry points share: the verdict, the log line and the result.
+    fn conclude(mut self) -> EnhancementResult {
+        self.enhancement_result.is_success = self.enhancement_result.errors.is_empty();
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -121,15 +144,18 @@ impl<'a> GeneralAstEnhancer<'a> {
 
     // ── Private ───────────────────────────────────────────────────────────────
 
+    /// Enhances the `@QUICKFUNCS` section of the document or, without one, of `ast`. The enhanced
+    /// section is written into `ast` when there is one; with a document and no `ast` it is not
+    /// exported at all.
     fn enhance_quickfunctions(
         &mut self,
-        ast:             &mut DixScript,
+        ast:             Option<&mut DixScript>,
         semantic_result: Option<&SemanticAnalysisResult>,
     ) {
         // Whether there is a section is decided by the tree that is read.
         let present = match self.document.as_deref() {
             Some(document) => document.quick_functions.is_some(),
-            None           => ast.quick_functions.is_some(),
+            None           => ast.as_deref().map_or(false, |ast| ast.quick_functions.is_some()),
         };
         if !present {
             if self.debug_config.is_enabled {
@@ -169,7 +195,7 @@ impl<'a> GeneralAstEnhancer<'a> {
                     .as_ref()
                     .expect("presence was read from this document just above");
                 let enhanced = enhancer.enhance_doc(section, arena, quickfuncs_analysis);
-                let exported = enhanced.export(arena);
+                let exported = ast.is_some().then(|| enhanced.export(arena));
                 // The document keeps the enhanced section, so that it carries the functions
                 // as they are after this stage and not as they were parsed.
                 *quick_functions = Some(enhanced);
@@ -177,10 +203,10 @@ impl<'a> GeneralAstEnhancer<'a> {
             }
             None => {
                 let section = ast
-                    .quick_functions
-                    .as_ref()
+                    .as_deref()
+                    .and_then(|ast| ast.quick_functions.as_ref())
                     .expect("presence was read from this tree just above");
-                enhancer.enhance(section, quickfuncs_analysis)
+                Some(enhancer.enhance(section, quickfuncs_analysis))
             }
         };
         let count = enhancer.get_enhancement_count();
@@ -198,7 +224,9 @@ impl<'a> GeneralAstEnhancer<'a> {
             },
         );
 
-        ast.quick_functions = Some(enhanced_section);
+        if let (Some(ast), Some(section)) = (ast, enhanced_section) {
+            ast.quick_functions = Some(section);
+        }
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(

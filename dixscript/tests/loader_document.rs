@@ -67,10 +67,15 @@ struct Prepared {
     semantic_ok: bool,
 }
 
-/// The loader's stages 1 to 6 on `source`, the contents of the file at `path`. With `lenient` the
-/// stages go on after a semantic error, as the error strategy `Continue` does, so a source with a
-/// bad enum reference still reaches the resolver; the loader itself stops at the error.
-fn prepare(path: &str, source: &[u8], lenient: bool) -> Result<Prepared, String> {
+/// The loader's stages 1 to 4 on `source`, the contents of the file at `path`: the document and
+/// the settings and error manager it was parsed with. With `lenient` the stages go on after a
+/// semantic error, as the error strategy `Continue` does, so a source with a bad enum reference
+/// still reaches the resolver; the loader itself stops at the error.
+fn parse_only(
+    path: &str,
+    source: &[u8],
+    lenient: bool,
+) -> Result<(Document, OperationalSettings, ErrorManager), String> {
     let em = ErrorManager::new_isolated_silent();
     let initial = OperationalSettings {
         source_file_path: Some(path.to_string()),
@@ -88,11 +93,19 @@ fn prepare(path: &str, source: &[u8], lenient: bool) -> Result<Prepared, String>
         settings.debug_mode = DebugMode::Off;
     }
     em.update_settings(settings.clone());
-    let mut document =
+    let document =
         GeneralParser::new_for_lsp(split.rest_tokens, &config.config_section, &settings, em.clone())
             .map_err(|e| format!("Parser init failed: {}", e.message()))?
             .parse_document()
             .map_err(|e| format!("Parse failed: {}", e.message()))?;
+    Ok((document, settings, em))
+}
+
+/// The loader's stages 1 to 6 on `source`, as the loader ran them before the document was the
+/// product: the owned tree exported from the parse is analyzed and enhanced next to the document.
+/// With `lenient` see [`parse_only`].
+fn prepare(path: &str, source: &[u8], lenient: bool) -> Result<Prepared, String> {
+    let (mut document, settings, em) = parse_only(path, source, lenient)?;
     let ast = document.export();
     let semantic = GeneralSemanticAnalyzer::new_with_error_manager(&ast, &settings, em.clone())
         .with_document(&document)
@@ -180,6 +193,9 @@ fn sources() -> Vec<(&'static str, bool, String)> {
     // Numeric arrays. Literals of mixed numeric types never reach the homogenizer: semantic
     // analysis rejects them, so only a function can make an array that needs promoting.
     v.push(("m01_homogeneous_literal_arrays", true, format!("{h}@DATA(\n  weights = [1, 2, 3]\n  half = [1.5, 2.5]\n  grid = [[1, 2], [3, 4]]\n  rows::\n    [1, 2],\n    [3, 4]\n)\n")));
+    // Two functions of one name. Semantic analysis refuses it; the resolver, reached through the
+    // lenient stages, calls the first.
+    v.push(("m10_duplicate_function_names", false, format!("{h}@QUICKFUNCS(\n  ~f<int> => global(x<int>) {{ return x + 1 }}\n  ~f<int> => global(x<int>) {{ return x + 100 }}\n)\n\n@DATA(\n  a = f(1)\n)\n")));
     v.push(("m09_mixed_literal_array", false, format!("{h}@DATA(\n  weights = [1, 2.5, 3]\n)\n")));
     v.push(("m02_computed_arrays", true, format!("{h}@QUICKFUNCS(\n  ~mix<array> => global(x<int>) {{ return [x, 2.5, x + 1] }}\n  ~ints<array> => global(x<int>) {{ return [x, x + 1] }}\n)\n\n@DATA(\n  a = mix(3)\n  b = ints(4)\n  c = [mix(1), ints(2)]\n)\n")));
     // A schema checked against the resolved data: satisfied, and violated by a computed value.
@@ -187,6 +203,8 @@ fn sources() -> Vec<(&'static str, bool, String)> {
     v.push(("m04_schema_violated_by_a_computed_value", false, format!("{h}@QUICKFUNCS(\n  ~f<int> => global(x<int>) {{ return x + 1 }}\n)\n\n@DATA(\n  n = f(1)\n)\n\n@SCHEMA(\n  n = Schema.String(true)\n)\n")));
     v.push(("m05_functions_but_no_data", true, format!("{h}@QUICKFUNCS(\n  ~f<int> => global(x<int>) {{ return x + 1 }}\n)\n")));
     // A section the config does not enable is refused when the document is parsed.
+    // A section the stand-in comparison needs a source for: @DLM that is parsed and analyzed.
+    v.push(("m11_dlm_section", true, format!("{h}@DLM(\n  DCompressor.gzip\n)\n\n@DATA(\n  a = 1\n)\n")));
     v.push(("m06_parse_error", false, "@CONFIG(\n  version -> \"1.0.0\"\n  features -> \"basic\"\n)\n\n@DLM(\n  DCompressor.gzip\n)\n\n@DATA(\n  a = 1\n)\n".to_string()));
     v.push(("m07_unknown_function", false, format!("{h}@DATA(\n  a = nope(1)\n)\n")));
     // Passes semantic analysis and fails in value resolution: each call needs the other's result.
@@ -253,7 +271,7 @@ fn the_owned_entry_points_return_what_the_original_stages_produced() {
 
         if expect_ok { compiled += 1 } else { failed += 1 }
     }
-    assert_eq!((compiled, failed), (11, 8), "the sources cover both outcomes");
+    assert_eq!((compiled, failed), (12, 9), "the sources cover both outcomes");
 }
 
 #[test]
@@ -365,8 +383,9 @@ fn product_mode_leaves_in_the_document_what_a_default_run_puts_in_its_result() {
         )
         .with_document(&mut default_run.document)
         .resolve();
+        // The product run is given an empty owned tree: it takes its functions from the document.
         let product = ValueResolver::new_with_error_manager(
-            product_run.enhanced.clone(), &product_run.symbols, product_run.settings.debug_mode, em,
+            DixScript::new(), &product_run.symbols, product_run.settings.debug_mode, em,
         )
         .with_document_product(&mut product_run.document)
         .resolve();
@@ -413,7 +432,7 @@ fn a_run_that_fails_in_the_enum_phase_returns_no_tree_in_product_mode() {
         .with_document(&mut default_run.document)
         .resolve();
         let product = ValueResolver::new_with_error_manager(
-            product_run.enhanced.clone(), &product_run.symbols, product_run.settings.debug_mode,
+            DixScript::new(), &product_run.symbols, product_run.settings.debug_mode,
             ErrorManager::new_isolated_silent(),
         )
         .with_document_product(&mut product_run.document)
@@ -423,6 +442,39 @@ fn a_run_that_fails_in_the_enum_phase_returns_no_tree_in_product_mode() {
         assert!(default.resolved_ast.is_some(), "{name}: a failed default run returns its tree");
         assert!(product.resolved_ast.is_none(), "{name}: a failed product run returns none");
     }
+}
+
+#[test]
+fn a_duplicated_function_name_calls_the_first_definition_in_product_mode() {
+    let (_, _, text) = sources().into_iter().find(|(n, _, _)| *n == "m10_duplicate_function_names").unwrap();
+    let path = write_source("m10", &text);
+    let _guard = registry_lock();
+    let mut default_run = prepare(&path, text.as_bytes(), true).expect("the lenient stages run");
+    let mut product_run = prepare(&path, text.as_bytes(), true).expect("the lenient stages run");
+    let default = ValueResolver::new_with_error_manager(
+        default_run.enhanced.clone(), &default_run.symbols, default_run.settings.debug_mode,
+        ErrorManager::new_isolated_silent(),
+    )
+    .with_document(&mut default_run.document)
+    .resolve();
+    let product = ValueResolver::new_with_error_manager(
+        DixScript::new(), &product_run.symbols, product_run.settings.debug_mode,
+        ErrorManager::new_isolated_silent(),
+    )
+    .with_document_product(&mut product_run.document)
+    .resolve();
+    assert!(default.is_success && product.is_success, "{:?} {:?}", default.errors, product.errors);
+    let first = default.resolved_ast.expect("a default run returns its tree");
+    assert!(
+        matches!(entry_value(&first, "a"), Value::Integer { value: 2, .. }),
+        "the first definition adds 1: {:?}",
+        entry_value(&first, "a")
+    );
+    assert_eq!(
+        format!("{:?}", entry_value(&product_run.document.export(), "a")),
+        format!("{:?}", entry_value(&first, "a")),
+        "product mode calls the same function"
+    );
 }
 
 #[test]
@@ -442,6 +494,110 @@ fn a_default_run_with_a_document_still_returns_its_tree() {
     assert!(names.contains(&"Base.Rarity") && names.contains(&"Types.Priority"), "{names:?}");
     // The owned tree got the merge; the document of a default run did not.
     assert!(prepared.document.export().enums.is_none());
+}
+
+// ==================== the analyzer and the owned tree ====================
+
+/// What an analysis reports, in a form two runs can be compared by: the verdict, every error and
+/// warning without its suggestion (some suggestions list names in hash order), and what the symbol
+/// table holds for each imported namespace.
+fn fingerprint(result: &dixscript::Compiler::Core::SemanticAnalysisResult) -> String {
+    let mut errors: Vec<String> = result
+        .errors
+        .iter()
+        .map(|e| format!("{} {} {} {}", e.error_id, e.error_type, e.section_name, e.message))
+        .collect();
+    errors.sort();
+    let mut warnings: Vec<String> = result
+        .warnings
+        .iter()
+        .map(|w| format!("{} {} {}", w.warning_id, w.section_name, w.message))
+        .collect();
+    warnings.sort();
+    let mut namespaces: Vec<String> = result
+        .symbol_table
+        .as_ref()
+        .map(|table| {
+            table
+                .namespaces
+                .iter()
+                .map(|(alias, ns)| format!("{alias}: {} functions, {} enums", ns.functions.len(), ns.enums.len()))
+                .collect()
+        })
+        .unwrap_or_default();
+    namespaces.sort();
+    format!("{} {errors:?} {warnings:?} {namespaces:?}", result.is_success)
+}
+
+/// One analysis of `document` with `ast` as the owned tree, with an error manager of its own: a
+/// manager keeps the errors of an earlier analysis, so two analyses must not share one.
+fn analysis_of(ast: &DixScript, document: &Document, settings: &OperationalSettings) -> String {
+    let em = ErrorManager::new_isolated_silent();
+    em.update_settings(settings.clone());
+    fingerprint(
+        &GeneralSemanticAnalyzer::new_with_error_manager(ast, settings, em)
+            .with_document(document)
+            .analyze(),
+    )
+}
+
+#[test]
+fn the_analyzer_reads_only_the_document_when_it_has_one() {
+    // The loader gives the analyzer an empty owned tree and the document. That is only the same
+    // as giving it the tree exported from the document if no section is still read from the tree.
+    let mut analyzed = 0;
+    for (name, _, text) in sources() {
+        let path = write_source(name, &text);
+        let _guard = registry_lock();
+        for lenient in [false, true] {
+            let Ok((document, settings, _)) = parse_only(&path, text.as_bytes(), lenient) else {
+                continue;
+            };
+            let exported = document.export();
+            let stand_in = DixScript::new();
+            let run = |ast: &DixScript| analysis_of(ast, &document, &settings);
+            assert_eq!(run(&exported), run(&stand_in), "{name} (lenient: {lenient})");
+            analyzed += 1;
+        }
+    }
+    assert!(analyzed >= 30, "only {analyzed} analyses were compared");
+
+    // The corpus has every section the crafted sources lack: @RAW, @SECURITY, @DLM that is
+    // enabled in a real file, imports of several files.
+    let corpus = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mdix_files");
+    let mut files = Vec::new();
+    collect_mdix(&corpus, &mut files);
+    files.sort();
+    let mut corpus_analyses = 0;
+    for file in files {
+        let Ok(bytes) = std::fs::read(&file) else { continue };
+        let path = file.to_string_lossy().into_owned();
+        // The cloud imports go to the network and wait for a timeout, which is slow and says
+        // nothing about the sections; the big files have no section the small ones lack.
+        if bytes.len() > 100_000 || path.contains("_cloud_") {
+            continue;
+        }
+        let _guard = registry_lock();
+        let Ok((document, settings, _)) = parse_only(&path, &bytes, false) else { continue };
+        let exported = document.export();
+        let stand_in = DixScript::new();
+        let run = |ast: &DixScript| analysis_of(ast, &document, &settings);
+        assert_eq!(run(&exported), run(&stand_in), "{path}");
+        corpus_analyses += 1;
+    }
+    assert!(corpus_analyses >= 70, "only {corpus_analyses} corpus files were compared");
+}
+
+fn collect_mdix(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_mdix(&path, out);
+        } else if path.extension().map_or(false, |e| e == "mdix") {
+            out.push(path);
+        }
+    }
 }
 
 // ==================== input errors ====================

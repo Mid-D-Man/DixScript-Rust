@@ -1168,8 +1168,7 @@ sources.
   `Document` of their own at that point. A `Document` that has been through the
   loader's enhancer holds the enhanced section: the enhancer stores it back as well as exporting it,
   so `Document.quick_functions` holds the functions after enhancement (a document that did not go
-  through the enhancer holds them as they parsed). The interpreter still copies the local functions
-  from the owned enhanced tree; it can read them from the document when the owned tree goes.
+  through the enhancer holds them as they parsed). In product mode the interpreter registers the local functions from the document's section as they are; the default mode still copies them from the owned enhanced tree.
 - A `Doc*` value cannot print by itself, because its ids mean nothing without the arena.
   `Document` implements `Display`, and `Arena::display` returns a handle that prints a `Doc*`
   section (see `document_display.rs`). `Debug` for the `Doc*` types is still the derived one and

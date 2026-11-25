@@ -155,6 +155,17 @@ Breaking release.
 
 ### Performance
 
+- **The loader without the owned tree.** Callgrind, debug build, instructions, `elements_database.mdix`,
+  against the entry below (the document product alone): `compile_to_resolved_ast` 1,384,068,710 to
+  1,332,499,315 (-3.73 percent), `load_text` 2,050,106,154 to 1,969,093,730 (-3.95), compile, pack and
+  unpack 1,803,266,881 to 1,751,758,423 (-2.86) and compile and convert 2,185,142,582 to
+  2,133,261,786 (-2.37). Against the tree before either change (the four figures of the entry
+  below, first column) that is -3.38, -3.71, -2.60 and -2.14 percent. In the first run the saving is
+  the export after the parse (20.8M), the enhancer's copy of the main file's tree (15.5M) and the
+  drops of the two owned trees that no longer exist (15.4M), 51.7M against 51.6M measured; the
+  other 29.4M of `load_text` is the clone in `determine_dlm_behavior` (18.2M, down to 753
+  instructions) and the drop of the clone (about 10M), with 0.6M in `DixData::from_ast`. Release builds,
+  wall-clock time and the files that are not this one were not measured.
 - **The loader's document product, measured alone.** Callgrind, debug build, instructions,
   `elements_database.mdix` (the largest corpus file), before against after: `compile_to_resolved_ast`
   1,379,063,569 to 1,384,068,710 (+0.36 percent), `load_text` 2,045,040,003 to 2,050,106,154 (+0.25),
@@ -208,9 +219,21 @@ Breaking release.
   its `@ENUMS` (`with_document_product`), and stages 8 and 9 (numeric-array homogenization and the
   `@SCHEMA` check of the resolved data) read its own arena instead of copying the resolved data into
   a scratch arena. `compile_to_resolved_ast` returns the export of that document; its result, errors
-  and log lines are unchanged on all 84 corpus files and on 19 crafted sources. On the largest corpus
-  file this step alone is 0.24 to 0.36 percent more instructions in a debug build (see
-  Performance); the owned tree it still builds goes when the stages that read it have moved.
+  and log lines are unchanged on all 84 corpus files and on the crafted sources. On the largest corpus
+  file this step alone was 0.24 to 0.36 percent more instructions in a debug build; the next entry
+  removes that and more (see Performance).
+- **The loader builds no owned tree before its last stage.** The export of the parse result is gone:
+  stage 5 is given an empty owned tree next to the document (the analyzer reads every section from
+  the document), stage 6 enhances the document in place (`enhance_document`, crate private: no copy
+  of an owned tree and no export of the section), and stage 7 resolves through the crate-private
+  `ValueResolver::for_document`, which registers the local functions from the document's own
+  enhanced `@QUICKFUNCS` section without copying them. The public constructors and `enhance` are
+  unchanged. `ValueResolver::with_document_product` now reads no owned tree at all (it read the
+  `@QUICKFUNCS` section of one): the owned tree passed to it is ignored, which narrows what the
+  method does since the previous entry; nothing but the loader calls it.
+- **`load_text` and the other loads no longer clone the resolved tree** before looking for a `@DLM`
+  section: `determine_dlm_behavior` takes the tree by value and moves it into its result, and copies
+  it only on the path that has to change a copy.
 - **The comment at stage 8 of the loader is corrected.** A hand-written array of mixed numeric
   literals does not reach the homogenizer: semantic analysis rejects it, so only arrays a function
   computed are promoted.

@@ -166,6 +166,12 @@ Breaking release.
   other 29.4M of `load_text` is the clone in `determine_dlm_behavior` (18.2M, down to 753
   instructions) and the drop of the clone (about 10M), with 0.6M in `DixData::from_ast`. Release builds,
   wall-clock time and the files that are not this one were not measured.
+- **Imported files in the arena.** The same measurement against the entry above: `compile_to_resolved_ast`
+  1,332,499,315 to 1,327,400,148 (-0.38 percent), `load_text` 1,969,093,730 to 1,964,519,408 (-0.23),
+  compile, pack and unpack 1,751,758,423 to 1,747,178,820 (-0.26) and compile and convert
+  2,133,261,786 to 2,128,736,010 (-0.21): the exports of the four imported files (1.8M), the
+  enhancer's clones of them (1.3M) and the owned trees they left (1.3M). Against the tree before the
+  document became the product the four are -3.75, -3.94, -2.85 and -2.35 percent.
 - **The loader's document product, measured alone.** Callgrind, debug build, instructions,
   `elements_database.mdix` (the largest corpus file), before against after: `compile_to_resolved_ast`
   1,379,063,569 to 1,384,068,710 (+0.36 percent), `load_text` 2,045,040,003 to 2,050,106,154 (+0.25),
@@ -231,6 +237,12 @@ Breaking release.
   unchanged. `ValueResolver::with_document_product` now reads no owned tree at all (it read the
   `@QUICKFUNCS` section of one): the owned tree passed to it is ignored, which narrows what the
   method does since the previous entry; nothing but the loader calls it.
+- **Imported files stay in the arena.** The imports resolver keeps the `Document` it parses for each
+  imported file as the file's only tree: it no longer exports an owned tree from it, attaches the
+  config to that tree or lets the enhancer clone it. The nested imports and the seed namespaces are read
+  from the document, the enhancer works in place, and only the enhanced `@QUICKFUNCS` section and the
+  `@ENUMS` section are taken out of the document, because a namespace holds them as owned types.
+  `resolve_imports` still takes caller-parsed owned trees. No signature changed.
 - **`load_text` and the other loads no longer clone the resolved tree** before looking for a `@DLM`
   section: `determine_dlm_behavior` takes the tree by value and moves it into its result, and copies
   it only on the path that has to change a copy.

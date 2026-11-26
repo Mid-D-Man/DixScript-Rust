@@ -38,15 +38,47 @@ use super::{HashVerifier, CloudFileCache};
 #[cfg(all(not(target_arch = "wasm32"), feature = "cloud-import"))]
 use super::CloudProviderFactory;
 
-/// An imported file as `read_and_parse_raw` returns it.
-///
-/// `ast` is the owned tree; `document` is the arena form it was exported from, which the semantic
-/// analyzer and the enhancer then read instead of copying the owned sections back into scratch
-/// arenas. A file with no content has no document, and neither has one that was parsed by the
-/// caller of [`ImportsResolver::resolve_imports`].
-struct ParsedImport {
-    ast:      DixScript,
-    document: Option<Document>,
+/// An imported file as `read_and_parse_raw` returns it: the document the parser built, which the
+/// semantic analyzer and the enhancer read and the enhancer changes in place, or nothing for a file
+/// with no content. No owned tree is exported from it.
+enum ParsedImport {
+    Empty,
+    Document(Document),
+}
+
+impl ParsedImport {
+    /// The input of the recursion for this file. `empty` stands in for the owned tree of a file with
+    /// no content.
+    fn input<'s>(&'s mut self, empty: &'s DixScript) -> ImportInput<'s> {
+        match self {
+            ParsedImport::Empty        => ImportInput::Owned(empty),
+            ParsedImport::Document(d)  => ImportInput::Parsed(d),
+        }
+    }
+}
+
+/// What the recursion works on for one imported file: an owned tree that the caller of
+/// [`ImportsResolver::resolve_imports`] parsed, or a document this resolver parsed.
+enum ImportInput<'s> {
+    Owned(&'s DixScript),
+    Parsed(&'s mut Document),
+}
+
+impl ImportInput<'_> {
+    /// The `@IMPORTS` section of the file, which both forms hold as the same owned type.
+    fn imports(&self) -> Option<&ImportsSection> {
+        match self {
+            ImportInput::Owned(ast)      => ast.imports.as_ref(),
+            ImportInput::Parsed(document) => document.imports.as_ref(),
+        }
+    }
+}
+
+/// What an imported file contributes to its namespace once it has been analyzed and enhanced: the
+/// enhanced `@QUICKFUNCS` section and the `@ENUMS` section, as owned types.
+struct EnhancedImport {
+    quick_functions: Option<QuickFuncsSection>,
+    enums:           Option<EnumsSection>,
 }
 
 pub struct ImportsResolver<'a> {
@@ -149,7 +181,8 @@ impl<'a> ImportsResolver<'a> {
                 }
             };
 
-            if !self.resolve_import_recursive(&import.alias, &parsed.ast, parsed.document.as_mut(), &resolved_path) {
+            let empty_tree = DixScript::new();
+            if !self.resolve_import_recursive(&import.alias, parsed.input(&empty_tree), &resolved_path) {
                 self.error_manager.log_error(&format!(
                     "[ImportsResolver] Failed to resolve '{}'",
                     import.alias,
@@ -219,7 +252,7 @@ impl<'a> ImportsResolver<'a> {
                 ));
             }
 
-            if !self.resolve_import_recursive(alias, ast, None, absolute_path) {
+            if !self.resolve_import_recursive(alias, ImportInput::Owned(ast), absolute_path) {
                 self.error_manager.log_error(&format!(
                     "[ImportsResolver] Failed to resolve import '{}'",
                     alias
@@ -255,8 +288,7 @@ impl<'a> ImportsResolver<'a> {
     fn resolve_import_recursive(
         &mut self,
         alias:         &str,
-        raw_ast:       &DixScript,
-        document:      Option<&mut Document>,
+        input:         ImportInput<'_>,
         absolute_path: &str,
     ) -> bool {
         let normalized_path = if Self::is_cloud_url(absolute_path) {
@@ -297,7 +329,7 @@ impl<'a> ImportsResolver<'a> {
         self.visiting.insert(normalized_path.clone());
         self.import_stack.push(normalized_path.clone());
 
-        let result = self.resolve_import_inner(alias, raw_ast, document, &normalized_path);
+        let result = self.resolve_import_inner(alias, input, &normalized_path);
 
         self.import_stack.pop();
         self.visiting.remove(&normalized_path);
@@ -309,14 +341,15 @@ impl<'a> ImportsResolver<'a> {
     fn resolve_import_inner(
         &mut self,
         alias:           &str,
-        raw_ast:         &DixScript,
-        document:        Option<&mut Document>,
+        input:           ImportInput<'_>,
         normalized_path: &str,
     ) -> bool {
         let mut local_imports = HashMap::new();
+        // Read once, before the input is handed to the analysis at the end.
+        let declared: Option<ImportsSection> = input.imports().cloned();
 
         // ── Step 1: Resolve all transitive dependencies FIRST ─────────────────
-        if let Some(ref imports_section) = raw_ast.imports {
+        if let Some(ref imports_section) = declared {
             let nested_base_dir = if Self::is_cloud_url(normalized_path) {
                 Self::get_cloud_url_directory(normalized_path)
             } else {
@@ -391,10 +424,10 @@ impl<'a> ImportsResolver<'a> {
                         Err(_) => return false,
                     };
 
+                let empty_tree = DixScript::new();
                 if !self.resolve_import_recursive(
                     &nested_import.alias,
-                    &nested_raw.ast,
-                    nested_raw.document.as_mut(),
+                    nested_raw.input(&empty_tree),
                     &nested_path,
                 ) {
                     return false;
@@ -410,7 +443,7 @@ impl<'a> ImportsResolver<'a> {
 
         // ── Step 2: Seed namespaces for enhancement ───────────────────────────
         let seed_namespaces: HashMap<String, ImportedNamespace> =
-            if let Some(ref imports_section) = raw_ast.imports {
+            if let Some(ref imports_section) = declared {
                 imports_section
                     .imports
                     .iter()
@@ -434,19 +467,19 @@ impl<'a> ImportsResolver<'a> {
             ));
         }
 
-        let enhanced_ast =
-            match self.analyze_and_enhance(raw_ast, document, normalized_path, alias, &seed_namespaces) {
+        let enhanced =
+            match self.analyze_and_enhance(input, normalized_path, alias, &seed_namespaces) {
                 Ok(a)  => a,
                 Err(_) => return false,
             };
 
         // ── Step 3: Extract symbols ───────────────────────────────────────────
         let functions =
-            Self::extract_global_functions(enhanced_ast.quick_functions.as_ref(), alias);
-        let enums = Self::extract_enums(enhanced_ast.enums.as_ref());
+            Self::extract_global_functions(enhanced.quick_functions.as_ref(), alias);
+        let enums = Self::extract_enums(enhanced.enums.as_ref());
 
         if self.debug_config.is_enabled {
-            if let Some(ref qf) = enhanced_ast.quick_functions {
+            if let Some(ref qf) = enhanced.quick_functions {
                 let skipped = qf.functions.len().saturating_sub(functions.len());
                 self.error_manager.log_debug(&format!(
                     "[ImportsResolver] Extracted {}/{} functions from '{}' ({} scoped, not exported)",
@@ -520,7 +553,7 @@ impl<'a> ImportsResolver<'a> {
                 "[ImportsResolver] Imported file '{}' is empty",
                 resolved_path
             ));
-            return Ok(ParsedImport { ast: DixScript::new(), document: None });
+            return Ok(ParsedImport::Empty);
         }
 
         // ── Approach B: tokenize full content ─────────────────────────────────
@@ -615,26 +648,27 @@ impl<'a> ImportsResolver<'a> {
             format!("Parse errors in imported file: {}", e)
         })?;
 
-        // Attach the already-parsed ConfigSection — GeneralParser doesn't
-        // parse @CONFIG itself, it receives it as a pre-built argument.
-        // The owned tree that the nested-import walk and the extraction read, exported once from
-        // the document the analyzer and the enhancer will read.
-        let mut ast = document.export();
-        ast.config = Some(config_result.config_section);
-
-        Ok(ParsedImport { ast, document: Some(document) })
+        // The parser was given the already-parsed ConfigSection (it does not parse @CONFIG
+        // itself) and puts it in the document, so the document is complete as it is.
+        Ok(ParsedImport::Document(document))
     }
 
     // ── Phase 2: Semantic analysis and AST enhancement ────────────────────────
 
     fn analyze_and_enhance(
         &mut self,
-        raw_ast:         &DixScript,
-        document:        Option<&mut Document>,
+        input:           ImportInput<'_>,
         resolved_path:   &str,
         alias:           &str,
         seed_namespaces: &HashMap<String, ImportedNamespace>,
-    ) -> Result<DixScript, String> {
+    ) -> Result<EnhancedImport, String> {
+        // A document is analyzed and enhanced as it is; the analyzer then reads every section from
+        // it and takes the owned tree only because its constructor does, so that is empty.
+        let stand_in = DixScript::new();
+        let (raw_ast, mut document): (&DixScript, Option<&mut Document>) = match input {
+            ImportInput::Owned(ast)       => (ast, None),
+            ImportInput::Parsed(document) => (&stand_in, Some(document)),
+        };
         let mut import_settings = self.operational_settings.clone();
         import_settings.source_file_path        = Some(resolved_path.to_string());
         // CRITICAL: prevent a nested ImportsResolver from being created inside
@@ -693,10 +727,15 @@ impl<'a> ImportsResolver<'a> {
         }
 
         let mut ast_enhancer = GeneralAstEnhancer::new(&import_settings);
-        if let Some(document) = document {
+        let has_document = document.is_some();
+        if let Some(document) = document.as_deref_mut() {
             ast_enhancer = ast_enhancer.with_document(document);
         }
-        let enhancement_result = ast_enhancer.enhance(raw_ast, Some(&semantic_result));
+        let enhancement_result = if has_document {
+            ast_enhancer.enhance_document(Some(&semantic_result))
+        } else {
+            ast_enhancer.enhance(raw_ast, Some(&semantic_result))
+        };
 
         if !enhancement_result.is_success {
             self.error_manager.add_imports_resolution_error(
@@ -715,13 +754,27 @@ impl<'a> ImportsResolver<'a> {
             return Err(format!("AST enhancement failed for '{}'", alias));
         }
 
-        let enhanced_ast = enhancement_result.enhanced_ast;
+        // The namespace holds owned functions, so the enhanced section is exported, and only it:
+        // the rest of the file is not copied.
+        let enhanced = match document {
+            Some(document) => EnhancedImport {
+                quick_functions: document
+                    .quick_functions
+                    .as_ref()
+                    .map(|section| section.export(&document.arena)),
+                enums: document.enums.clone(),
+            },
+            None => EnhancedImport {
+                quick_functions: enhancement_result.enhanced_ast.quick_functions,
+                enums:           enhancement_result.enhanced_ast.enums,
+            },
+        };
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
                 "[ImportsResolver] Processed '{}' ({} functions)",
                 alias,
-                enhanced_ast
+                enhanced
                     .quick_functions
                     .as_ref()
                     .map(|qf| qf.functions.len())
@@ -729,7 +782,7 @@ impl<'a> ImportsResolver<'a> {
             ));
         }
 
-        Ok(enhanced_ast)
+        Ok(enhanced)
     }
 
     fn read_import_content(

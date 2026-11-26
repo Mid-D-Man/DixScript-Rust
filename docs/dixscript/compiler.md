@@ -393,10 +393,9 @@ validation in sequence, and returns the arena `Document` (`compile_to_document`)
   exports the section. Stage 7 is `ValueResolver::for_document`: the phases rewrite `@DATA` in the
   document's arena, the imported enums are merged into its `@ENUMS`, the local functions are the
   document's own enhanced section, and no owned tree exists to be exported, copied or dropped. The
-  conditions that decide whether stage 7 runs read the document. Imported files are parsed into a
-  `Document` by the imports resolver and analyzed and enhanced next to it, but it still exports an
-  owned tree for each and the enhancer clones that tree; those are the bridge that is left (see
-  Fixes and Problems).
+  conditions that decide whether stage 7 runs read the document. Imported files
+  are parsed into a `Document` by the imports resolver, which analyzes and enhances it in place
+  and exports only the functions section its namespace needs.
 - **`determine_dlm_behavior` takes the tree by value.** It used to clone the whole resolved tree into
   its result before it looked for a `@DLM` section, on the `load_text` path, whether or not the file
   had one. It moves the tree into the result, which is what a file with no modules returns, and
@@ -1162,20 +1161,33 @@ file's own imports first, analyzes and enhances it, and registers its global fun
 enhanced tree of each, with its parameter defaults) and its enums as a namespace of the symbol table.
 
 **Decisions:**
-- **An imported file is parsed to a `Document`, and the analyzer and the enhancer read it.**
-  `read_and_parse_raw` calls `parse_document` and exports the owned tree once, which the nested
-  import walk and the extraction of functions and enums still read. `analyze_and_enhance` gives the
-  document to `GeneralSemanticAnalyzer::with_document` and to `GeneralAstEnhancer::with_document`,
-  the path the loader takes for the main file. Before this, each imported file was parsed to a
-  document, exported, and then copied back into scratch arenas by the owned entry points of every
-  analyzer and of the enhancer.
+- **An imported file is parsed to a `Document`, and the document is its only tree.**
+  `read_and_parse_raw` calls `parse_document` and returns the document (`ParsedImport::Document`; a
+  file with no content is `ParsedImport::Empty`). The recursion takes an `ImportInput`: a document
+  this resolver parsed, or an owned tree that the caller of `resolve_imports` parsed. The nested
+  imports and the seed namespaces are read from the file's `@IMPORTS` section, which both forms hold
+  as the same owned type. `analyze_and_enhance` gives a document to
+  `GeneralSemanticAnalyzer::with_document`, with an empty owned tree next to it because the
+  constructor takes one, and enhances it in place with `GeneralAstEnhancer::enhance_document`, the
+  path the loader takes for the main file. Before this, each imported file was exported to an owned
+  tree after the parse, and the enhancer cloned that tree and exported its enhanced section into the
+  clone.
+- **Only what the namespace needs leaves the document.** A namespace holds owned functions, so the
+  enhanced `@QUICKFUNCS` section is exported from the document, and `@ENUMS` (an owned type
+  already) is cloned; nothing else of the file is copied. The `@CONFIG` section that the old code
+  attached to the exported tree after the parse is gone, because `parse_document` already puts the
+  config it was given in the document.
 - **A file the caller parsed itself takes the owned path.** `resolve_imports`, which takes
-  already parsed trees, passes no document down, so its analysis and enhancement go through the owned
-  entry points as they always did. A file with no content has no document either.
+  already parsed trees, gives the recursion `ImportInput::Owned`, so its analysis and enhancement go
+  through the owned entry points as they always did. A file with no content has no document either,
+  and is handled as an empty owned tree.
 - **The two paths cannot show up in the result.** The document and the owned tree of an imported
   file agree by construction, so the namespaces and the errors are the same whichever way they were
   read; the tests pin the result and compare the two entry points with each other.
-- **The gain is small.** Callgrind on a debug build of the 5 file chemistry import chain counts
+- **The change that dropped the owned tree is measured in the loader's entry.** It saves 5.1M
+  instructions of 1,332M on the largest corpus file (see the Fixes and Problems entry on imported
+  files).
+- **The gain of the first change was small.** Callgrind on a debug build of the 5 file chemistry import chain counts
   1,294.8 million instructions before and 1,292.3 million after, about 0.2% fewer, which is within what
   the harness itself spends. Nothing else was measured.
 
@@ -3083,10 +3095,60 @@ requires the larger to take less than 7 times as long.
   and the other corpus files were not measured.
 - **What is left.** The export at the end of `compile_to_resolved_ast` (26.5M, of which 24.5M is the
   data) stays until the consumers after stage 9 (binary serialization, the DLM auditors, the runtime
-  layer) read the document. The imports resolver still exports an owned tree for each imported file
-  and the enhancer clones it: in this profile that is 1.8M for the exports, 1.3M for the clones and
-  1.7M for the export of the enhanced section, 4.7M in all (0.35 percent of the run), while the
-  analysis of the four files is 30.8M and their parsing 41.4M, neither of which is a bridge. Taking
-  the owned tree out of the imports path means changing what `ParsedImport` holds and how nested
-  imports are read, for at most that 4.7M, so it was not done; that is a decision for the owner. CI
-  was not run by me on this drop.
+  layer) read the document. The imports resolver still exported an owned tree for each imported file
+  and the enhancer cloned it: 1.8M for the exports, 1.3M for the clones and 1.7M for the export of
+  the enhanced section, 4.7M in all (0.35 percent of the run), while the analysis of the four files
+  is 30.8M and their parsing 41.4M, neither of which is a bridge. The next entry moves that. CI was
+  not run by me on this drop.
+
+### Fixes and Problems: imported files stay in the arena
+
+- **What it was.** The imports resolver parsed each imported file into a `Document`, which was the
+  right tree for the analyzer and the enhancer, but it then exported an owned tree from it for the
+  nested-import walk and for the extraction of functions and enums, attached the config to that
+  tree, and the enhancer cloned it and exported the enhanced section into the clone.
+- **What changed.** `imports_resolver.rs` only. `ParsedImport` is now `Empty` or `Document(Document)`.
+  The recursion takes an `ImportInput`, either `Owned(&DixScript)` (what `resolve_imports` is given,
+  unchanged in behaviour) or `Parsed(&mut Document)`. The nested imports and the seed namespaces
+  are read from the file's `@IMPORTS` section, the analyzer is given an empty owned tree next to the
+  document, and the enhancer is `enhance_document`. `analyze_and_enhance` returns an
+  `EnhancedImport` holding the enhanced `@QUICKFUNCS` section, exported from the document, and the
+  `@ENUMS` section, cloned from it; the namespace code reads those two. No public signature changed.
+- **Premises read before they were relied on.** `parse_document` puts the config section it was
+  given into the document, so attaching it again to an exported tree was redundant, and the
+  document's config is what the analyzer's version check reads. Imported files are analyzed with the
+  same stand-in the main file gets, which the guard test of the previous entry proves is the same as
+  the real export for the main file; the recorded import scenarios below show the same for the files
+  an import brings in.
+- **How it was checked.** `tests/imports_resolver_document.rs` was not changed and passes: its 16
+  crafted files (a library with global and scoped functions, defaults, a lambda and an enum, files
+  that import it directly, twice over and through each other, a missing, an empty, an unparsable
+  and an unanalyzable import, a file that imports itself) have the namespaces and errors that
+  the original code gave, and the files the resolver reads give the same namespaces as the same
+  files parsed by the caller. The corpus run of the previous entries was repeated against the
+  unchanged binary's same-day captures: 79 files equal and the five that differ between two
+  unchanged runs equal at their level, for both entry points, no differences, and the pipeline's
+  logs have the same 76, 1 and 7 split on the same seven files. Bug injection: 8 single changes (the
+  nested imports read as empty, the seed namespaces empty, the functions or the enums of the
+  namespace dropped from the document path, the same two dropped from the owned path, and the
+  analyzer reading the owned tree for its enums or its imports again), one build, each run alone
+  against the imports tests, the loader tests and the enum registry tests, with a control that
+  passes. All 8 were caught; the two analyzer changes are caught through the files an import brings
+  in as well. A ninth change, a second arm for the empty file, could not change anything and was
+  not run.
+- **Measured.** Callgrind, debug build, instructions, `elements_database.mdix`, the tree of the
+  previous entry against this one: `compile_to_resolved_ast` 1,332,499,315 to 1,327,400,148 (-5.1M,
+  -0.38 percent), `load_text` 1,969,093,730 to 1,964,519,408 (-4.6M, -0.23), compile, pack and unpack
+  1,751,758,423 to 1,747,178,820 (-4.6M, -0.26) and compile and convert 2,133,261,786 to
+  2,128,736,010 (-4.5M, -0.21). Against the tree before the document became the product that is
+  -51.7M (-3.75 percent), -80.5M (-3.94), -51.3M (-2.85) and -51.3M (-2.35). In the first run,
+  `Document::export` falls by 1.8M (the exports of the four imported files), `DixScript::clone` by
+  1.3M (the clones, which are gone), the drops of owned trees by 1.3M, and the enhancer's own
+  section export (1.7M) moves into `analyze_and_enhance` because the namespace needs owned
+  functions. The analysis of the imported files (30.8M) and their parsing (41.4M) are not bridge and
+  are untouched. Release builds and wall-clock time were not measured.
+- **What is left.** Nothing of the imports path is owned except what a namespace holds, which is
+  the `Vec` of owned functions and the enums section. Holding the imported files' functions in an
+  arena instead would change `ImportedNamespace`, which the language server and the type inference
+  read, so it is a change of public shape and was not made. The interpreter still copies the
+  functions of every imported namespace into the document's arena once (1.3M).

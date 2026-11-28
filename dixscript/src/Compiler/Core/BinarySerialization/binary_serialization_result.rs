@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/BinarySerialization/binary_serialization_result.rs"
+// ============================================================================
 //! Result types for binary serialization/deserialization operations
 
 use std::time::Duration;
@@ -6,6 +10,7 @@ use super::binary_serialization_context::{
     BinaryDeserializationStatistics,
 };
 use crate::Compiler::AST::DixScript;
+use crate::Compiler::AST::arena::Document;
 
 /// Result of binary serialization operation
 #[derive(Debug, Clone)]
@@ -146,3 +151,66 @@ impl std::fmt::Display for BinaryDeserializationResult {
         )
     }
           }
+
+/// The result of [`BinaryUnpacker::unpack_document`](super::BinaryUnpacker::unpack_document):
+/// the fields of [`BinaryDeserializationResult`], with the arena [`Document`] in place of the
+/// owned tree.
+#[derive(Debug)]
+pub struct BinaryDocumentResult {
+    pub is_success: bool,
+    pub document: Option<Document>,
+    pub binary_size: usize,
+    pub duration: Duration,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+    pub statistics: BinaryDeserializationStatistics,
+}
+
+impl BinaryDocumentResult {
+    pub fn success(
+        document: Document,
+        binary_size: usize,
+        duration: Duration,
+        statistics: BinaryDeserializationStatistics,
+    ) -> Self {
+        BinaryDocumentResult {
+            is_success: true,
+            document: Some(document),
+            binary_size,
+            duration,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+            statistics,
+        }
+    }
+
+    pub fn failure(
+        errors: Vec<String>,
+        warnings: Vec<String>,
+        duration: Duration,
+    ) -> Self {
+        BinaryDocumentResult {
+            is_success: false,
+            document: None,
+            binary_size: 0,
+            duration,
+            errors,
+            warnings,
+            statistics: BinaryDeserializationStatistics::new(),
+        }
+    }
+}
+
+impl std::fmt::Display for BinaryDocumentResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let status = if self.is_success { "SUCCESS" } else { "FAILED" };
+        write!(
+            f,
+            "Binary Deserialization {}: Size={} bytes, Duration={:.2}ms, Errors={}",
+            status,
+            self.binary_size,
+            self.duration.as_secs_f64() * 1000.0,
+            self.errors.len()
+        )
+    }
+}

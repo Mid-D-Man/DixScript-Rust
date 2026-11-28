@@ -113,7 +113,12 @@ Breaking release.
   conversions the two call paths always used (a tuple stays a tuple, cut to six items, or becomes an
   array). `DocQuickFunction::from_owned(&mut Arena, &QuickFunction)` copies one function in, and
   `ExecutionContext::with_capacity` sizes the root scope.
-
+- **`BinaryPacker::pack_document`, `BinaryUnpacker::unpack_document` and `BinaryDocumentResult`** pack
+  an arena `Document` and unpack into one without an owned tree. They read and write the same bytes
+  and fail with the same errors as `pack` and `unpack`, which keep their signatures and their code.
+  Under them are `ValueEncoder::encode_node`, `ValueDecoder::decode_node`,
+  `DataSectionWriter::write_document_section`, `SecuritySectionWriter::write_document_section`,
+  `DataSectionReader::read_document_section` and `SecuritySectionReader::read_document_section`.
 
 ### Removed
 - `VersionConstraints::with_forward_compat`, `is_valid_value_type`, `is_valid_default_value`,
@@ -216,7 +221,10 @@ Breaking release.
   files are unchanged. A script's execution scopes are sized for their parameters, and an object literal
   is built directly in the map the value holds. Release builds, wall-clock time and peak memory were
   not measured.
-
+- **`DixLoader::compile_with_dlm_from_str` packs the compiled `Document`** instead of exporting it,
+  cloning the exported tree and packing the clone. On `elements_database.mdix` (debug build, callgrind
+  instructions) it is 1,542,687,433 to 1,483,678,615, which is 3.83 percent fewer. A source with a
+  compressor or an encryptor still exports once, because the DLM executor reads an owned tree.
 
 ### Changed
 

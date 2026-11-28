@@ -1,7 +1,12 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/BinarySerialization/SectionWriters/security_section_writer.rs"
+// ============================================================================
 //! Writes @SECURITY section to binary format.
 
 use std::io::{Write, Seek, SeekFrom};
 use crate::Compiler::AST::{SecuritySection, SecurityEntry, SecurityField};
+use crate::Compiler::AST::arena::{Arena, DocSecurity, DocSecurityEntry};
 use super::binary_format::SectionId;
 use super::section_offset::SectionOffset;
 use super::binary_serialization_context::BinarySerializationContext;
@@ -30,10 +35,46 @@ impl<'a> SecuritySectionWriter<'a> {
         writer: &mut W,
         security_section: &SecuritySection,
     ) -> Result<SectionOffset, BinarySerializationError> {
+        self.write_framed(writer, security_section.entries.len(), |this, writer| {
+            for entry in &security_section.entries {
+                this.write_security_entry(writer, entry)?;
+                this.fail_if_terminating()?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Writes the `@SECURITY` section of a [`Document`](crate::Compiler::AST::arena::Document).
+    ///
+    /// The bytes, statistics and errors are those of [`write_section`](Self::write_section)
+    /// for the exported section; `arena` is the one the section's value ids point into.
+    pub fn write_document_section<W: Write + Seek>(
+        &mut self,
+        writer: &mut W,
+        arena: &Arena,
+        security_section: &DocSecurity,
+    ) -> Result<SectionOffset, BinarySerializationError> {
+        self.write_framed(writer, security_section.entries.len(), |this, writer| {
+            for entry in &security_section.entries {
+                this.write_doc_security_entry(writer, arena, entry)?;
+                this.fail_if_terminating()?;
+            }
+            Ok(())
+        })
+    }
+
+    /// The frame both entry points share: the section id, a length field patched once the
+    /// entries are written, the entry count, then whatever `write_entries` writes.
+    fn write_framed<W: Write + Seek>(
+        &mut self,
+        writer: &mut W,
+        entry_count: usize,
+        write_entries: impl FnOnce(&mut Self, &mut W) -> Result<(), BinarySerializationError>,
+    ) -> Result<SectionOffset, BinarySerializationError> {
         if self.context.debug_config.is_enabled {
             self.context.log_info(&format!(
                 "Writing @SECURITY section ({} entries)",
-                security_section.entries.len()
+                entry_count
             ));
         }
 
@@ -54,18 +95,10 @@ impl<'a> SecuritySectionWriter<'a> {
             .map_err(|e| self.write_err(e.to_string(), "SecuritySection"))?;
 
         writer
-            .write_all(&(security_section.entries.len() as i32).to_le_bytes())
+            .write_all(&(entry_count as i32).to_le_bytes())
             .map_err(|e| self.write_err(e.to_string(), "SecuritySection"))?;
 
-        for entry in &security_section.entries {
-            self.write_security_entry(writer, entry)?;
-            if self.context.error_manager.should_terminate_parsing() {
-                return Err(BinarySerializationError::invalid_state(
-                    "Terminating SECURITY write due to accumulated errors",
-                    "SecuritySection",
-                ));
-            }
-        }
+        write_entries(self, writer)?;
 
         let end_pos = writer
             .stream_position()
@@ -93,6 +126,55 @@ impl<'a> SecuritySectionWriter<'a> {
             .record_section_size(SectionId::Security, section_length as usize);
 
         Ok(SectionOffset::new(SectionId::Security, start_pos, end_pos - start_pos))
+    }
+
+    fn fail_if_terminating(&self) -> Result<(), BinarySerializationError> {
+        if self.context.error_manager.should_terminate_parsing() {
+            return Err(BinarySerializationError::invalid_state(
+                "Terminating SECURITY write due to accumulated errors",
+                "SecuritySection",
+            ));
+        }
+        Ok(())
+    }
+
+    fn write_doc_security_entry<W: Write>(
+        &mut self,
+        writer: &mut W,
+        arena: &Arena,
+        entry: &DocSecurityEntry,
+    ) -> Result<(), BinarySerializationError> {
+        self.write_string_field(writer, &entry.block_key, "SecurityEntry")?;
+
+        writer
+            .write_all(&(entry.fields.len() as i32).to_le_bytes())
+            .map_err(|e| self.write_err(e.to_string(), "SecurityEntry"))?;
+
+        if self.context.debug_config.is_verbose {
+            self.context.log_verbose(&format!(
+                "  security block: {} ({} fields)",
+                entry.block_key,
+                entry.fields.len()
+            ));
+        }
+
+        for field in &entry.fields {
+            self.write_string_field(writer, &field.key, "SecurityField")?;
+
+            self.value_encoder
+                .encode_node(writer, arena, field.value, self.context)
+                .map_err(|e| self.write_err(e.to_string(), "SecurityField"))?;
+
+            if self.context.debug_config.is_verbose {
+                self.context.log_verbose(&format!(
+                    "    field: {} = {}",
+                    field.key,
+                    arena.value_ref(field.value)
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     fn write_security_entry<W: Write>(

@@ -401,6 +401,13 @@ validation in sequence, and returns the arena `Document` (`compile_to_document`)
   had one. It moves the tree into the result, which is what a file with no modules returns, and
   copies it only on the path that has to change a copy (a compressor or an encryptor). Both feature
   variants of the function changed.
+- **`compile_with_dlm_from_str` packs the `Document`.** It compiles to the document, gives the
+  document its security section (the small section is exported, passed to
+  `ensure_valid_security_section` and imported back; nothing else is copied) and calls
+  `pack_document`. Only a source with a compressor or an encryptor exports the document, because
+  the DLM executor still reads an owned tree. Before this it exported, cloned the whole tree to
+  set the security section on the clone, and packed the clone. The file-based path
+  (`determine_dlm_behavior`) still packs an owned tree.
 
 ### `Compiler/Core/general_parser.rs`
 
@@ -2056,6 +2063,186 @@ owned result.
 **Tests:** `cargo test -p dixscript --test loader_document`. 10 tests and 1 ignored helper, all
 passing on Rust 1.75.
 
+### `Compiler/Core/BinarySerialization/binary_packer.rs`
+
+**What it does:** Packs a tree into the binary format: a header, the sections the format stores
+(`@CONFIG`, `@ENUMS`, `@DATA` and `@SECURITY`, in that order), an offset table and a SHA-256
+footer. The sections are encoded in parallel with rayon when two or more are present, and one
+after the other on wasm32, without the `rayon-support` feature and when the log is verbose.
+
+**Decisions:**
+- **Two entry points over one private `Source`.** `pack(&DixScript)` and `pack_document(&Document)`
+  both call `pack_source`, which reads a `Source`, an owned tree or a document. Only `@DATA` and
+  `@SECURITY` differ between the two, because `@CONFIG` and `@ENUMS` are the same owned types in
+  both; those two sections go through `write_section` for the owned tree and
+  `write_document_section` for the document. A `Document` is `Sync`, so the section tasks share the
+  one reference.
+- **The owned entry point does not go through the arena.** Routing `pack(&DixScript)` through a
+  temporary `Document` was built first and measured: the import of the data section alone is 19.7M
+  instructions on `elements_database.mdix`, and compile, pack and unpack came out 27.5M (1.6
+  percent) slower. A conversion is kept only where the count drops, so the owned path keeps the
+  owned writers and the document path is the one the loader uses.
+- **Only the four stored sections are read.** `@IMPORTS`, `@DLM`, `@QUICKFUNCS`, `@RAW` and
+  `@SCHEMA` have no encoding in the format, in either entry point.
+
+### `Compiler/Core/BinarySerialization/binary_unpacker.rs`
+
+**What it does:** Reads a packed file: size and checksum checks, the header, the offset table, the
+section decoding (in parallel when two or more sections are decodable and the log is not
+verbose, on a target with rayon), and the assembly of the sections into a tree.
+
+**Decisions:**
+- **`unpack` and `unpack_document` share everything up to the assembly.** `decode_file` runs the
+  checks and the decoding for a `Target`, `Owned` or `Document`, and returns the decoded sections
+  and the number of offset table entries; `assemble_ast` and `assemble_document` build the result.
+  `record_totals` then sets the byte and section totals from the table, as the single original
+  function did, which is why the per-section increments in both assemblies do not show in the
+  statistics.
+- **Each arena section is decoded into an arena of its own.** The sections are decoded in
+  parallel, so `@DATA` and `@SECURITY` cannot share one arena while they are built. In
+  `assemble_document` the first of them becomes the document's arena and every later one is
+  appended with `Arena::append`, and its section is shifted by the offsets the append returns
+  (`DocData::shifted`, `DocSecurity::shifted`), the same mechanism the section parsers use.
+- **A section that fails without ending the run is left out, as before.** Both assemblies skip a
+  section whose decoding returned an error that did not reach the termination threshold, so the
+  result can succeed without that section. This is the original behaviour and the document path
+  reproduces it.
+- **The result is `BinaryDocumentResult`,** with the fields of `BinaryDeserializationResult` and a
+  `document` in place of the `ast`.
+
+### `Compiler/Core/BinarySerialization/value_encoder.rs`
+
+**What it does:** Encodes one value: a type tag and a payload per type, with the nesting depth, the
+array length, the object property count and the string length checked against the format's limits.
+
+**Decisions:**
+- **`encode_node` is `encode_value` for a node in an `Arena`.** It writes the same bytes, records
+  the same statistics, logs the same warning for an enum that is not in the file's own `@ENUMS`, and
+  fails with the same messages. The one thing it does that the owned encoder does not need is to
+  print the offending node: the message for an unsupported value prints it with `{:?}`, and
+  `ValueRef`'s `Debug` prints exactly what the owned `Value` prints.
+- **The tail of the blob and the regex encoders is shared.** `encode_blob_data` and
+  `encode_regex_pattern` take the string, so the argument check is the only part that exists once
+  per entry point. The owned `encode_value` and its public signature are unchanged.
+
+### `Compiler/Core/BinarySerialization/value_decoder.rs`
+
+**What it does:** Decodes one value from a stream: a type tag, then the payload, with the same
+limits checked as on the way in.
+
+**Decisions:**
+- **`decode_node` is `decode_value` building nodes in an `Arena`.** It returns the id of the value
+  it read and leaves the earlier ids of the arena valid. Containers collect their children's ids
+  and allocate the list after the children, so the parent is allocated last.
+- **Everything that turns bytes into text exists once.** `read_text`, `read_regex_pattern`,
+  `read_date_text`, `read_timestamp_text` and `read_hex_text` are used by both entry points, so the
+  two cannot disagree about what a string, a date or a colour is. The owned decoder was changed to
+  call them; its behaviour and its signature are unchanged.
+- **The allocations that the original made on corrupt input are kept.** An object key's length is
+  not checked against a limit, and the decoder allocates `vec![0u8; length]` for it as before; the
+  counts of arrays and objects are checked first, as before. A negative length still ends in a
+  capacity-overflow panic in both entry points. See the entry on binary serialisation below for
+  what this means for edited files.
+
+### `Compiler/Core/BinarySerialization/binary_serialization_result.rs`
+
+**What it does:** The result types of packing and unpacking, with their statistics, and their
+`Display`.
+
+**Decisions:**
+- **`BinaryDocumentResult` is a new type beside `BinaryDeserializationResult`,** not a field added to
+  it. Adding a `document` field to the existing struct would have changed a public struct; the new
+  type leaves it alone.
+
+### `Compiler/Core/BinarySerialization/mod.rs`
+
+**What it does:** The module's declarations and re-exports.
+
+**Decisions:**
+- **`BinaryDocumentResult` is re-exported next to the other two result types.**
+
+### `Compiler/Core/BinarySerialization/SectionWriters/data_section_writer.rs`
+
+**What it does:** Writes the `@DATA` section: the section id, a length that is patched when the
+entries are written, the entry count, and the entries (simple properties, table properties, group
+arrays and object properties).
+
+**Decisions:**
+- **`write_framed` is the frame both entry points use.** `write_section` (owned) and
+  `write_document_section` (arena) differ only in how they write the entries, so the id, the length
+  back-patch, the count, the log lines and the statistics exist once. The termination check after
+  each entry is `fail_if_terminating`.
+- **The document entries are written by `write_doc_*` functions** that read a `DocDataEntry` and an
+  `Arena` and call `ValueEncoder::encode_node`. The check that an object property holds an object
+  reads the node's kind, and its message prints the node with `{:?}` as the owned one does.
+
+### `Compiler/Core/BinarySerialization/SectionWriters/security_section_writer.rs`
+
+**What it does:** Writes the `@SECURITY` section: blocks of key and value fields, framed like the
+data section.
+
+**Decisions:**
+- **The frame is shared the same way** (`write_framed`, `fail_if_terminating`), and
+  `write_document_section` writes `DocSecurityEntry` fields through `encode_node`.
+
+### `Compiler/Core/BinarySerialization/SectionReaders/data_section_reader.rs`
+
+**What it does:** Reads the `@DATA` section back into entries.
+
+**Decisions:**
+- **`read_entries` is the frame both entry points use,** taking a closure that reads one entry:
+  the section id check, the length, the entry count, the termination check after each entry.
+  `read_entry_type` reads and validates the entry type byte for both.
+- **`read_document_section` returns a `DocData` and appends the nodes to the arena it is given.**
+  The table path is split and its empty segments are dropped exactly as in the owned reader, and the
+  object-property check reads the decoded node's kind.
+- **The entry count is still used to size a `Vec` before anything is read,** as in the original.
+
+### `Compiler/Core/BinarySerialization/SectionReaders/security_section_reader.rs`
+
+**What it does:** Reads the `@SECURITY` section back into blocks and fields.
+
+**Decisions:**
+- **The frame is shared the same way** (`read_entries`), and `read_document_section` returns a
+  `DocSecurity` built in the arena it is given.
+
+### `tests/binary_document.rs`
+
+**What it does:** Pins the arena packer and unpacker against the owned code that is still in the
+crate. 18 tests.
+
+**Decisions:**
+- **The owned writers, readers and decoders are the oracle.** They still run the original code, so
+  a test packs or unpacks the same tree through both and compares what an outside reader sees:
+  the bytes, the statistics and the text of every error. Comparing against recorded bytes is not
+  possible, because a compiled file's `@CONFIG` holds the time of the compile and two runs of the
+  unchanged binary never write the same bytes.
+- **Corpus.** Every corpus file that compiles (`*_cloud_*` left out) has its `@DATA` and `@SECURITY`
+  written both ways, is packed with `pack` and `pack_document` (sections compared), and is unpacked
+  with `unpack` and `unpack_document` (the exported tree, the statistics and the errors compared).
+  The test requires at least 55 data sections, 8 security sections and one file whose data the
+  encoder rejects, so the corpus has to reach the cases the test claims to compare.
+- **Hand-built trees.** One tree holds every value type, a local enum, a table, a group array, an
+  object property and a security section, and the test requires every type tag in the statistics.
+  24 failing values (an unsupported prefix with a position, tuples of 0 and 7, blobs and regexes
+  with bad arguments or bad content, bad colours, dates and timestamps, an unresolved identifier,
+  a nested-array node, an interpolated string, depth, string length, array length and object size
+  one past the limit) are written as a simple property, in a table, in a group array and in a
+  security field and compared; a separate test requires that each of them really fails.
+- **Decoders.** Every single-byte edit (10 replacement values) and every truncation of the
+  encoding of each of 17 values is decoded both ways: 2,563 comparisons of the error text and
+  kind, the bytes consumed, the exported value, the statistics, and the panic. Nesting at, one
+  past and three past the limit and counts and lengths at, one past and below zero are built byte
+  by byte, because the encoder refuses to write them. Whole-file edits are not run: see the entry
+  on binary serialisation.
+- **Sections.** Every truncation of a file with all four sections, and malformed sections (an
+  unknown entry type, a wrong section id, an empty section, a value tag that is not a tag, an object
+  property that decodes to another type), are unpacked both ways.
+- **The loader.** `compile_with_dlm_from_str` is compared with the flow it replaced, rebuilt from
+  the owned entry points (compile, clone, default security section, pack), on the corpus sources
+  with no DLM modules. A file is compared only if the old flow agrees with itself across two
+  compiles, because a quickfunction that returns an object lists its properties in hash order.
+
 ### `tests/value_resolution_scaling.rs`
 
 **What it does:** Compiles a generated source of 400 resolved calls and one of 1,600 and
@@ -3152,3 +3339,77 @@ requires the larger to take less than 7 times as long.
   arena instead would change `ImportedNamespace`, which the language server and the type inference
   read, so it is a change of public shape and was not made. The interpreter still copies the
   functions of every imported namespace into the document's arena once (1.3M).
+
+### Fixes and Problems: binary serialisation reads the Document
+
+- **What it was.** `BinaryPacker::pack` read an owned `DixScript` and `BinaryUnpacker::unpack` built
+  one, so `compile_with_dlm_from_str` exported the compiled document, cloned the exported tree to
+  put the default security section on the clone, and packed the clone.
+- **What changed.** `BinaryPacker::pack_document(&Document)`, `BinaryUnpacker::unpack_document(&[u8])`
+  and `BinaryDocumentResult` are new. Under them are `ValueEncoder::encode_node`,
+  `ValueDecoder::decode_node`, `write_document_section` on the data and security writers and
+  `read_document_section` on the data and security readers. `pack` and `unpack` keep the owned
+  code and their signatures. The shared parts (the section frames, the reads that turn bytes into
+  text, the tail of the blob and regex encoders, the entry type read) were pulled into helpers that
+  both entry points call. `compile_with_dlm_from_str` compiles to the document, sets the security
+  section on the document and packs it; it exports only for a source with a compressor or an
+  encryptor. No existing public signature changed; the new public names were agreed before they
+  were written.
+- **Premises read before they were relied on.** The owned writers and decoders are public, so the
+  original code stays in the crate as the oracle, which is why the owned entry points were not made
+  wrappers: that would have removed the oracle and, measured, made the owned path 1.6 percent
+  slower. The pack and unpack `Debug` of a node equals the owned value's, so error messages that
+  print a value are reproduced without a conversion of the whole tree. One earlier figure is
+  corrected here: the ceiling of this slice had been put at 28M of the pack and unpack cost, but the
+  `pack` and `unpack` totals (118.6M and 117.8M) are almost all SHA-256 (117.8M each), and the
+  encode (67.9M) and decode (104.2M) run on rayon worker threads, so they were never under those
+  totals.
+- **How it was checked.** Same-day baselines from the unchanged binary: the corpus through pack and
+  unpack twice, and callgrind of the entry points. Raw bytes cannot be compared, because every
+  packed file of two runs of the unchanged binary differs (the `@CONFIG` timestamp and the checksum),
+  so the sections were compared instead: of 68 packed files, 177 sections, 88 are byte for byte what
+  the unchanged binary wrote and 89 differ between two runs of the unchanged binary as well (the
+  timestamp, and the clock and random builtins in the data); no section differs where the unchanged
+  binary is stable. `tests/binary_document.rs` (18 tests) compares the new paths with the owned
+  code that is still in the crate over the corpus, hand-built trees, 24 failing values, every
+  single-byte edit and truncation of 17 encoded values, every truncation of a full file, malformed
+  sections and the loader flow. Bug injection: 41 single changes (the encoder's boolean, array
+  element type, object key, tuple range, enum fallback, statistics, tuple tag, error position and
+  blob message; the data writer's group items, table path join, object check, property count and
+  simple name; the security writer's block key and field count; the packer's security section, the
+  document arms of `Source` for config, enums, entry count and security; the decoder's integer,
+  boolean, blob prefix, tuple range, array depth, array limit, object key, statistics and enum
+  bytes; the readers' group items, table path filter, object check, simple name and field key; the
+  assembly's shift of the second arena, config, enums and security arena; the loader's security
+  section), one build, each run alone against the new tests with a control that passes. 40 were
+  caught. The survivor changes the factor 150 of the size estimate, which both entry points share,
+  so no comparison between them can see it.
+- **Measured.** Callgrind, debug build, instructions, `elements_database.mdix`, against the unchanged
+  tree. `compile_with_dlm_from_str` 1,542,687,433 to 1,483,678,615 (-59.0M, -3.83 percent), the same
+  482,822 byte result: the export (24.7M), the clone (18.2M) and the drops of both owned trees
+  (20.5M, to 2,156 instructions) are gone, the document drop rises 0.4M and the encode costs 3.7M
+  more (71.6M against 67.9M, because the arena accessors are not inlined in a debug build). Compile,
+  pack and unpack with no owned tree anywhere (`compile_to_document`, `pack_document`,
+  `unpack_document`) is 1,707,822,190 against 1,746,897,446 for the owned flow (-39.1M, -2.24
+  percent). The unpack decode alone is 104,179,579 to 102,021,353 (-2.2M, -2.1 percent): the arena
+  decoder is not measurably cheaper than the owned one in a debug build, and the gain of
+  `unpack_document` is the export it saves a document reader (24.7M) and the cheaper drop, not the
+  decoding. The owned flow (`compile_to_resolved_ast`, `pack`, `unpack`) is unchanged: 1,746,897,446
+  to 1,747,333,753 (+0.4M, +0.02 percent, no code on that path changed). Release builds and
+  wall-clock time were not measured.
+- **A problem found and not changed.** Editing a length field of a packed file so that the bytes
+  after it are read as a count can make the section readers allocate for that count before they read
+  anything. Setting the name length of the first `@ENUMS` entry of a 651 byte file to zero makes the
+  characters of the name `Colo` the field count, 1,869,376,323, and both unpackers end with `memory
+  allocation of 89730112656 bytes failed` and abort the process. It is in the `@ENUMS` reader, which
+  this slice did not touch, and the data and security readers size a `Vec` from a count the same
+  way. A file only reaches that code with a valid checksum, so it needs a crafted file, but the
+  result is an abort and not an error. Because both entry points do it, the byte-edit tests run only
+  on the value decoder, whose counts and lengths are checked against a limit before anything is
+  allocated, and truncations, which change no count, run on whole files.
+- **What is left.** `unpack_document` has no production caller yet: `load_text` after a binary
+  unpack reads an owned tree through `DixData::from_ast`, and the auditors diff two owned trees, so
+  the document unpacker pays when those read a document. `determine_dlm_behavior` packs an owned
+  tree on its compressor and encryptor branch, and `DLMPipelineExecutor::execute` reads an owned
+  tree, so a source with modules still exports once. The hostile-count allocations above are a
+  robustness fix across three readers and were not part of this slice.

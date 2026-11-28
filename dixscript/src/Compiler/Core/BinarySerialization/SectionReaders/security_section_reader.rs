@@ -1,7 +1,12 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/BinarySerialization/SectionReaders/security_section_reader.rs"
+// ============================================================================
 //! Reads @SECURITY section from binary format.
 
 use std::io::Read;
 use crate::Compiler::AST::{SecuritySection, SecurityEntry, SecurityField, Position};
+use crate::Compiler::AST::arena::{Arena, DocSecurity, DocSecurityEntry, DocSecurityField};
 use super::binary_format::SectionId;
 use super::section_offset::SectionOffset;
 use super::binary_serialization_context::BinarySerializationContext;
@@ -30,6 +35,33 @@ impl<'a> SecuritySectionReader<'a> {
         reader: &mut R,
         offset: &SectionOffset,
     ) -> Result<SecuritySection, BinarySerializationError> {
+        let entries = self.read_entries(reader, offset, |this, reader| this.read_security_entry(reader))?;
+        Ok(SecuritySection::new(entries, Position::UNKNOWN))
+    }
+
+    /// Reads the `@SECURITY` section into `arena` and returns it as a [`DocSecurity`].
+    ///
+    /// Reads the same bytes and fails with the same errors as [`read_section`](Self::read_section);
+    /// exporting the result gives the section `read_section` returns. The nodes are appended
+    /// to `arena`.
+    pub fn read_document_section<R: Read>(
+        &mut self,
+        reader: &mut R,
+        offset: &SectionOffset,
+        arena: &mut Arena,
+    ) -> Result<DocSecurity, BinarySerializationError> {
+        let entries = self.read_entries(reader, offset, |this, reader| this.read_doc_security_entry(reader, arena))?;
+        Ok(DocSecurity { entries, position: Position::UNKNOWN })
+    }
+
+    /// The frame both entry points share: the section id, the length, the entry count, then
+    /// `entry_count` entries read by `read_entry`.
+    fn read_entries<R: Read, T>(
+        &mut self,
+        reader: &mut R,
+        offset: &SectionOffset,
+        mut read_entry: impl FnMut(&mut Self, &mut R) -> Result<T, BinarySerializationError>,
+    ) -> Result<Vec<T>, BinarySerializationError> {
         if self.context.debug_config.is_enabled {
             self.context.log_info(&format!(
                 "Reading @SECURITY section from offset {}",
@@ -70,7 +102,7 @@ impl<'a> SecuritySectionReader<'a> {
 
         let mut entries = Vec::with_capacity(entry_count as usize);
         for _ in 0..entry_count {
-            let entry = self.read_security_entry(reader)?;
+            let entry = read_entry(self, reader)?;
             entries.push(entry);
             if self.context.error_manager.should_terminate_parsing() {
                 return Err(BinarySerializationError::invalid_state(
@@ -85,7 +117,46 @@ impl<'a> SecuritySectionReader<'a> {
                 .log_info(&format!("@SECURITY read: {} entries", entry_count));
         }
 
-        Ok(SecuritySection::new(entries, Position::UNKNOWN))
+        Ok(entries)
+    }
+
+    fn read_doc_security_entry<R: Read>(
+        &mut self,
+        reader: &mut R,
+        arena: &mut Arena,
+    ) -> Result<DocSecurityEntry, BinarySerializationError> {
+        let block_key = self.read_string(reader, "SecurityEntry")?;
+
+        let mut count_buf = [0u8; 4];
+        reader
+            .read_exact(&mut count_buf)
+            .map_err(|e| self.read_err(e.to_string(), "SecurityEntry"))?;
+        let field_count = i32::from_le_bytes(count_buf);
+
+        if self.context.debug_config.is_verbose {
+            self.context.log_verbose(&format!(
+                "  security block: {} ({} fields)",
+                block_key, field_count
+            ));
+        }
+
+        let mut fields = Vec::with_capacity(field_count as usize);
+        for _ in 0..field_count {
+            let key = self.read_string(reader, "SecurityField")?;
+            let value = self
+                .value_decoder
+                .decode_node(reader, arena, self.context)
+                .map_err(|e| self.read_err(e.to_string(), "SecurityField"))?;
+
+            if self.context.debug_config.is_verbose {
+                self.context
+                    .log_verbose(&format!("    field: {} = {}", key, arena.value_ref(value)));
+            }
+
+            fields.push(DocSecurityField { key, value, position: Position::UNKNOWN });
+        }
+
+        Ok(DocSecurityEntry { block_key, fields, position: Position::UNKNOWN })
     }
 
     fn read_security_entry<R: Read>(

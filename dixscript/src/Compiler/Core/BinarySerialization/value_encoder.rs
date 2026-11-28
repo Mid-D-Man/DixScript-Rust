@@ -1,8 +1,13 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/BinarySerialization/value_encoder.rs"
+// ============================================================================
 //! Encodes DixScript AST values to binary format
 
 use std::collections::HashMap;
 use std::io::{Write, Result as IoResult};
 use crate::Compiler::AST::Value;
+use crate::Compiler::AST::arena::{Arena, ObjectPropNode, ValueId, ValueNode};
 use crate::ErrorManager::ErrorManager;
 use super::binary_format::{ValueTypeTag, BlobEncoding};
 use super::binary_serialization_context::BinarySerializationContext;
@@ -490,6 +495,17 @@ impl ValueEncoder {
                 "Blob constructor requires string argument",
             ));
         };
+        self.encode_blob_data(writer, data, context)
+    }
+
+    /// The part of the blob encoder that follows the argument check, shared by the owned and
+    /// the arena entry points.
+    fn encode_blob_data<W: Write>(
+        &mut self,
+        writer:  &mut W,
+        data:    &str,
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         let encoding = BlobEncoding::detect(data);
         if !encoding.validate(data) {
             return Err(std::io::Error::new(
@@ -522,6 +538,17 @@ impl ValueEncoder {
                 "Regex constructor requires string argument",
             ));
         };
+        self.encode_regex_pattern(writer, pattern, context)
+    }
+
+    /// The part of the regex encoder that follows the argument check, shared by the owned and
+    /// the arena entry points.
+    fn encode_regex_pattern<W: Write>(
+        &mut self,
+        writer:  &mut W,
+        pattern: &str,
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         regex::Regex::new(pattern).map_err(|e| std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("Invalid regex pattern: {}", e),
@@ -583,6 +610,247 @@ impl ValueEncoder {
             Value::Timestamp { .. }          => ValueTypeTag::Timestamp,
             Value::EnumValue { .. }          => ValueTypeTag::Enum,
             Value::PrefixedConstructor { prefix, .. } => match prefix.as_str() {
+                "t" => ValueTypeTag::Tuple,
+                "b" => ValueTypeTag::Blob,
+                "r" => ValueTypeTag::Regex,
+                _   => ValueTypeTag::Invalid,
+            },
+            _ => ValueTypeTag::Invalid,
+        }
+    }
+}
+
+/// The arena entry points: the same encoding as above, read from an [`Arena`] instead of from
+/// an owned `Value` tree.
+impl ValueEncoder {
+    /// Encodes the value `id` of `arena`.
+    ///
+    /// Writes the same bytes, records the same statistics, logs the same warnings and fails
+    /// with the same messages as [`encode_value`](Self::encode_value) does for the exported
+    /// value. The one extra cost is an export of the offending node when the error message
+    /// needs to print it.
+    pub fn encode_node<W: Write>(
+        &mut self,
+        writer:  &mut W,
+        arena:   &Arena,
+        id:      ValueId,
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
+        let node = arena.value(id);
+        match node {
+            ValueNode::Integer { value, .. }            => self.encode_int32(writer, *value, context),
+            ValueNode::Long { value, .. }               => self.encode_int64(writer, *value, context),
+            ValueNode::Float { value, .. }              => self.encode_float32(writer, *value, context),
+            ValueNode::Double { value, .. }             => self.encode_float64(writer, *value, context),
+            ValueNode::ScientificNotation { value, .. } => self.encode_float64(writer, *value, context),
+            ValueNode::String { value, .. }             => self.encode_string(writer, arena.text(*value), context),
+            ValueNode::Boolean { value, .. }            => self.encode_bool(writer, *value, context),
+            ValueNode::Null { .. }                      => self.encode_null(writer, context),
+            ValueNode::Array { values, .. }             => {
+                self.encode_array_nodes(writer, arena, arena.value_list(*values), context)
+            }
+            ValueNode::Object { properties, .. }        => {
+                self.encode_object_nodes(writer, arena, arena.prop_list(*properties), context)
+            }
+            ValueNode::HexColor { value, .. }           => self.encode_hex(writer, arena.text(*value), context),
+            ValueNode::Date { value, .. }               => self.encode_date(writer, arena.text(*value), context),
+            ValueNode::Timestamp { value, .. }          => self.encode_timestamp(writer, arena.text(*value), context),
+
+            ValueNode::PrefixedConstructor { prefix, arguments, position } => {
+                let arguments = arena.value_list(*arguments);
+                match arena.text(*prefix) {
+                    "t" => self.encode_tuple_nodes(writer, arena, arguments, context),
+                    "b" => self.encode_blob_node(writer, arena, arguments, context),
+                    "r" => self.encode_regex_node(writer, arena, arguments, context),
+                    other => {
+                        let err = BinarySerializationError::with_position(
+                            crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::UnsupportedType,
+                            format!("Unsupported prefixed constructor: {}", other),
+                            context.get_current_scope(),
+                            *position,
+                        );
+                        Err(std::io::Error::new(std::io::ErrorKind::InvalidData, err))
+                    }
+                }
+            }
+
+            // Resolved against this file's own @ENUMS table exactly as in `encode_value`; see
+            // the long comment on that arm for why the encoder does this itself and for the
+            // known gap around imported enums.
+            ValueNode::EnumValue { enum_name, value: field_name, .. } => {
+                let enum_name  = arena.text(*enum_name);
+                let field_name = arena.text(*field_name);
+                match self.local_enums.get(enum_name).and_then(|fields| fields.get(field_name)) {
+                    Some(&resolved) => self.encode_enum(writer, enum_name, field_name, resolved, context),
+                    None => {
+                        self.error_manager.log_warning(&format!(
+                            "EnumValue {}.{} not found in this file's local @ENUMS during binary \
+                             encoding (likely an imported enum — cross-file resolution isn't \
+                             wired into the encoder yet). Encoding with resolved value 0; \
+                             enum_name/field_name identity is still preserved.",
+                            enum_name, field_name
+                        ));
+                        self.encode_enum(writer, enum_name, field_name, 0, context)
+                    }
+                }
+            }
+
+            _ => {
+                let err = BinarySerializationError::new(
+                    crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::UnsupportedType,
+                    format!("Unsupported value type for serialization: {:?}", arena.value_ref(id)),
+                    context.get_current_scope(),
+                );
+                Err(std::io::Error::new(std::io::ErrorKind::InvalidData, err))
+            }
+        }?;
+
+        context.statistics.increment_value_count(self.get_type_tag_for_node(arena, node));
+        Ok(())
+    }
+
+    fn encode_array_nodes<W: Write>(
+        &mut self,
+        writer:  &mut W,
+        arena:   &Arena,
+        values:  &[ValueId],
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
+        context.enter_nested("Array")
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        let count = values.len();
+        context.validate_array_length(count)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        writer.write_all(&[ValueTypeTag::Array as u8])?;
+        writer.write_all(&(count as i32).to_le_bytes())?;
+
+        let element_type = match values.first() {
+            Some(&first) => self.get_type_tag_for_node(arena, arena.value(first)),
+            None         => ValueTypeTag::Null,
+        };
+        writer.write_all(&[element_type as u8])?;
+
+        for &value in values {
+            self.encode_node(writer, arena, value, context)?;
+        }
+
+        context.exit_nested()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        Ok(())
+    }
+
+    fn encode_object_nodes<W: Write>(
+        &mut self,
+        writer:     &mut W,
+        arena:      &Arena,
+        properties: &[ObjectPropNode],
+        context:    &mut BinarySerializationContext,
+    ) -> IoResult<()> {
+        context.enter_nested("Object")
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        let count = properties.len();
+        context.validate_object_property_count(count)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        writer.write_all(&[ValueTypeTag::Object as u8])?;
+        writer.write_all(&(count as i32).to_le_bytes())?;
+
+        for prop in properties {
+            let key_bytes = arena.text(prop.key).as_bytes();
+            writer.write_all(&(key_bytes.len() as i32).to_le_bytes())?;
+            writer.write_all(key_bytes)?;
+            self.encode_node(writer, arena, prop.value, context)?;
+        }
+
+        context.exit_nested()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        Ok(())
+    }
+
+    fn encode_tuple_nodes<W: Write>(
+        &mut self,
+        writer:  &mut W,
+        arena:   &Arena,
+        values:  &[ValueId],
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
+        context.enter_nested("Tuple")
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        let count = values.len();
+        if !(1..=6).contains(&count) {
+            let err = BinarySerializationError::new(
+                crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::InvalidFormat,
+                format!("Tuple must have 1-6 elements, got {}", count),
+                context.get_current_scope(),
+            );
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, err));
+        }
+
+        writer.write_all(&[ValueTypeTag::Tuple as u8])?;
+        writer.write_all(&[count as u8])?;
+
+        for &value in values {
+            self.encode_node(writer, arena, value, context)?;
+        }
+
+        context.exit_nested()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        Ok(())
+    }
+
+    fn encode_blob_node<W: Write>(
+        &mut self,
+        writer:    &mut W,
+        arena:     &Arena,
+        arguments: &[ValueId],
+        context:   &mut BinarySerializationContext,
+    ) -> IoResult<()> {
+        match arguments.first().map(|&id| arena.value(id)) {
+            Some(ValueNode::String { value, .. }) => self.encode_blob_data(writer, arena.text(*value), context),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Blob constructor requires string argument",
+            )),
+        }
+    }
+
+    fn encode_regex_node<W: Write>(
+        &mut self,
+        writer:    &mut W,
+        arena:     &Arena,
+        arguments: &[ValueId],
+        context:   &mut BinarySerializationContext,
+    ) -> IoResult<()> {
+        match arguments.first().map(|&id| arena.value(id)) {
+            Some(ValueNode::String { value, .. }) => self.encode_regex_pattern(writer, arena.text(*value), context),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Regex constructor requires string argument",
+            )),
+        }
+    }
+
+    fn get_type_tag_for_node(&self, arena: &Arena, node: &ValueNode) -> ValueTypeTag {
+        match node {
+            ValueNode::Integer { .. }            => ValueTypeTag::Int32,
+            ValueNode::Long { .. }               => ValueTypeTag::Int64,
+            ValueNode::Float { .. }              => ValueTypeTag::Float32,
+            ValueNode::Double { .. }
+            | ValueNode::ScientificNotation { .. } => ValueTypeTag::Float64,
+            ValueNode::String { .. }             => ValueTypeTag::String,
+            ValueNode::Boolean { .. }            => ValueTypeTag::Bool,
+            ValueNode::Null { .. }               => ValueTypeTag::Null,
+            ValueNode::Array { .. }              => ValueTypeTag::Array,
+            ValueNode::Object { .. }             => ValueTypeTag::Object,
+            ValueNode::HexColor { .. }           => ValueTypeTag::Hex,
+            ValueNode::Date { .. }               => ValueTypeTag::Date,
+            ValueNode::Timestamp { .. }          => ValueTypeTag::Timestamp,
+            ValueNode::EnumValue { .. }          => ValueTypeTag::Enum,
+            ValueNode::PrefixedConstructor { prefix, .. } => match arena.text(*prefix) {
                 "t" => ValueTypeTag::Tuple,
                 "b" => ValueTypeTag::Blob,
                 "r" => ValueTypeTag::Regex,

@@ -1,8 +1,13 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/BinarySerialization/binary_packer.rs"
+// ============================================================================
 //! Main binary serialization orchestrator — packs DixScript AST into binary format.
 
 use web_time::Instant;
 use std::io::{Write, Cursor};
-use crate::Compiler::AST::DixScript;
+use crate::Compiler::AST::{ConfigSection, DixScript, EnumsSection};
+use crate::Compiler::AST::arena::Document;
 use super::{
     binary_format::{HEADER_SIZE, SectionFlags, SectionId},
     binary_header::BinaryHeader,
@@ -29,6 +34,45 @@ const CANONICAL_SECTION_ORDER: &[SectionId] = &[
 
 type SectionEncodeResult = Result<(Vec<u8>, BinarySerializationStatistics), BinarySerializationError>;
 
+/// What the packer reads: an owned tree or an arena document. Only `@DATA` and `@SECURITY`
+/// differ between the two; `@CONFIG` and `@ENUMS` are the same owned types in both.
+#[derive(Clone, Copy)]
+enum Source<'a> {
+    Owned(&'a DixScript),
+    Document(&'a Document),
+}
+
+impl<'a> Source<'a> {
+    fn config(self) -> Option<&'a ConfigSection> {
+        match self {
+            Source::Owned(ast)      => ast.config.as_ref(),
+            Source::Document(doc)   => doc.config.as_ref(),
+        }
+    }
+
+    fn enums(self) -> Option<&'a EnumsSection> {
+        match self {
+            Source::Owned(ast)      => ast.enums.as_ref(),
+            Source::Document(doc)   => doc.enums.as_ref(),
+        }
+    }
+
+    /// The number of `@DATA` entries, or `None` without a `@DATA` section.
+    fn data_entries(self) -> Option<usize> {
+        match self {
+            Source::Owned(ast)      => ast.data.as_ref().map(|d| d.entries.len()),
+            Source::Document(doc)   => doc.data.as_ref().map(|d| d.entries.len()),
+        }
+    }
+
+    fn has_security(self) -> bool {
+        match self {
+            Source::Owned(ast)      => ast.security.is_some(),
+            Source::Document(doc)   => doc.security.is_some(),
+        }
+    }
+}
+
 pub struct BinaryPacker {
     context: BinarySerializationContext,
 }
@@ -40,16 +84,30 @@ impl BinaryPacker {
         }
     }
 
+    /// Packs an owned tree.
     pub fn pack(&mut self, ast: &DixScript) -> BinarySerializationResult {
+        self.pack_source(Source::Owned(ast))
+    }
+
+    /// Packs a [`Document`] without exporting it to an owned tree first.
+    ///
+    /// Writes the bytes [`pack`](Self::pack) writes for the exported document. Only `@CONFIG`,
+    /// `@ENUMS`, `@DATA` and `@SECURITY` are stored in the binary format; the other sections
+    /// of the document are ignored.
+    pub fn pack_document(&mut self, document: &Document) -> BinarySerializationResult {
+        self.pack_source(Source::Document(document))
+    }
+
+    fn pack_source(&mut self, source: Source<'_>) -> BinarySerializationResult {
         let start = Instant::now();
 
         if self.context.debug_config.is_enabled {
             self.context.log_info("Starting binary serialization");
         }
 
-        let original_size = self.estimate_original_size(ast);
+        let original_size = self.estimate_original_size(source);
 
-        match self.pack_internal(ast) {
+        match self.pack_internal(source) {
             Ok(binary_data) => {
                 let duration = start.elapsed();
                 if self.context.debug_config.is_enabled {
@@ -80,8 +138,8 @@ impl BinaryPacker {
         }
     }
 
-    fn pack_internal(&mut self, ast: &DixScript) -> Result<Vec<u8>, BinarySerializationError> {
-        let sections_to_encode = self.determine_sections(ast);
+    fn pack_internal(&mut self, source: Source<'_>) -> Result<Vec<u8>, BinarySerializationError> {
+        let sections_to_encode = self.determine_sections(source);
 
         if sections_to_encode.is_empty() {
             return Err(BinarySerializationError::invalid_state(
@@ -96,7 +154,7 @@ impl BinaryPacker {
             if self.context.debug_config.is_enabled {
                 self.context.log_info("Using concurrent section encoding (rayon)");
             }
-            self.encode_sections_parallel(ast, &sections_to_encode)?
+            self.encode_sections_parallel(source, &sections_to_encode)?
         } else {
             if self.context.debug_config.is_enabled {
                 let reason = if cfg!(target_arch = "wasm32") {
@@ -112,28 +170,28 @@ impl BinaryPacker {
                     "Using sequential section encoding {}", reason
                 ));
             }
-            self.encode_sections_sequential(ast, &sections_to_encode)?
+            self.encode_sections_sequential(source, &sections_to_encode)?
         };
 
         self.assemble_binary(encoded)
     }
 
-    fn determine_sections(&self, ast: &DixScript) -> Vec<SectionId> {
+    fn determine_sections(&self, source: Source<'_>) -> Vec<SectionId> {
         let mut sections = Vec::with_capacity(4);
         for &id in CANONICAL_SECTION_ORDER {
-            if self.section_present(id, ast) {
+            if self.section_present(id, source) {
                 sections.push(id);
             }
         }
         sections
     }
 
-    fn section_present(&self, id: SectionId, ast: &DixScript) -> bool {
+    fn section_present(&self, id: SectionId, source: Source<'_>) -> bool {
         match id {
-            SectionId::Config   => ast.config.is_some(),
-            SectionId::Enums    => ast.enums.is_some(),
-            SectionId::Data     => ast.data.is_some(),
-            SectionId::Security => ast.security.is_some(),
+            SectionId::Config   => source.config().is_some(),
+            SectionId::Enums    => source.enums().is_some(),
+            SectionId::Data     => source.data_entries().is_some(),
+            SectionId::Security => source.has_security(),
             SectionId::Imports  => false,
         }
     }
@@ -147,7 +205,7 @@ impl BinaryPacker {
 
     fn encode_sections_parallel(
         &mut self,
-        ast: &DixScript,
+        source: Source<'_>,
         sections: &[SectionId],
     ) -> Result<Vec<(SectionId, Vec<u8>)>, BinarySerializationError> {
         #[cfg(all(not(target_arch = "wasm32"), feature = "rayon-support"))]
@@ -156,7 +214,7 @@ impl BinaryPacker {
 
             let results: Vec<(SectionId, SectionEncodeResult)> = sections
                 .par_iter()
-                .map(|&id| (id, Self::encode_single_section(id, ast)))
+                .map(|&id| (id, Self::encode_single_section(id, source)))
                 .collect();
 
             self.collect_encode_results(results, sections)
@@ -167,17 +225,17 @@ impl BinaryPacker {
         // in either of those cases. The cfg block above is compiled away
         // there, leaving only this sequential fallback.
         #[cfg(any(target_arch = "wasm32", not(feature = "rayon-support")))]
-        self.encode_sections_sequential(ast, sections)
+        self.encode_sections_sequential(source, sections)
     }
 
     fn encode_sections_sequential(
         &mut self,
-        ast: &DixScript,
+        source: Source<'_>,
         sections: &[SectionId],
     ) -> Result<Vec<(SectionId, Vec<u8>)>, BinarySerializationError> {
         let results: Vec<(SectionId, SectionEncodeResult)> = sections
             .iter()
-            .map(|&id| (id, Self::encode_single_section(id, ast)))
+            .map(|&id| (id, Self::encode_single_section(id, source)))
             .collect();
 
         self.collect_encode_results(results, sections)
@@ -225,13 +283,13 @@ impl BinaryPacker {
         Ok(ordered)
     }
 
-    fn encode_single_section(section_id: SectionId, ast: &DixScript) -> SectionEncodeResult {
+    fn encode_single_section(section_id: SectionId, source: Source<'_>) -> SectionEncodeResult {
         let mut buf = Cursor::new(Vec::new());
         let mut ctx = BinarySerializationContext::new();
 
         match section_id {
             SectionId::Config => {
-                let config = ast.config.as_ref().ok_or_else(|| {
+                let config = source.config().ok_or_else(|| {
                     BinarySerializationError::invalid_state(
                         "CONFIG section absent during encoding", "ConfigSection",
                     )
@@ -241,7 +299,7 @@ impl BinaryPacker {
                     .write_section(&mut buf, config)?;
             }
             SectionId::Enums => {
-                let enums = ast.enums.as_ref().ok_or_else(|| {
+                let enums = source.enums().ok_or_else(|| {
                     BinarySerializationError::invalid_state(
                         "ENUMS section absent during encoding", "EnumsSection",
                     )
@@ -249,25 +307,39 @@ impl BinaryPacker {
                 EnumsSectionWriter::new(&mut ctx).write_section(&mut buf, enums)?;
             }
             SectionId::Data => {
-                let data = ast.data.as_ref().ok_or_else(|| {
-                    BinarySerializationError::invalid_state(
-                        "DATA section absent during encoding", "DataSection",
-                    )
-                })?;
+                let absent = || BinarySerializationError::invalid_state(
+                    "DATA section absent during encoding", "DataSection",
+                );
                 let mut enc = ValueEncoder::new()
-                    .with_enums(ValueEncoder::build_local_enums(ast.enums.as_ref()));
-                DataSectionWriter::new(&mut ctx, &mut enc)
-                    .write_section(&mut buf, data)?;
+                    .with_enums(ValueEncoder::build_local_enums(source.enums()));
+                let mut writer = DataSectionWriter::new(&mut ctx, &mut enc);
+                match source {
+                    Source::Owned(ast) => {
+                        let data = ast.data.as_ref().ok_or_else(absent)?;
+                        writer.write_section(&mut buf, data)?;
+                    }
+                    Source::Document(doc) => {
+                        let data = doc.data.as_ref().ok_or_else(absent)?;
+                        writer.write_document_section(&mut buf, &doc.arena, data)?;
+                    }
+                }
             }
             SectionId::Security => {
-                let security = ast.security.as_ref().ok_or_else(|| {
-                    BinarySerializationError::invalid_state(
-                        "SECURITY section absent during encoding", "SecuritySection",
-                    )
-                })?;
+                let absent = || BinarySerializationError::invalid_state(
+                    "SECURITY section absent during encoding", "SecuritySection",
+                );
                 let mut enc = ValueEncoder::new();
-                SecuritySectionWriter::new(&mut ctx, &mut enc)
-                    .write_section(&mut buf, security)?;
+                let mut writer = SecuritySectionWriter::new(&mut ctx, &mut enc);
+                match source {
+                    Source::Owned(ast) => {
+                        let security = ast.security.as_ref().ok_or_else(absent)?;
+                        writer.write_section(&mut buf, security)?;
+                    }
+                    Source::Document(doc) => {
+                        let security = doc.security.as_ref().ok_or_else(absent)?;
+                        writer.write_document_section(&mut buf, &doc.arena, security)?;
+                    }
+                }
             }
             SectionId::Imports => {
                 return Ok((Vec::new(), BinarySerializationStatistics::new()));
@@ -353,12 +425,12 @@ impl BinaryPacker {
         Ok(buf.into_inner())
     }
 
-    fn estimate_original_size(&self, ast: &DixScript) -> usize {
+    fn estimate_original_size(&self, source: Source<'_>) -> usize {
         let mut size = 100;
-        if ast.config.is_some()  { size += 200; }
-        if let Some(ref e) = ast.enums { size += e.enums.len() * 100; }
-        if let Some(ref d) = ast.data  { size += d.entries.len() * 150; }
-        if ast.security.is_some() { size += 100; }
+        if source.config().is_some()  { size += 200; }
+        if let Some(e) = source.enums() { size += e.enums.len() * 100; }
+        if let Some(entries) = source.data_entries() { size += entries * 150; }
+        if source.has_security() { size += 100; }
         size
     }
 }

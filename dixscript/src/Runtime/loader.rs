@@ -26,7 +26,7 @@ use crate::Compiler::DLM::Auditor::{IAuditor, DiyAuditor, EnhancedAuditor};
 #[cfg(feature = "dlm")]
 use crate::Compiler::Utilities::SecurityUtilities;
 use crate::Compiler::AST::DixScript;
-use crate::Compiler::AST::arena::Document;
+use crate::Compiler::AST::arena::{DocSecurity, Document};
 #[cfg(feature = "dlm")]
 use crate::Compiler::AST::DLMModuleType;
 #[cfg(feature = "dlm-auditor")]
@@ -310,25 +310,27 @@ impl DixLoader {
         source: &str,
         source_label: &str,
     ) -> Result<DLMPipelineResult, String> {
-        let ast = self.compile_source(
-            source, source_label, crate::Compiler::AST::data_types::CompatibilityMode::Strict,
+        let mut document = self.compile_document_from_bytes(
+            source.as_bytes(),
+            source_label,
+            crate::Compiler::AST::data_types::CompatibilityMode::Strict,
         )?;
 
-        let mut ast_with_security = ast.clone();
-        ast_with_security.security = Some(
-            SecurityUtilities::ensure_valid_security_section(
-                ast_with_security.security,
-                ast_with_security.dlm.as_ref(),
-            ),
+        // The security section is small, so it makes the round trip through its owned form that
+        // `ensure_valid_security_section` works on; the rest of the document is not copied.
+        let ensured_security = SecurityUtilities::ensure_valid_security_section(
+            document.security.as_ref().map(|section| section.export(&document.arena)),
+            document.dlm.as_ref(),
         );
+        document.security = Some(DocSecurity::from_owned(&mut document.arena, &ensured_security));
 
         let mut packer = BinaryPacker::new();
-        let ser_result  = packer.pack(&ast_with_security);
+        let ser_result  = packer.pack_document(&document);
         if !ser_result.is_success {
             return Err(format!("Binary serialization failed: {:?}", ser_result.errors));
         }
 
-        let has_compressor_or_encryptor = ast_with_security.dlm.as_ref()
+        let has_compressor_or_encryptor = document.dlm.as_ref()
             .map(|d| d.modules.iter().any(|m| {
                 m.module_type == DLMModuleType::DCompressor
                     || m.module_type == DLMModuleType::DEncryptor
@@ -349,6 +351,8 @@ impl DixLoader {
             return Ok(result);
         }
 
+        // The executor still reads an owned tree, so this is the one path that exports.
+        let mut ast_with_security = document.export();
         let dlm_executor = DLMPipelineExecutor::new(source_label, "in-memory", DebugMode::Off);
         Ok(dlm_executor.execute(&mut ast_with_security, ser_result.binary_data))
     }

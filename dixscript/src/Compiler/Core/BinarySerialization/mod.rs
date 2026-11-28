@@ -1,3 +1,7 @@
+// ============================================================================
+// NOTICE: Full documentation, design decisions, and fix history for this file
+// live in docs/dixscript/compiler.md, section "Compiler/Core/BinarySerialization/mod.rs"
+// ============================================================================
 //! Binary serialization for .dixscript files.
 //!
 //! Serialized sections: CONFIG, ENUMS, DATA, SECURITY.
@@ -42,7 +46,9 @@ pub use binary_serialization_context::{
     BinaryDeserializationStatistics,
 };
 pub use binary_serialization_error::BinarySerializationError;
-pub use binary_serialization_result::{BinarySerializationResult, BinaryDeserializationResult};
+pub use binary_serialization_result::{
+    BinarySerializationResult, BinaryDeserializationResult, BinaryDocumentResult,
+};
 pub use checksum_validator::ChecksumValidator;
 
 pub use SectionWriters::{
